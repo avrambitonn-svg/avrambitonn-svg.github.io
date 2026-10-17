@@ -1,0 +1,1 @@
+var e=()=>Date.now();export{e as t};
