@@ -1,0 +1,133 @@
+/* הצעת מחיר להדפסה: גיליון A4 במיתוג ג'נאייר */
+.qp-root { min-height: 100vh; background: #e7ebef; padding: 0 0 48px; }
+.qp-toolbar {
+  position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 20px;
+  background: rgba(28, 33, 39, 0.96); color: #cfd6dd; backdrop-filter: blur(8px);
+}
+.qp-toolbar .wordmark b { font-size: 17px; }
+.qp-toolbar .wordmark small { display: none; }
+.qp-toolbar .hint { font-size: 12.5px; color: #8e9aa6; }
+.qp-toolbar .btn { height: 36px; }
+.qp-toolbar .btn.ghost { color: #cfd6dd; }
+.qp-toolbar .btn.ghost:hover { background: rgba(255, 255, 255, 0.08); }
+
+.qp-sheet {
+  --qp-ink: #1c2127;
+  width: 210mm; min-height: 297mm; margin: 24px auto 0; background: #fff; color: var(--qp-ink); padding: 12mm 13mm 11mm;
+  box-shadow: 0 2px 6px rgba(16, 24, 32, 0.08), 0 18px 50px rgba(16, 24, 32, 0.14); border-radius: 4px;
+  font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; position: relative;
+}
+.qp-sheet * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+/* ראש המסמך */
+.qp-head { display: flex; align-items: stretch; justify-content: space-between; gap: 18px; background: var(--qp-ink); color: #fff; border-radius: 12px; padding: 15px 20px; position: relative; overflow: hidden; }
+.qp-head::after { content: ''; position: absolute; inset-inline-end: -60px; top: -80px; width: 260px; height: 260px; border-radius: 50%; background: radial-gradient(circle, rgba(0, 174, 239, 0.32), transparent 65%); }
+.qp-head .doc { position: relative; z-index: 1; }
+.qp-head .doc h1 { color: #fff; font-size: 26px; font-weight: 300; letter-spacing: -0.01em; }
+.qp-head .doc .no { margin-top: 4px; font-size: 13px; color: #b9c4ce; }
+.qp-head .doc .no b { color: #fff; font-weight: 700; }
+.qp-head .brandbox { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 10px; }
+.qp-head .wordmark b { font-size: 26px; }
+.qp-head .wordmark small { font-size: 8px; }
+.qp-head .slogan { font-size: 12px; color: var(--brand); font-weight: 600; }
+.qp-stripe { height: 3px; border-radius: 3px; background: linear-gradient(90deg, var(--brand), rgba(0, 174, 239, 0.15)); margin: 8px 0 14px; }
+.qp-tag { display: inline-block; margin-inline-start: 8px; padding: 1px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 700; vertical-align: middle; }
+.qp-tag.draft { background: rgba(255, 255, 255, 0.14); color: #e2e8ee; }
+.qp-tag.ok { background: #16a34a; color: #fff; }
+
+/* צדדים */
+.qp-parties { display: grid; grid-template-columns: 1.25fr 1fr; gap: 12px; margin-bottom: 14px; }
+.qp-box { border: 1px solid #e3e8ed; border-radius: 10px; padding: 10px 14px; line-height: 1.45; }
+.qp-box .t { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; color: #7a838d; margin-bottom: 6px; }
+.qp-box .name { font-size: 15.5px; font-weight: 700; }
+.qp-box .line { color: #4b545e; }
+.qp-kv { display: grid; grid-template-columns: auto 1fr; gap: 1px 12px; }
+.qp-kv dt { color: #7a838d; }
+.qp-kv dd { margin: 0; font-weight: 600; }
+.qp-project { font-size: 15px; font-weight: 700; margin: 0 0 8px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.qp-project span { font-size: 12.5px; font-weight: 400; color: #7a838d; }
+
+/* טבלת שורות */
+.qp-table { width: 100%; border-collapse: collapse; }
+.qp-table thead th { font-size: 11px; font-weight: 700; color: #7a838d; text-align: start; padding: 7px 8px; border-bottom: 1.5px solid var(--qp-ink); }
+.qp-table th.n, .qp-table td.n { text-align: end; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.qp-table td { padding: 6px 8px; border-bottom: 1px solid #edf0f3; vertical-align: baseline; }
+.qp-table tr { break-inside: avoid; }
+.qp-table .grp td { padding-top: 10px; padding-bottom: 2px; border-bottom: 0; font-weight: 700; color: var(--brand-700); font-size: 12.5px; }
+.qp-table .grp td span { display: inline-flex; align-items: center; gap: 6px; }
+.qp-table .grp td span::before { content: ''; width: 7px; height: 7px; border-radius: 2px; background: var(--brand); }
+.qp-table .desc { font-weight: 600; }
+.qp-table .sku { font-size: 10.5px; color: #9aa3ad; margin-right: 8px; font-weight: 400; white-space: nowrap; }
+.qp-table td.tot { font-weight: 700; }
+
+/* סיכום */
+.qp-sum { display: grid; grid-template-columns: 1fr 250px; gap: 22px; margin-top: 14px; align-items: start; break-inside: avoid; }
+.qp-sum .left { display: flex; flex-direction: column; gap: 12px; }
+.qp-notes { font-size: 12.5px; color: #4b545e; }
+.qp-notes .t { font-size: 11px; font-weight: 700; color: #7a838d; margin-bottom: 4px; }
+.qp-totals { border-radius: 10px; background: #f5f8fa; border: 1px solid #e3e8ed; padding: 10px 14px; }
+.qp-totals .r { display: flex; justify-content: space-between; padding: 3px 0; font-variant-numeric: tabular-nums; }
+.qp-totals .r span:first-child { color: #4b545e; }
+.qp-totals .r.grand { margin-top: 6px; padding-top: 8px; border-top: 1.5px solid var(--qp-ink); font-size: 17px; font-weight: 800; }
+.qp-totals .r.grand span:first-child { color: var(--qp-ink); }
+.qp-totals .dep { margin-top: 6px; font-size: 11.5px; color: #4b545e; }
+
+/* תנאים וחתימה */
+.qp-terms { break-inside: avoid; }
+.qp-terms .t { font-size: 11px; font-weight: 700; color: #7a838d; margin-bottom: 4px; }
+.qp-terms ol { margin: 0; padding-inline-start: 18px; font-size: 11px; line-height: 1.45; color: #4b545e; display: grid; gap: 1px; }
+.qp-sign { display: grid; grid-template-columns: 1fr 1fr auto; gap: 16px; margin-top: 16px; align-items: end; break-inside: avoid; }
+.qp-sigbox { border-bottom: 1.5px solid var(--qp-ink); min-height: 56px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 4px; }
+.qp-sigbox img { max-height: 70px; max-width: 100%; }
+.qp-sigcap { font-size: 11px; color: #7a838d; margin-top: 4px; }
+.qp-sigcap b { color: var(--qp-ink); }
+.qp-qr { display: flex; align-items: center; gap: 10px; border: 1px solid #e3e8ed; border-radius: 10px; padding: 8px 10px; }
+.qp-qr img { display: block; }
+.qp-qr div { font-size: 10.5px; color: #4b545e; max-width: 112px; line-height: 1.4; }
+.qp-qr b { display: block; color: var(--qp-ink); font-size: 12px; }
+.qp-sigbox.stamped { border-bottom-color: transparent; }
+.qp-stamp { transform: rotate(-7deg); margin-bottom: 4px; border: 2.5px solid #16a34a; color: #16a34a; border-radius: 10px; padding: 4px 14px; font-weight: 800; font-size: 17px; letter-spacing: 0.04em; opacity: 0.85; text-align: center; line-height: 1.2; }
+.qp-stamp small { display: block; font-size: 10px; font-weight: 600; letter-spacing: 0; }
+
+.qp-foot { margin-top: auto; padding-top: 14px; break-inside: avoid; }
+.qp-foot .in { border-top: 1px solid #e3e8ed; padding-top: 10px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 11px; color: #7a838d; }
+.qp-foot .in b { color: var(--qp-ink); }
+.qp-foot .contacts { display: flex; gap: 6px 14px; flex-wrap: wrap; }
+.qp-foot .contacts span { white-space: nowrap; }
+.qp-foot .promise { color: var(--brand-700); font-weight: 700; }
+
+/* מסך צר: הגיליון נפרש לרוחב */
+@media screen and (max-width: 840px) {
+  .qp-sheet { width: auto; min-height: 0; margin: 12px; padding: 16px; font-size: 13px; }
+  .qp-head { flex-direction: column-reverse; padding: 16px; }
+  .qp-head .brandbox { align-items: flex-start; flex-direction: row; justify-content: space-between; width: 100%; }
+  .qp-parties, .qp-sum, .qp-sign { grid-template-columns: 1fr; }
+  .qp-toolbar .hint { display: none; }
+  .qp-table thead th:nth-child(3), .qp-table td:nth-child(3) { display: none; }
+}
+
+@page { size: A4; margin: 10mm 0 10mm; }
+@page :first { margin-top: 0; }
+@media print {
+  html, body { background: #fff !important; }
+  .qp-root { background: #fff; padding: 0; min-height: 0; }
+  .qp-toolbar { display: none !important; }
+  .qp-sheet { width: 210mm; min-height: 0; margin: 0; box-shadow: none; border-radius: 0; padding: 10mm 13mm 0; }
+  .qp-foot { margin-top: 12px; padding-top: 0; }
+  /* צפוף יותר על הנייר, כדי שהצעה רגילה תיכנס בעמוד אחד */
+  .qp-sheet { font-size: 12.5px; line-height: 1.42; }
+  .qp-head { padding: 12px 18px; }
+  .qp-head .doc h1 { font-size: 24px; }
+  .qp-stripe { margin: 7px 0 12px; }
+  .qp-parties { margin-bottom: 10px; }
+  .qp-box { padding: 8px 12px; }
+  .qp-project { margin-bottom: 4px; }
+  .qp-table thead th { padding: 5px 8px; }
+  .qp-table td { padding: 4px 8px; }
+  .qp-table .grp td { padding-top: 7px; padding-bottom: 0; font-size: 12px; }
+  .qp-sum { margin-top: 10px; }
+  .qp-sign { margin-top: 12px; }
+  .qp-sigbox { min-height: 46px; }
+  .qp-qr { padding: 6px 8px; }
+  .qp-qr img { width: 62px; height: 62px; }
+}

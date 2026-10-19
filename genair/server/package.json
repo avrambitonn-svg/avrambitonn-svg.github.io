@@ -1,0 +1,16 @@
+{
+  "name": "genair-ops-server",
+  "version": "0.1.0",
+  "description": "Genair Ops integration server: Priority ERP, Anthropic AI proxy, WhatsApp Business, Google Calendar/Drive",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test \"test/*.test.js\"",
+    "test:live": "RUN_LIVE=1 node --test test/priority.live.test.js"
+  }
+}
