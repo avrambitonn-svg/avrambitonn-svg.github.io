@@ -1,5 +1,5 @@
 // יומן גוגל ו-Drive דרך שרת האינטגרציות (רק במצב "סנכרון מלא"). במצב קישורים לא קורה כלום ברקע.
-// יומן: אירוע ביומן האישי של כל משתתף (User.googleCalendarId), ואם אין לאף אחד — ביומן של החברה.
+// יומן: אירוע ביומן האישי של כל משתתף (User.googleCalendarId), ומי שאין לו יומן — ביומן של החברה.
 // Drive: לכל תיק תיקייה עם תיקיות המשנה מההגדרות (משרד, לקוח, מתקין...), וכל קובץ עולה לתיקייה שלו.
 import { app } from '../store'
 import { api, serverConfigured, ServerError } from './server'
@@ -16,10 +16,13 @@ interface Target {
   calendarId?: string
 }
 
+// יומן אישי לכל משתתף שהגדיר יומן; מי שאין לו (או מועד בלי צוות) — אירוע אחד ביומן של החברה
 function targets(ap: Appointment): Target[] {
   const users = app().db.users
-  const list = ap.userIds.map((id) => users.find((u) => u.id === id)).filter((u) => u?.googleCalendarId).map((u) => ({ key: u!.id, calendarId: u!.googleCalendarId }))
-  return list.length ? list : [{ key: DEFAULT }]
+  const people = ap.userIds.map((id) => users.find((u) => u.id === id))
+  const list: Target[] = people.filter((u) => u?.googleCalendarId).map((u) => ({ key: u!.id, calendarId: u!.googleCalendarId }))
+  if (!list.length || people.some((u) => !u?.googleCalendarId)) list.push({ key: DEFAULT })
+  return list
 }
 
 const calendarOf = (key: string) => (key === DEFAULT ? undefined : app().db.users.find((u) => u.id === key)?.googleCalendarId)
@@ -145,6 +148,15 @@ export async function ensureCaseFolder(caseId: ID, folderKey: string): Promise<s
   } catch {
     return undefined
   }
+}
+
+/** העלאה ישירה לתיקייה ב-Drive (במצב הדגמה, כשהקובץ עצמו נשמר בדפדפן) */
+export async function uploadToDrive(file: File, folderId: string) {
+  return api<{ id: string; webViewLink: string }>(`/api/google/drive/files?folderId=${encodeURIComponent(folderId)}`, {
+    method: 'POST',
+    headers: { 'content-type': file.type || 'application/octet-stream', 'x-file-name': encodeURIComponent(file.name) },
+    body: file,
+  })
 }
 
 export async function moveDriveFile(fileId: string, from: string | undefined, to: string) {

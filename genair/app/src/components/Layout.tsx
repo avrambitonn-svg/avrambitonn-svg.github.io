@@ -145,6 +145,12 @@ function Notifications() {
   const unread = list.filter((n) => !n.read).length
   // התראה חדשה (גם ממשתמש אחר, דרך הסנכרון): התראת דפדפן כשהלשונית ברקע, ומספר על סמל האפליקציה
   useNotificationAlerts(list, (link) => link && nav(link))
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
   return (
     <div style={{ position: 'relative' }}>
       <button className="icon-btn" onClick={() => setOpen((v) => !v)} aria-label="התראות">

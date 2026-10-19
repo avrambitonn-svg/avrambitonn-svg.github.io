@@ -73,7 +73,8 @@ const raw: S[] = [
   { chapter: 'case', target: tab('משימות'), action: 'press', title: 'משימות התיק', text: 'משימות ידניות ומשימות שהפלואו פתח, עם אחראי, תאריך ותזכורת.' },
   { chapter: 'case', target: tab('מסמכים'), action: 'press', title: 'מסמכים', text: 'תיקיות קבועות לכל תיק: משרד, לקוח, מתקין, ספקים וארכיון. גוררים קבצים לכאן, והם נשמרים גם ב-Google Drive.' },
   { chapter: 'case', target: tab('כספים'), action: 'press', title: 'כספים', text: 'תקציב מול ביצוע: סעיפי תקציב, הוצאות לפי ספק, עמלות סוכן לפי כללים, תשלומים ויתרה לגבייה.' },
-  { chapter: 'case', target: tab('צ׳אט'), action: 'press', title: 'צ׳אט והודעות', text: 'שתי שיחות בכל תיק: מול הלקוח (וואטסאפ והאזור האישי) ושיחה פנימית של הצוות, עם אזכור @.' },
+  { chapter: 'case', target: tab('צ׳אט'), action: 'press', title: 'צ׳אט והודעות', text: 'מול הלקוח: וואטסאפ והודעות מהאזור האישי באותו מקום, ועונים מכאן.' },
+  { chapter: 'case', target: { text: 'פנימי', sel: '.content [role=tab]' }, action: 'press', optional: true, title: 'שיחת צוות בתיק', text: 'הצוות מדבר על התיק בתוך התיק: ציוד, מועדים, שאלות. מאזכרים עם @ ומי שאוזכר מקבל התראה.' },
   { chapter: 'case', target: tab('היסטוריה'), action: 'press', title: 'היסטוריה', text: 'כל מה שקרה בתיק ומי עשה את זה, עם סינון לפי סוג והוספת הערות.' },
   { chapter: 'case', target: tab('אזור אישי'), action: 'press', title: 'קישור אישי ללקוח', text: 'לכל לקוח קישור וקוד QR לאזור האישי שלו. בלי סיסמה ובלי אפליקציה.' },
 
@@ -126,9 +127,14 @@ const raw: S[] = [
   { chapter: 'stock', route: '/suppliers', target: '.content .page-head', title: 'ספקים', text: 'אנשי קשר, תנאי תשלום, הזמנות רכש, הוצאות לפי תיק ומסמכים. הזמנה שמתקבלת נכנסת למלאי ולתקציב התיק.' },
 
   // ---------- צוות ----------
-  { chapter: 'team', route: '/tasks', target: '.content .page-head', title: 'משימות', text: 'שלי, ששותפו איתי ושיצרתי. משתפים משימה עם עובד, ותזכורת בלחיצה: בעוד שעה, היום ב-16:00 או מחר בבוקר.' },
-  { chapter: 'team', route: '/leave', target: '.content .page-head', title: 'אישורי חופשה', text: 'עובד מבקש, מנהל מאשר. מי שבחופשה לא יופיע כפנוי בשיבוץ.' },
-  { chapter: 'team', target: '.cw-fab', optional: true, action: 'press', title: 'צ׳אט', text: 'שיחות צוות ופניות לקוחות במקום אחד, עם התראה על הודעה חדשה.', after: () => (document.querySelector('.cw-fab') as HTMLElement | null)?.click() },
+  { chapter: 'team', route: '/tasks', target: '.content .page-head', title: 'משימות', text: 'כל המשימות במקום אחד, מקובצות לפי מועד: באיחור, היום, בקרוב. משתפים משימה עם עובד, ותזכורת בלחיצה: בעוד שעה, היום ב-16:00 או מחר בבוקר.' },
+  { chapter: 'team', target: tab('ששותפו איתי'), action: 'press', title: 'ששותפו איתי', text: 'משימות שעובד אחר שיתף איתי. כל שינוי מגיע אליו כהתראה.' },
+  { chapter: 'team', target: tab('כל הצוות'), action: 'press', optional: true, title: 'כל הצוות', text: 'למנהל: מה פתוח אצל כל אחד, ומה באיחור.' },
+  { chapter: 'team', route: '/leave', target: tab('ממתינות לאישור'), action: 'press', title: 'אישורי חופשה', text: 'עובד מבקש חופשה, מילואים או יום אישי, והמנהל מאשר. אם יש לו עבודות באותם ימים, המערכת מזהירה לפני האישור.' },
+  { chapter: 'team', target: tab('לוח היעדרויות'), action: 'press', title: 'מי לא בעבודה', text: 'לוח של כל ההיעדרויות. מי שבחופשה לא יופיע כפנוי בשיבוץ.' },
+  { chapter: 'team', route: '/', target: '.cw-fab', action: 'press', title: 'הצ׳אטים שלי', text: 'צ׳אט מכל מסך, עם מונה של הודעות שלא נקראו.' },
+  { chapter: 'team', target: { text: 'שיחות פנים', sel: '.cw-tabs [role=tab]' }, action: 'press', title: 'שיחות פנים', text: 'שיחה לכל תיק ושיחות אישיות בין עובדים. מי קרא, מתי, וחיפוש.' },
+  { chapter: 'team', target: { text: 'פניות לקוחות', sel: '.cw-tabs [role=tab]' }, action: 'press', title: 'פניות לקוחות', text: 'כל ההודעות מלקוחות, מוואטסאפ ומהאזור האישי, במקום אחד. מה שלא נענה מסומן.', after: () => (document.querySelector('.cw-panel [aria-label="סגירה"]') as HTMLElement | null)?.click() },
 
   // ---------- ניהול ----------
   { chapter: 'manage', route: '/reports', target: '.content .page-head', title: 'דוחות', text: 'הכנסות, תיקים שנפתחו ונסגרו, ביצועי סוכנים, תפוקת מתקינים, לקוחות מובילים וסיבות הפסד. השוואה לתקופה הקודמת, וייצוא ל-PDF ול-Excel.' },

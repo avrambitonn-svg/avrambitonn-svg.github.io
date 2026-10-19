@@ -8,7 +8,7 @@ import { useConfig } from '../../lib/config'
 import { Callout, Confirm, Modal, Progress, toast } from '../../components/ui'
 import { date, nowIso, uid } from '../../lib/format'
 import { deleteLocalBlob, docBlob, downloadDoc, externalLink, filesOnServer, hasContent, isImage, isPdf, maxFileBytes, saveLocalBlob, sizeLabel, uploadToServer } from '../../lib/files'
-import { createDriveFolder, ensureCaseFolder, googleApiMode, moveDriveFile, trashDriveFile } from '../../lib/integrations/google'
+import { createDriveFolder, ensureCaseFolder, googleApiMode, moveDriveFile, trashDriveFile, uploadToDrive } from '../../lib/integrations/google'
 import type { Doc, ID, ListOption } from '../../lib/types'
 import './docs.css'
 
@@ -73,7 +73,16 @@ export function DocsPanel({ caseId, customerId, supplierId }: { caseId?: ID; cus
           if (r.driveError) toast.info(`${file.name} נשמר בשרת, אבל לא עלה ל-Drive`)
         } else {
           doc.blobKey = await saveLocalBlob(id, file)
-          setUp(id, { pct: 100 })
+          setUp(id, { pct: drive ? 50 : 100 })
+          const folderId = drive && caseId ? await ensureCaseFolder(caseId, folder) : undefined
+          if (folderId) {
+            try {
+              const r = await uploadToDrive(file, folderId)
+              doc = { ...doc, driveFileId: r.id, webViewLink: r.webViewLink }
+            } catch {
+              toast.info(`${file.name} נשמר בדפדפן, אבל לא עלה ל-Drive`)
+            }
+          }
         }
         for (const k of Object.keys(doc) as (keyof Doc)[]) if (doc[k] === undefined) delete doc[k]
         upsert('docs', doc)
@@ -129,8 +138,8 @@ export function DocsPanel({ caseId, customerId, supplierId }: { caseId?: ID; cus
     <div className="col" style={{ gap: 16 }}>
       <Callout>
         <div className="row wrap between" style={{ gap: 8 }}>
-          <span>
-            {filesOnServer() ? 'הקבצים נשמרים בשרת, וכל הצוות רואה אותם.' : 'במצב הדגמה הקבצים נשמרים בדפדפן הזה (עד 25MB לקובץ).'}
+          <span style={{ flex: '1 1 260px', minWidth: 0 }}>
+            {filesOnServer() ? 'הקבצים נשמרים בשרת, וכל הצוות רואה אותם.' : <>במצב הדגמה הקבצים נשמרים בדפדפן הזה (עד <span className="ltr">25MB</span> לקובץ).</>}
             {drive ? ' הם עולים גם לתיקיית התיק ב-Google Drive.' : filesOnServer() ? ' כשמחברים את Google Drive, לכל תיק נפתחת תיקייה עם אותן תיקיות משנה.' : ''}
             {' '}גוררים קבצים לתיקייה, או לוחצים על "העלאה".
           </span>

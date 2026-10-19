@@ -293,10 +293,17 @@ function RemotePortal({ token, server }: { token: string; server: string }) {
     }
   }, [server, base])
 
+  // אחרי שהלקוח כתב או פעל, בודקים כל 5 שניות (מחכים לתשובה); אחרת כל 15
+  const active = useRef(0)
   useEffect(() => {
     void load()
     // תשובות מהמשרד ועדכוני מועדים מגיעים בלי לרענן את הדף
-    const t = setInterval(() => document.visibilityState === 'visible' && void load(), 15_000)
+    let tick = 0
+    const t = setInterval(() => {
+      tick++
+      const busy = Date.now() - active.current < 3 * 60_000
+      if (document.visibilityState === 'visible' && (busy || tick % 3 === 0)) void load()
+    }, 5_000)
     const onVis = () => document.visibilityState === 'visible' && void load()
     document.addEventListener('visibilitychange', onVis)
     return () => {
@@ -352,6 +359,7 @@ function RemotePortal({ token, server }: { token: string; server: string }) {
     },
     send: async (body) => {
       await call(server, `${base}/messages`, { method: 'POST', json: { body } })
+      active.current = Date.now()
       await load()
     },
     openDoc: async (d) => {

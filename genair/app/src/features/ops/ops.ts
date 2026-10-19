@@ -409,7 +409,7 @@ export function icsEvent(db: DB, a: Appointment) {
     ctx.team.length ? `צוות: ${ctx.team.map((u) => u.name).join(', ')}` : '',
     a.notes,
   ].filter(Boolean).join('\n')
-  return { id: a.id, title: a.title, start: a.start, end: a.end, details, location: addressText(ctx.address) }
+  return { id: a.id, title: a.title, start: a.start, end: a.end, details, location: a.location || addressText(ctx.address) }
 }
 
 export const dayKey = (d: Date) => ymd(d)
