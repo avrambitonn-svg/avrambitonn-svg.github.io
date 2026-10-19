@@ -1,14 +1,14 @@
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
-  Building, CalendarDays, CheckCircle2, CircleOff, Cloud, Copy, Download, FileText, Mic, Navigation, Package, Plug, QrCode, RefreshCw, Share2, ShieldCheck, Sparkles, Star, Sun, Upload, UserPlus, Users, WifiOff, MessageCircle, Database, ListTree, Workflow,
+  Building, CalendarDays, CheckCircle2, Cloud, Copy, Download, FileText, Hash, Mic, Navigation, Package, Palette, Plug, QrCode, RefreshCw, Share2, Sparkles, Star, Sun, Upload, UserCog, Users, WifiOff, MessageCircle, Database, ListTree, Workflow,
 } from 'lucide-react'
 import { brand } from '../../brand'
 import { useApp, useSettings } from '../../lib/store'
-import { Avatar, Badge, Callout, Card, Confirm, Field, Modal, PageHead, Tabs, toast } from '../../components/ui'
+import { Badge, Callout, Card, Confirm, Field, PageHead, Tabs, toast } from '../../components/ui'
 import { QR } from '../../components/extras'
 import { categoryLabel, roleLabel, syncLabel, syncTone } from '../../lib/labels'
-import { daysBetween, date, uid } from '../../lib/format'
+import { uid } from '../../lib/format'
 import { health, type Health } from '../../lib/integrations/server'
 import { aiMode } from '../../lib/integrations/ai'
 import { pullPrices, priorityEnabled } from '../../lib/integrations/priority'
@@ -17,13 +17,31 @@ import { templates } from '../../lib/messaging'
 import { ListsSettings } from './ListsSettings'
 import { FlowSettings } from '../../features/flow/FlowSettings'
 import { SyncSettingsCard } from '../../features/auth/SyncSettingsCard'
-import type { CatalogItem, ItemCategory, Role, Settings, User } from '../../lib/types'
+import type { CatalogItem, ItemCategory, Role, Settings } from '../../lib/types'
+import { applyTheme, setConfig, themes, useThemeSync } from '../../lib/config'
+import { peekCaseNumber } from '../../lib/numbering'
 
 type Tab = 'company' | 'lists' | 'flows' | 'users' | 'catalog' | 'integrations' | 'templates' | 'data'
 const days = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳']
 
+const tabIds: Tab[] = ['company', 'lists', 'flows', 'users', 'catalog', 'integrations', 'templates', 'data']
+
 export default function SettingsPage() {
-  const [tab, setTab] = useState<Tab>('integrations')
+  useThemeSync()
+  const [params, setParams] = useSearchParams()
+  const fromUrl = params.get('tab') as Tab | null
+  const [tab, setTabState] = useState<Tab>(fromUrl && tabIds.includes(fromUrl) ? fromUrl : 'integrations')
+  const setTab = (t: Tab) => {
+    setTabState(t)
+    const p = new URLSearchParams(params)
+    p.set('tab', t)
+    setParams(p, { replace: true })
+  }
+  useEffect(() => {
+    // קישור ישיר לאזור ברשימות (#ls-caseNumbering)
+    const id = window.location.hash.split('#')[2]
+    if (id) setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120)
+  }, [])
   return (
     <div>
       <PageHead title="הגדרות וחיבורים" sub="כל ההגדרות נשמרות בדפדפן הזה במצב הדגמה; בייצור הן נשמרות בשרת" />
@@ -75,8 +93,8 @@ function CompanyTab() {
           <Field label="מע״מ (%)"><input className="input" type="number" value={s.vatPct} onChange={(e) => set({ vatPct: Number(e.target.value) })} /></Field>
           <Field label="תוקף הצעה (ימים)"><input className="input" type="number" value={s.quoteValidityDays} onChange={(e) => set({ quoteValidityDays: Number(e.target.value) })} /></Field>
           <Field label="מקדמה באישור (%)"><input className="input" type="number" value={s.depositPct} onChange={(e) => set({ depositPct: Number(e.target.value) })} /></Field>
-          <Field label="עמלת סוכן (%)"><input className="input" type="number" value={s.commissionPct} onChange={(e) => set({ commissionPct: Number(e.target.value) })} /></Field>
         </div>
+        <div className="small mt12">עמלות סוכנים מחושבות לפי <Link to="/settings?tab=lists#ls-commissionRules">כללי העמלות</Link> (לפי סוכן, סוג פרויקט, אחוז ובסיס החישוב).</div>
       </Card>
       <Card title="ימי ושעות עבודה" pad>
         <div className="row wrap">
@@ -96,86 +114,61 @@ function CompanyTab() {
           <input className="input ltr" placeholder="https://g.page/r/..." value={s.reviewUrl} onChange={(e) => set({ reviewUrl: e.target.value })} />
         </Field>
       </Card>
+      <SystemCard />
     </div>
   )
 }
 
-const permissions: { action: string; roles: Role[] }[] = [
-  { action: 'פתיחת לקוח ותיק', roles: ['admin', 'office', 'agent', 'engineer'] },
-  { action: 'בניית הצעת מחיר', roles: ['admin', 'office', 'agent', 'engineer'] },
-  { action: 'צפייה בעלויות ורווח', roles: ['admin', 'office'] },
-  { action: 'אישור תכנון טכני', roles: ['admin', 'engineer'] },
-  { action: 'שיבוץ צוותים', roles: ['admin', 'office'] },
-  { action: 'עדכון ביצוע, תמונות וחתימה', roles: ['admin', 'engineer', 'installer'] },
-  { action: 'דוחות', roles: ['admin', 'office'] },
-  { action: 'משתמשים והגדרות', roles: ['admin'] },
-]
+function SystemCard() {
+  const theme = useApp((x) => x.db.config.theme)
+  const numbering = useApp((x) => x.db.config.caseNumbering)
+  useApp((x) => x.db.counters)
+  return (
+    <Card title={<div className="row"><Palette size={17} /><h2>מערכת</h2></div>} pad>
+      <div className="col" style={{ gap: 12 }}>
+        <div>
+          <div className="label mb8">ערכת צבע</div>
+          <div className="row wrap" style={{ gap: 6 }}>
+            {themes.map((t) => (
+              <button key={t.key} className={`chip ${theme === t.key ? 'on' : ''}`} onClick={() => { setConfig({ theme: t.key }); applyTheme(t.key) }}>
+                <span style={{ width: 12, height: 12, borderRadius: '50%', background: t.swatch[0], display: 'inline-block' }} /> {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="small">
+          <span className="muted">מספור תיקים: </span>{numbering.mode === 'agent' ? 'לפי ראשי התיבות של הסוכן' : 'מספור רץ'} · <span className="muted">הבא בתור: </span><b className="ltr num">{peekCaseNumber()}</b>
+        </div>
+        <div className="small"><span className="muted">שפה ואזור זמן: </span>עברית · ירושלים (<span className="ltr">Asia/Jerusalem</span>) · ש״ח</div>
+        <div className="row wrap" style={{ gap: 6 }}>
+          <Link className="btn sm" to="/settings?tab=lists"><ListTree size={15} /> רשימות ומספור</Link>
+          <Link className="btn sm" to="/users"><UserCog size={15} /> משתמשים</Link>
+        </div>
+      </div>
+    </Card>
+  )
+}
 
+// המשתמשים, התפקידים וההרשאות עברו למסך משתמשים (/users)
 function UsersTab() {
   const users = useApp((s) => s.db.users)
-  const patch = useApp((s) => s.patch)
-  const upsert = useApp((s) => s.upsert)
-  const [open, setOpen] = useState(false)
-  const [nu, setNu] = useState<Pick<User, 'name' | 'role' | 'title' | 'phone'>>({ name: '', role: 'installer', title: '', phone: '' })
-  const roles = Object.keys(roleLabel) as Role[]
+  const active = users.filter((u) => u.active)
   return (
-    <div className="col" style={{ gap: 16 }}>
-      <Card title="צוות" actions={<button className="btn sm primary" onClick={() => setOpen(true)}><UserPlus size={15} /> משתמש</button>}>
-        <div className="table-wrap">
-          <table className="table">
-            <thead><tr><th>שם</th><th>תפקיד</th><th className="hide-mobile">טלפון</th><th>אישורים</th><th>פעיל</th></tr></thead>
-            <tbody>
-              {users.map((u) => (
-                <tr key={u.id}>
-                  <td><span className="row"><Avatar user={u} /><span><div className="small strong">{u.name}</div><div className="tiny muted">{u.title}</div></span></span></td>
-                  <td>
-                    <select className="select sm" style={{ width: 'auto' }} value={u.role} onChange={(e) => patch('users', u.id, { role: e.target.value as Role })}>
-                      {roles.map((r) => <option key={r} value={r}>{roleLabel[r]}</option>)}
-                    </select>
-                  </td>
-                  <td className="small hide-mobile"><span className="ltr">{u.phone}</span></td>
-                  <td>
-                    <div className="row wrap" style={{ gap: 4 }}>
-                      {(u.certifications ?? []).map((c) => {
-                        const left = daysBetween(new Date(), c.expires)
-                        return <Badge key={c.type} tone={left < 0 ? 'danger' : left <= 30 ? 'warning' : 'success'}>{c.type} · {left < 0 ? 'פג' : date(c.expires)}</Badge>
-                      })}
-                      {!u.certifications?.length && <span className="tiny muted">—</span>}
-                    </div>
-                  </td>
-                  <td><input type="checkbox" checked={u.active} onChange={(e) => patch('users', u.id, { active: e.target.checked })} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <div className="grid g2">
+      <Card title={<div className="row"><Users size={17} /><h2>משתמשים והרשאות</h2></div>} pad>
+        <p className="small muted">הוספת עובדים, תפקידים, מנהלי מחלקה ומנהלי פרויקטים, הרשאות, הסמכות ויומנים אישיים מנוהלים עכשיו במסך המשתמשים.</p>
+        <div className="row wrap mt12" style={{ gap: 6 }}>
+          {(Object.keys(roleLabel) as Role[]).map((r) => {
+            const n = active.filter((u) => u.role === r).length
+            return n ? <Badge key={r} tone="muted">{roleLabel[r]} · <span className="ltr">{n}</span></Badge> : null
+          })}
         </div>
+        <Link className="btn primary mt16" to="/users"><UserCog size={16} /> למסך המשתמשים</Link>
       </Card>
-      <Card title={<div className="row"><ShieldCheck size={17} /><h2>הרשאות לפי תפקיד</h2></div>}>
-        <div className="table-wrap">
-          <table className="table">
-            <thead><tr><th>פעולה</th>{roles.map((r) => <th key={r} style={{ textAlign: 'center' }}>{roleLabel[r]}</th>)}</tr></thead>
-            <tbody>
-              {permissions.map((p) => (
-                <tr key={p.action}>
-                  <td className="small">{p.action}</td>
-                  {roles.map((r) => <td key={r} style={{ textAlign: 'center' }}>{p.roles.includes(r) ? <CheckCircle2 size={17} color="var(--success)" /> : <CircleOff size={16} color="#cbd2d9" />}</td>)}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="card-body tiny muted">מתקין רואה רק את המשימות שלו, וסוכן רואה רק את התיקים שלו. בייצור ההרשאות נאכפות בשרת ובמסד הנתונים, לא רק במסך.</div>
+      <Card title={<div className="row"><Hash size={17} /><h2>ראשי תיבות למספור תיקים</h2></div>} pad>
+        <p className="small muted">כשהמספור הוא לפי סוכן, כל תיק מקבל את ראשי התיבות של הסוכן (למשל <span className="ltr">DM-0073</span>). משנים בהגדרות ← רשימות ← מספור תיקים.</p>
+        <Link className="btn sm mt12" to="/settings?tab=lists#ls-caseNumbering">למספור תיקים</Link>
       </Card>
-      {open && (
-        <Modal title="משתמש חדש" size="narrow" onClose={() => setOpen(false)} footer={<button className="btn primary" disabled={!nu.name} onClick={() => { upsert('users', { ...nu, id: uid('u'), color: ['#0ea5e9', '#16a34a', '#f59e0b', '#8b5cf6', '#ef4444'][users.length % 5], active: true }); setOpen(false) }}>הוספה</button>}>
-          <div className="col">
-            <Field label="שם"><input className="input" value={nu.name} onChange={(e) => setNu({ ...nu, name: e.target.value })} /></Field>
-            <Field label="תפקיד במערכת"><select className="select" value={nu.role} onChange={(e) => setNu({ ...nu, role: e.target.value as Role })}>{roles.map((r) => <option key={r} value={r}>{roleLabel[r]}</option>)}</select></Field>
-            <Field label="תואר"><input className="input" value={nu.title} onChange={(e) => setNu({ ...nu, title: e.target.value })} placeholder="מתקין, טכנאי שירות..." /></Field>
-            <Field label="טלפון"><input className="input ltr" value={nu.phone} onChange={(e) => setNu({ ...nu, phone: e.target.value })} /></Field>
-          </div>
-        </Modal>
-      )}
     </div>
   )
 }

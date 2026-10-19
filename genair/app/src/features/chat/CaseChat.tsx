@@ -1,29 +1,45 @@
-// שיחות בתיק: מול הלקוח (וואטסאפ / פורטל) ובתוך הצוות
-import { useMemo } from 'react'
-import { MessageCircle } from 'lucide-react'
-import { useApp } from '../../lib/store'
-import { Card, Empty } from '../../components/ui'
-import { date, dateTime } from '../../lib/format'
+// שיחות בתיק: מול הלקוח (וואטסאפ / אזור אישי) ובתוך הצוות
+import { useMemo, useState } from 'react'
+import { MessageCircle, Users } from 'lucide-react'
+import { useApp, useMe } from '../../lib/store'
+import { Avatars, Card } from '../../components/ui'
 import type { ID } from '../../lib/types'
+import { caseThread, isCustUnread, isUnread, threadMembers } from './chat'
+import { CustomerConversation, TeamConversation } from './parts'
+import './chat.css'
+
+type Sub = 'customer' | 'team'
 
 export function CaseChat({ caseId, onCompose }: { caseId: ID; onCompose: () => void }) {
-  const db = useApp((s) => s.db)
-  const k = db.cases.find((x) => x.id === caseId)
-  const msgs = useMemo(() => db.messages.filter((m) => m.caseId === caseId).sort((a, b) => a.at.localeCompare(b.at)), [db.messages, caseId])
-  return (
-    <Card title="הודעות עם הלקוח" actions={<button className="btn sm wa" onClick={onCompose}><MessageCircle size={15} /> הודעה חדשה</button>}>
-      {msgs.length === 0 ? (
-        <Empty title="אין הודעות עדיין" />
-      ) : (
-        <div className="card-body col" style={{ gap: 10, background: '#efeae2', borderRadius: '0 0 14px 14px' }}>
-          {msgs.map((m) => (
-            <div key={m.id} style={{ alignSelf: m.direction === 'out' ? 'flex-start' : 'flex-end', maxWidth: '78%', background: m.direction === 'out' ? '#d9fdd3' : '#fff', borderRadius: 10, padding: '8px 12px', boxShadow: '0 1px 1px rgba(0,0,0,.06)' }}>
-              <div className="small" style={{ whiteSpace: 'pre-wrap' }}>{m.body.replace('{portal}', '🔗 קישור לאזור האישי').replace('{date}', date(k?.installWindow?.from ?? m.at))}</div>
-              <div className="tiny muted" style={{ textAlign: 'end' }}>{dateTime(m.at)}{m.direction === 'out' && m.by ? ` · ${db.users.find((u) => u.id === m.by)?.name ?? ''}` : ''}</div>
-            </div>
-          ))}
-        </div>
-      )}
+  const me = useMe()
+  const messages = useApp((s) => s.db.messages)
+  const chat = useApp((s) => s.db.chat)
+  const cases = useApp((s) => s.db.cases)
+  const users = useApp((s) => s.db.users)
+  const threadId = caseThread(caseId)
+  const custUnread = useMemo(() => messages.filter((m) => m.caseId === caseId && isCustUnread(m)).length, [messages, caseId])
+  const teamUnread = useMemo(() => chat.filter((m) => m.threadId === threadId && isUnread(m, me.id)).length, [chat, threadId, me.id])
+  const members = useMemo(() => threadMembers({ cases, chat }, threadId), [cases, chat, threadId])
+  const [sub, setSub] = useState<Sub>(() => (teamUnread > 0 && custUnread === 0 ? 'team' : 'customer'))
+
+  const tabs = (
+    <div className="seg" role="tablist" aria-label="סוג שיחה">
+      <button role="tab" aria-selected={sub === 'customer'} className={sub === 'customer' ? 'on' : ''} onClick={() => setSub('customer')}>
+        לקוח {custUnread > 0 && <span className="cw-n" style={{ display: 'inline-grid', marginInlineStart: 4 }}>{custUnread}</span>}
+      </button>
+      <button role="tab" aria-selected={sub === 'team'} className={sub === 'team' ? 'on' : ''} onClick={() => setSub('team')}>
+        פנימי {teamUnread > 0 && <span className="cw-n" style={{ display: 'inline-grid', marginInlineStart: 4 }}>{teamUnread}</span>}
+      </button>
+    </div>
+  )
+
+  return sub === 'customer' ? (
+    <Card title={tabs} actions={<button className="btn sm wa" onClick={onCompose}><MessageCircle size={15} /> הודעה מתבנית</button>}>
+      <div className="case-chat-box"><CustomerConversation caseId={caseId} /></div>
+    </Card>
+  ) : (
+    <Card title={tabs} actions={<span className="row" style={{ gap: 6 }} title={members.map((id) => users.find((u) => u.id === id)?.name).join(', ')}><Users size={15} className="muted" /><Avatars users={members.slice(0, 6).map((id) => users.find((u) => u.id === id))} /></span>}>
+      <div className="case-chat-box"><TeamConversation threadId={threadId} emptyText="כאן הצוות מדבר על התיק: ציוד, מועדים, שאלות. אפשר לאזכר עם @" /></div>
     </Card>
   )
 }

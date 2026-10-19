@@ -1,0 +1,9 @@
+/* אשף פתיחת תיק: תקציר השלבים שהושלמו מתחת לפס השלבים */
+.nc-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: -8px 0 18px; }
+.nc-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--brand-100); background: var(--brand-50); color: var(--brand-700); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.nc-chip:hover { border-color: var(--brand); }
+.nc-chip svg { flex: none; }
+.nc-ico { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--warning-50); color: var(--warning); flex: none; }
+.nc-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+.input.nc-bad { border-color: var(--danger); }
+.nc-sum > div { min-width: 0; overflow-wrap: anywhere; }

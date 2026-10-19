@@ -49,3 +49,39 @@ export function parseRetryAfter(value, now = Date.now) {
 export function backoffDelay(attempt, { baseMs = 500, maxMs = 8_000 } = {}) {
   return Math.min(maxMs, baseMs * 2 ** (attempt - 1));
 }
+
+/**
+ * Fixed-window counter per key (login attempts, public forms). In memory, per process.
+ * hit(key) counts one event and returns { allowed, retryAfterMs }; peek(key) only checks.
+ */
+export function createWindowLimiter({ max, windowMs, now = Date.now }) {
+  const buckets = new Map();
+  const bucket = (key) => {
+    const t = now();
+    let b = buckets.get(key);
+    if (!b || b.resetAt <= t) {
+      b = { count: 0, resetAt: t + windowMs };
+      buckets.set(key, b);
+      if (buckets.size > 10_000) for (const [k, v] of buckets) if (v.resetAt <= t) buckets.delete(k);
+    }
+    return b;
+  };
+  const verdict = (b) => ({ allowed: b.count <= max, retryAfterMs: Math.max(0, b.resetAt - now()) });
+  return {
+    hit(key) {
+      const b = bucket(key);
+      b.count++;
+      return verdict(b);
+    },
+    peek(key) {
+      const b = bucket(key);
+      return { allowed: b.count < max, retryAfterMs: Math.max(0, b.resetAt - now()) };
+    },
+    reset(key) {
+      buckets.delete(key);
+    },
+    clear() {
+      buckets.clear();
+    },
+  };
+}

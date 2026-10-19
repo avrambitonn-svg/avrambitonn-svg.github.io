@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react'
-import { AlertTriangle, ArrowLeftRight, Boxes, ClipboardList, Coins, Copy, Mail, MessageCircle, PackagePlus, Search, SlidersHorizontal, Truck, Warehouse } from 'lucide-react'
+import { AlertTriangle, ArrowLeftRight, Boxes, ClipboardList, Coins, FilePlus2, Mail, MessageCircle, PackageCheck, PackagePlus, Search, SlidersHorizontal, Truck, Warehouse } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { Badge, Callout, Card, Empty, Field, Modal, PageHead, Stat, Tabs, toast } from '../../components/ui'
 import { app, useApp, useMe } from '../../lib/store'
 import type { CatalogItem, ID, StockEntry } from '../../lib/types'
 import { categoryLabel } from '../../lib/labels'
 import { date as fmtDate, money, number as fmtNum } from '../../lib/format'
-import { mailLink, shareOrCopy, whatsappLink } from '../../lib/integrations/links'
-import { brand } from '../../brand'
-import { findStock, isVan, locationsOf, MAIN_WAREHOUSE, moveStock, setStock, vanOf, writePref } from '../../features/ops/ops'
+import { findStock, isVan, locationsOf, MAIN_WAREHOUSE, moveStock, readPref, setStock, vanOf, writePref } from '../../features/ops/ops'
+import { createPurchaseOrder, isOpenPo, markPoSent, poMail, poStatusLabel, poTotal, poWhatsapp } from '../suppliers/po'
+import { PurchaseOrderView, ReceiveDialog } from '../suppliers/PurchaseOrderView'
 import '../../features/ops/ops.css'
 
 type Transfer = { itemId?: ID; from?: string; to?: string; qty?: number }
@@ -24,6 +25,7 @@ export default function InventoryPage() {
   const [onlyLow, setOnlyLow] = useState(false)
   const [adjust, setAdjust] = useState<StockEntry | 'new' | null>(null)
   const [transfer, setTransfer] = useState<Transfer | null>(null)
+  const [poView, setPoView] = useState<ID | null>(null)
 
   const item = (id: ID) => catalog.find((c) => c.id === id)
   const low = useMemo(() => stock.filter((e) => e.qty < e.min), [stock])
@@ -153,12 +155,14 @@ export default function InventoryPage() {
 
         <aside className="col" style={{ gap: 16 }}>
           <LowStockCard low={low} item={item} onRefill={(t) => setTransfer(t)} />
-          <div id="po-card" style={{ scrollMarginTop: 80 }}><PurchaseCard /></div>
+          <div id="po-card" style={{ scrollMarginTop: 80 }}><PurchaseCard onOpenPo={setPoView} /></div>
+          <OpenOrdersCard onOpenPo={setPoView} />
         </aside>
       </div>
 
       {adjust && <AdjustModal entry={adjust === 'new' ? undefined : adjust} defaultLocation={loc === 'all' ? MAIN_WAREHOUSE : loc} locations={locations} onClose={() => setAdjust(null)} />}
       {transfer && <TransferModal init={transfer} locations={locations} onClose={() => setTransfer(null)} />}
+      {poView && <PurchaseOrderView poId={poView} onClose={() => setPoView(null)} />}
     </div>
   )
 }
@@ -202,12 +206,14 @@ function LowStockCard({ low, item, onRefill }: { low: StockEntry[]; item: (id: I
   )
 }
 
-// הזמנת רכש מוצעת: מה שבמחסן מתחת למינימום, עד פי 2 מהמינימום, ועוד מה שחסר לרכבים
+// הזמנת רכש מוצעת: מה שבמחסן מתחת למינימום, עד פי 2 מהמינימום, ועוד מה שחסר לרכבים, פחות מה שכבר הוזמן ועוד לא הגיע
 function usePurchaseSuggestions() {
   const stock = useApp((s) => s.db.stock)
   const catalog = useApp((s) => s.db.catalog)
+  const pos = useApp((s) => s.db.purchaseOrders)
   return useMemo(() => {
     const ids = [...new Set(stock.map((e) => e.itemId))]
+    const onOrder = (itemId: ID) => pos.filter(isOpenPo).reduce((s, p) => s + p.lines.filter((l) => l.itemId === itemId).reduce((a, l) => a + l.qty, 0), 0)
     return ids
       .map((itemId) => {
         const wh = findStock(stock, itemId, MAIN_WAREHOUSE)
@@ -215,55 +221,49 @@ function usePurchaseSuggestions() {
         const available = wh?.qty ?? 0
         const min = wh?.min ?? 0
         const needed = (wh && wh.qty < wh.min) || vanShort > Math.max(0, available - min)
-        const qty = needed ? Math.max(1, min * 2 + vanShort - available) : 0
-        return { itemId, qty, available, min, vanShort, item: catalog.find((c) => c.id === itemId) }
+        const ordered = onOrder(itemId)
+        const qty = needed ? Math.max(0, Math.max(1, min * 2 + vanShort - available) - ordered) : 0
+        return { itemId, qty, available, min, vanShort, ordered, item: catalog.find((c) => c.id === itemId) }
       })
       .filter((x) => x.qty > 0 && x.item)
       .sort((a, b) => (a.item!.category === 'unit' ? 0 : 1) - (b.item!.category === 'unit' ? 0 : 1) || a.item!.name.localeCompare(b.item!.name, 'he'))
-  }, [stock, catalog])
+  }, [stock, catalog, pos])
 }
 
-function PurchaseCard() {
+const SUP_PREF = 'genair-po-supplier'
+
+function PurchaseCard({ onOpenPo }: { onOpenPo: (id: ID) => void }) {
   const sugg = usePurchaseSuggestions()
-  const users = useApp((s) => s.db.users)
+  const suppliers = useApp((s) => s.db.suppliers)
+  const cats = useApp((s) => s.db.config.supplierCategories)
   const [over, setOver] = useState<Record<ID, number>>({})
   const [skip, setSkip] = useState<ID[]>([])
-  const [supplier, setSupplierState] = useState(() => {
-    try {
-      return localStorage.getItem('genair-supplier-phone') ?? ''
-    } catch {
-      return ''
-    }
-  })
-  const setSupplier = (v: string) => { setSupplierState(v); writePref('genair-supplier-phone', v) }
-  const office = users.find((u) => u.role === 'office')
-  const lines = sugg.filter((s) => !skip.includes(s.itemId)).map((s) => ({ ...s, qty: over[s.itemId] ?? s.qty }))
-  const text = [
-    `הזמנת רכש — ${brand.name}`,
-    `תאריך: ${fmtDate(new Date())}`,
-    '',
-    ...lines.map((l) => `• ${l.item!.sku} · ${l.item!.name} — ${l.qty} ${l.item!.unit}`),
-    '',
-    `אספקה ל${MAIN_WAREHOUSE}: ${brand.address}`,
-    office ? `איש קשר: ${office.name}, ${office.phone.replace(/^(\d{3})/, '$1-')}` : `טלפון: ${brand.phone}`,
-    'נא לאשר זמינות ומועד אספקה. תודה!',
-  ].join('\n')
+  const [supplierId, setSupplierState] = useState(() => readPref<string>(SUP_PREF, '', suppliers.map((x) => x.id)))
+  const setSupplier = (v: string) => { setSupplierState(v); writePref(SUP_PREF, v) }
+  const active = useMemo(() => suppliers.filter((x) => x.active).sort((a, b) => Number(['units', 'materials'].includes(b.category)) - Number(['units', 'materials'].includes(a.category)) || a.name.localeCompare(b.name, 'he')), [suppliers])
+  const sup = suppliers.find((x) => x.id === supplierId)
+  const lines = sugg.filter((s) => !skip.includes(s.itemId)).map((s) => ({ ...s, qty: over[s.itemId] ?? s.qty })).filter((l) => l.qty > 0)
+  const total = lines.reduce((s, l) => s + l.qty * l.item!.cost, 0)
 
-  const share = async () => {
-    const r = await shareOrCopy({ title: `הזמנת רכש — ${brand.name}`, text })
-    if (r === 'copied') toast.success('ההזמנה הועתקה')
-    else if (r === 'shared') toast.success('ההזמנה שותפה')
-    else toast.error('לא הצלחנו להעתיק')
-  }
-  const wa = () => {
-    const digits = supplier.replace(/\D/g, '')
-    window.open(digits.length >= 9 ? whatsappLink(supplier, text) : `https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener')
+  const create = (send?: 'whatsapp' | 'email') => {
+    if (!sup || !lines.length) return
+    const po = createPurchaseOrder({
+      supplierId: sup.id, toLocation: MAIN_WAREHOUSE, notes: 'השלמת מלאי לפי ההזמנה המוצעת',
+      lines: lines.map((l) => ({ itemId: l.itemId, description: l.item!.name, qty: l.qty, unitCost: l.item!.cost, unit: l.item!.unit })),
+    })
+    if (send === 'whatsapp') window.open(poWhatsapp(po, sup), '_blank', 'noopener')
+    if (send === 'email') window.location.href = poMail(po, sup)
+    if (send) markPoSent(po.id, send)
+    setOver({})
+    setSkip([])
+    toast.success(send ? `הזמנה ${po.number} נשלחה ל${sup.name}` : `נוצרה טיוטה ${po.number}`)
+    if (!send) onOpenPo(po.id)
   }
 
   return (
     <Card title={<div className="row" style={{ gap: 8 }}><ClipboardList size={16} className="muted" /><h2>הזמנת רכש מוצעת</h2></div>} actions={sugg.length ? <span className="tiny muted">{lines.length} פריטים</span> : undefined}>
       {!sugg.length ? (
-        <div className="card-body small muted">אין צורך בהזמנה כרגע. המחסן מכסה את המינימום ואת החוסרים ברכבים.</div>
+        <div className="card-body small muted">אין צורך בהזמנה כרגע. המחסן מכסה את המינימום ואת החוסרים ברכבים (כולל מה שכבר הוזמן).</div>
       ) : (
         <>
           <div className="list">
@@ -274,7 +274,7 @@ function PurchaseCard() {
                   <input type="checkbox" checked={on} onChange={() => setSkip((l) => (on ? [...l, s.itemId] : l.filter((x) => x !== s.itemId)))} aria-label="לכלול בהזמנה" />
                   <span className="grow">
                     <span className="strong" style={{ display: 'block' }}>{s.item!.name}</span>
-                    <span className="tiny muted">במחסן {s.available} · מינימום {s.min}{s.vanShort ? ` · חסר ברכבים ${s.vanShort}` : ''}</span>
+                    <span className="tiny muted">במחסן {s.available} · מינימום {s.min}{s.vanShort ? ` · חסר ברכבים ${s.vanShort}` : ''}{s.ordered ? ` · כבר בהזמנה ${s.ordered}` : ''}</span>
                   </span>
                   <input className="input sm num" style={{ width: 64, textAlign: 'center' }} inputMode="numeric" value={over[s.itemId] ?? s.qty} disabled={!on} onChange={(e) => setOver((m) => ({ ...m, [s.itemId]: Math.max(0, Number(e.target.value.replace(/\D/g, '')) || 0) }))} aria-label="כמות להזמנה" />
                 </div>
@@ -282,17 +282,53 @@ function PurchaseCard() {
             })}
           </div>
           <div className="card-body col" style={{ gap: 8, borderTop: '1px solid var(--line-2)' }}>
-            <Field label="וואטסאפ של הספק (לא חובה)">
-              <input className="input sm ltr" style={{ textAlign: 'right' }} inputMode="tel" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="05X-XXXXXXX" />
+            <Field label="ספק" hint={sup ? <>{sup.phone ? <span className="ltr">{sup.phone}</span> : 'אין טלפון'}{sup.email ? ` · ${sup.email}` : ''} · עלות משוערת {money(total)}</> : <>הספקים מנוהלים ב<Link to="/suppliers">מסך הספקים</Link></>}>
+              <select className="select sm" value={supplierId} onChange={(e) => setSupplier(e.target.value)}>
+                <option value="">בחירת ספק...</option>
+                {active.map((x) => <option key={x.id} value={x.id}>{x.name} · {cats.find((c) => c.key === x.category)?.label ?? ''}</option>)}
+              </select>
             </Field>
             <div className="row wrap" style={{ gap: 6 }}>
-              <button className="btn sm wa" disabled={!lines.length} onClick={wa}><MessageCircle size={15} /> וואטסאפ לספק</button>
-              <button className="btn sm" disabled={!lines.length} onClick={share}><Copy size={15} /> העתקה / שיתוף</button>
-              <a className="btn sm" href={mailLink('', `הזמנת רכש — ${brand.name}`, text)}><Mail size={15} /> מייל</a>
+              <button className="btn sm wa" disabled={!sup || !lines.length} onClick={() => create('whatsapp')}><MessageCircle size={15} /> הזמנה בוואטסאפ</button>
+              <button className="btn sm" disabled={!sup || !lines.length || !sup.email} onClick={() => create('email')} title={sup && !sup.email ? 'לספק אין אימייל' : undefined}><Mail size={15} /> במייל</button>
+              <button className="btn sm" disabled={!sup || !lines.length} onClick={() => create()}><FilePlus2 size={15} /> טיוטה</button>
             </div>
+            <div className="tiny muted">ההזמנה נשמרת עם מספר, ובקבלת הסחורה הכמויות נכנסות למלאי.</div>
           </div>
         </>
       )}
+    </Card>
+  )
+}
+
+// הזמנות שעוד לא הגיעו: קבלה למלאי בלחיצה
+function OpenOrdersCard({ onOpenPo }: { onOpenPo: (id: ID) => void }) {
+  const pos = useApp((s) => s.db.purchaseOrders)
+  const suppliers = useApp((s) => s.db.suppliers)
+  const open = useMemo(() => pos.filter((p) => p.status === 'sent' || p.status === 'confirmed' || p.status === 'draft').sort((a, b) => (a.expectedAt ?? '9').localeCompare(b.expectedAt ?? '9')), [pos])
+  const [receiving, setReceiving] = useState<ID | null>(null)
+  const today = new Date().toISOString().slice(0, 10)
+  const rpo = open.find((p) => p.id === receiving)
+  return (
+    <Card title={<div className="row" style={{ gap: 8 }}><Truck size={16} className="muted" /><h2>הזמנות בדרך</h2></div>} actions={<Link className="btn sm ghost" to="/suppliers?tab=orders">הכל</Link>}>
+      {!open.length ? <div className="card-body small muted">אין הזמנות פתוחות</div> : (
+        <div className="list">
+          {open.slice(0, 6).map((p) => {
+            const sup = suppliers.find((x) => x.id === p.supplierId)
+            const late = p.expectedAt && p.expectedAt < today
+            return (
+              <div key={p.id} className="list-item small click" onClick={() => onOpenPo(p.id)}>
+                <span className="grow">
+                  <span className="strong" style={{ display: 'block' }}><span className="ltr">{p.number}</span> · {sup?.name}</span>
+                  <span className={`tiny ${late ? 'txt-danger' : 'muted'}`}>{poStatusLabel[p.status]}{p.expectedAt ? ` · אספקה ${fmtDate(p.expectedAt)}` : ''} · {money(poTotal(p))}</span>
+                </span>
+                {p.status !== 'draft' && <button className="btn sm" onClick={(e) => { e.stopPropagation(); setReceiving(p.id) }}><PackageCheck size={15} /> קבלה</button>}
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {rpo && <ReceiveDialog po={rpo} sup={suppliers.find((x) => x.id === rpo.supplierId)} onClose={() => setReceiving(null)} />}
     </Card>
   )
 }

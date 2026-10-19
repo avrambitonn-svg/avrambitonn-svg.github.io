@@ -1,55 +1,40 @@
-// "המשימות שלי" בדשבורד
+// "המשימות שלי" בדשבורד: הוספה מהירה והמשימות הפתוחות (שלי ושל שותפו איתי)
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus } from 'lucide-react'
+import { CheckCircle2 } from 'lucide-react'
 import { useApp, useMe } from '../../lib/store'
-import { Badge, Card, Empty } from '../../components/ui'
-import { nowIso, uid, ymd } from '../../lib/format'
+import { Card, Empty } from '../../components/ui'
+import type { Task } from '../../lib/types'
+import { dueGroup, isMine, sortTasks } from './tasks'
+import { QuickAdd, TaskDialog, TaskRow } from './parts'
+
+const SHOW = 7
 
 export function TasksCard() {
   const me = useMe()
   const tasks = useApp((s) => s.db.tasks)
-  const cases = useApp((s) => s.db.cases)
-  const upsert = useApp((s) => s.upsert)
-  const patch = useApp((s) => s.patch)
-  const [newTask, setNewTask] = useState('')
-  const myTasks = useMemo(() => tasks.filter((t) => t.assigneeId === me.id).sort((a, b) => Number(a.done) - Number(b.done) || (a.due ?? '').localeCompare(b.due ?? '')), [tasks, me.id])
+  const cfg = useApp((s) => s.db.config)
+  const [open, setOpen] = useState<Task | null>(null)
+  const mine = useMemo(() => tasks.filter((t) => !t.done && isMine(t, me.id)).sort(sortTasks(cfg)), [tasks, me.id, cfg])
+  const late = mine.filter((t) => dueGroup(t) === 'overdue').length
   return (
-    <Card title="המשימות שלי">
-      <form
-        className="row"
-        style={{ padding: '12px 18px', borderBottom: '1px solid var(--line-2)' }}
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (!newTask.trim()) return
-          upsert('tasks', { id: uid('t'), title: newTask.trim(), assigneeId: me.id, createdBy: me.id, done: false, priority: 'normal', due: ymd(), createdAt: nowIso() })
-          setNewTask('')
-        }}
-      >
-        <input className="input sm" placeholder="משימה חדשה..." value={newTask} onChange={(e) => setNewTask(e.target.value)} />
-        <button className="btn sm primary" type="submit"><Plus size={15} /></button>
-      </form>
-      {myTasks.length === 0 ? (
-        <Empty title="אין משימות" />
+    <Card
+      title={<h2>המשימות שלי{late > 0 && <span className="badge danger" style={{ marginInlineStart: 8 }}>{late} באיחור</span>}</h2>}
+      actions={<Link className="btn sm ghost" to="/tasks">לכל המשימות</Link>}
+    >
+      <QuickAdd />
+      {mine.length === 0 ? (
+        <Empty icon={<CheckCircle2 size={34} />} title="אין משימות פתוחות" />
       ) : (
         <div className="list">
-          {myTasks.slice(0, 7).map((t) => {
-            const k = cases.find((x) => x.id === t.caseId)
-            return (
-              <div key={t.id} className="list-item" style={{ opacity: t.done ? 0.55 : 1 }}>
-                <label className="check">
-                  <input type="checkbox" checked={t.done} onChange={() => patch('tasks', t.id, { done: !t.done })} />
-                </label>
-                <div className="grow">
-                  <div className="small" style={{ textDecoration: t.done ? 'line-through' : undefined, fontWeight: t.priority === 'high' ? 700 : 500 }}>{t.title}</div>
-                  {k && <Link className="tiny" to={`/cases/${k.id}`}>{k.number}</Link>}
-                </div>
-                {t.priority === 'high' && !t.done && <Badge tone="danger">דחוף</Badge>}
-              </div>
-            )
-          })}
+          {mine.slice(0, SHOW).map((t) => <TaskRow key={t.id} t={t} onOpen={setOpen} />)}
         </div>
       )}
+      <div className="row between" style={{ padding: '8px 18px', borderTop: '1px solid var(--line-2)' }}>
+        <Link className="small" to="/tasks?tab=created">צפייה במשימות שיצרתי</Link>
+        {mine.length > SHOW && <Link className="small strong" to="/tasks">ועוד {mine.length - SHOW}</Link>}
+      </div>
+      {open && <TaskDialog task={tasks.find((t) => t.id === open.id) ?? open} onClose={() => setOpen(null)} />}
     </Card>
   )
 }

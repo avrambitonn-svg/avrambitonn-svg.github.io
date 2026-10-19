@@ -1,0 +1,52 @@
+/* ספקים והזמנות רכש: רשימות, שורות הזמנה, מצב הזמנה וגיליון הדפסה */
+.sp-search { min-width: 180px; }
+.sp-search .input { width: 100%; }
+.sp-off td, .list-item.sp-off { opacity: 0.6; }
+.sp-wa { color: #25d366; }
+.sp-span2 { grid-column: 1 / -1; }
+.sp-details > div { min-width: 0; overflow-wrap: anywhere; }
+.side-box { border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: var(--surface-2); min-width: 0; }
+
+/* שורות הזמנה */
+.po-lines { display: flex; flex-direction: column; gap: 6px; }
+.po-lrow { display: grid; grid-template-columns: minmax(150px, 1.3fr) minmax(150px, 1.6fr) 74px 96px 90px 32px; gap: 6px; align-items: center; }
+.po-lrow > * { min-width: 0; }
+.po-lhead { font-size: 12px; color: var(--text-3); font-weight: 600; }
+.po-lrow .end { text-align: end; }
+@media (max-width: 700px) {
+  .po-lrow { grid-template-columns: minmax(0, 1fr) 70px 86px 30px; padding: 8px; border: 1px solid var(--line-2); border-radius: 10px; }
+  .po-lrow > select, .po-lrow > input:nth-child(2) { grid-column: 1 / -1; }
+  .po-lrow > span.end { text-align: start; }
+}
+.po-actions { justify-content: flex-end; gap: 6px; }
+
+/* מצב ההזמנה */
+.po-steps { display: flex; gap: 0; }
+.po-step { flex: 1; display: flex; align-items: center; gap: 8px; color: var(--text-3); font-weight: 600; font-size: 13px; min-width: 0; }
+.po-step .n { width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center; flex: none; font-size: 12px; background: #fff; }
+.po-step.done .n { background: var(--brand); border-color: var(--brand); color: #fff; }
+.po-step.cur { color: var(--ink); }
+.po-step::after { content: ''; flex: 1; height: 2px; background: var(--line); margin-inline-end: 8px; }
+.po-step.done::after { background: var(--brand); }
+.po-step:last-child { flex: none; }
+.po-step:last-child::after { display: none; }
+@media (max-width: 600px) { .po-step .t { display: none; } .po-step.cur .t { display: inline; white-space: nowrap; } }
+
+/* גיליון הדפסה: מוסתר במסך, ובהדפסה מחליף את האפליקציה */
+.po-sheet { display: none; }
+@media print {
+  body.print-po #root { display: none !important; }
+  body.print-po .po-sheet { display: block; font-family: var(--font); color: #111; font-size: 12.5px; }
+  .po-sheet-head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #00aeef; padding-bottom: 10px; margin-bottom: 14px; }
+  .po-sheet-head h1 { font-size: 22px; font-weight: 700; }
+  .po-brand { direction: ltr; text-align: right; font-size: 24px; font-weight: 700; letter-spacing: 0.04em; color: #1c2127; }
+  .po-brand span { color: #00aeef; }
+  .po-sheet-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 14px; line-height: 1.6; }
+  .po-sheet-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+  .po-sheet-table th, .po-sheet-table td { border: 1px solid #cfd6dd; padding: 6px 8px; text-align: start; }
+  .po-sheet-table th { background: #f1f4f7; font-size: 11.5px; }
+  .po-sheet-table tfoot td { font-weight: 700; }
+  .po-sheet-table tfoot td:first-child { text-align: end; }
+  .po-sign { display: flex; gap: 40px; margin-top: 40px; }
+  .po-sign div { flex: 1; border-top: 1px solid #555; padding-top: 6px; font-size: 11.5px; color: #555; }
+}

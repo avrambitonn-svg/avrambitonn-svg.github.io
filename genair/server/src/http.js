@@ -3,8 +3,10 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 
 export const MAX_BODY_BYTES = 25 * 1024 * 1024;
 
-export const CORS_ALLOW_HEADERS = 'content-type, x-app-token, anthropic-beta';
-export const CORS_ALLOW_METHODS = 'GET, POST, OPTIONS';
+export const CORS_ALLOW_HEADERS =
+  'content-type, x-app-token, anthropic-beta, authorization, x-client-id, x-file-name, x-case-id, x-folder, x-drive-folder-id, last-event-id';
+export const CORS_ALLOW_METHODS = 'GET, POST, PATCH, DELETE, OPTIONS';
+export const CORS_EXPOSE_HEADERS = 'x-auth-token';
 
 export class HttpError extends Error {
   constructor(status, code, message, details) {
@@ -45,6 +47,7 @@ export function sendError(res, err) {
   const headers = {};
   if (err.status === 413) headers.connection = 'close';
   if (err.allow) headers.allow = err.allow;
+  if (err.retryAfter) headers['retry-after'] = String(err.retryAfter);
   sendJson(res, err.status, errorBody(err), headers);
 }
 
@@ -126,6 +129,15 @@ export async function readJson(req) {
   return value;
 }
 
+/** Client IP for rate limits. Behind a proxy (Render, Fly, nginx) set TRUST_PROXY=true to use X-Forwarded-For. */
+export function clientIp(req, trustProxy = false) {
+  if (trustProxy) {
+    const fwd = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim();
+    if (fwd) return fwd;
+  }
+  return req.socket?.remoteAddress ?? 'unknown';
+}
+
 /** Constant-time string comparison (hashing first hides the length too). */
 export function safeEqual(a, b) {
   const ha = createHash('sha256').update(String(a ?? ''), 'utf8').digest();
@@ -156,6 +168,7 @@ export function applyCors(req, res, allowedOrigins) {
   res.setHeader('access-control-allow-origin', wildcard ? '*' : origin);
   res.setHeader('access-control-allow-methods', CORS_ALLOW_METHODS);
   res.setHeader('access-control-allow-headers', CORS_ALLOW_HEADERS);
+  res.setHeader('access-control-expose-headers', CORS_EXPOSE_HEADERS);
   res.setHeader('access-control-max-age', '600');
   return true;
 }

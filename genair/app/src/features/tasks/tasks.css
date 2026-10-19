@@ -1,0 +1,52 @@
+/* משימות: שורת משימה, הוספה מהירה, חלונות קטנים (תזכורת, שיתוף, תיק) */
+.tk-add { display: flex; flex-direction: column; gap: 8px; padding: 12px 18px; border-bottom: 1px solid var(--line-2); }
+.tk-add .row .input { flex: 1; min-width: 0; }
+.tk-opts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tk-opts .select, .tk-opts .input { width: auto; height: 32px; font-size: 13.5px; }
+.tk-opts input[type='date'] { width: 150px; }
+@media (max-width: 560px) { .tk-opts .select, .tk-opts input[type='date'] { flex: 1 1 130px; min-width: 0; } }
+
+.tk-row { gap: 10px; align-items: flex-start; padding: 10px 18px; }
+.tk-row.done .tk-title { text-decoration: line-through; color: var(--text-3); }
+.tk-row.done { background: var(--surface-2); }
+.tk-check { width: 19px; height: 19px; margin-top: 2px; accent-color: var(--success); flex: none; cursor: pointer; }
+.tk-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; cursor: pointer; text-align: start; border-radius: 6px; }
+.tk-main:focus-visible { outline: 2px solid var(--brand); }
+.tk-title { font-size: 14px; font-weight: 600; color: var(--ink); line-height: 1.35; overflow-wrap: anywhere; }
+.tk-title.high { color: var(--danger); }
+.tk-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: 12px; color: var(--text-3); }
+.tk-meta > span { display: inline-flex; align-items: center; gap: 4px; }
+.tk-meta .badge { height: 20px; font-size: 11.5px; padding: 0 7px; }
+.tk-meta a { font-weight: 600; }
+.tk-side { display: flex; align-items: center; gap: 6px; flex: none; }
+.tk-side .avatar { width: 26px; height: 26px; font-size: 11px; }
+.tk-group { padding: 8px 18px 6px; font-size: 12.5px; font-weight: 700; color: var(--text-2); background: var(--surface-2); border-bottom: 1px solid var(--line-2); display: flex; align-items: center; gap: 8px; }
+.tk-group.overdue { color: var(--danger); }
+.tk-group .n { background: var(--line); color: var(--text-2); border-radius: 999px; font-size: 11px; padding: 0 7px; }
+.tk-more { display: block; text-align: center; padding: 10px; font-size: 13px; font-weight: 600; border-top: 1px solid var(--line-2); }
+
+/* חלון קטן ליד כפתור; בנייד נפתח כגיליון בתחתית */
+.tk-pop { position: relative; display: inline-flex; }
+.tk-pop-scrim { position: fixed; inset: 0; z-index: 64; }
+.tk-pop-box { position: absolute; top: calc(100% + 6px); inset-inline-start: 0; z-index: 65; width: 270px; max-height: 340px; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; box-shadow: var(--shadow-lg); }
+.tk-pop-box .opt { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; border: 0; background: none; cursor: pointer; text-align: start; font: inherit; width: 100%; }
+.tk-pop-box .opt:hover:not(:disabled) { background: var(--line-2); }
+.tk-pop-box .opt:disabled { opacity: 0.45; cursor: not-allowed; }
+.tk-pop-box .opt .avatar { width: 26px; height: 26px; font-size: 11px; }
+@media (max-width: 700px) {
+  .tk-pop-box { position: fixed; top: auto; bottom: calc(80px + env(safe-area-inset-bottom)); inset-inline: 16px; width: auto; max-height: 60vh; }
+}
+
+.tk-case { position: relative; min-width: 160px; }
+.tk-case .input { height: 32px; font-size: 13.5px; }
+.tk-drop { position: absolute; top: calc(100% + 4px); inset-inline: 0; z-index: 66; min-width: 240px; max-height: 260px; overflow-y: auto; box-shadow: var(--shadow-lg); }
+.tk-drop .list-item { width: 100%; border: 0; border-bottom: 1px solid var(--line-2); background: #fff; font: inherit; padding: 8px 12px; text-align: start; cursor: pointer; }
+.tk-drop .list-item:hover { background: #f7fbfd; }
+@media (max-width: 560px) { .tk-case { flex: 1 1 100%; } .tk-drop { min-width: 0; } }
+.tk-chip-x { border: 0; background: none; cursor: pointer; padding: 0; display: inline-grid; place-items: center; color: inherit; }
+.tk-chip-case { max-width: 100%; }
+.tk-chip-case .truncate { max-width: 160px; }
+
+.tk-share { display: flex; flex-wrap: wrap; gap: 6px; }
+.tk-share .chip .avatar { width: 20px; height: 20px; font-size: 9px; }
+.tk-info { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--text-3); }

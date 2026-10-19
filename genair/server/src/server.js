@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { handler } from './app.js';
+import { flushAll } from './db/index.js';
 
 // Load genair/server/.env if present (real environment variables win).
 const envFile = fileURLToPath(new URL('../.env', import.meta.url));
@@ -36,8 +37,15 @@ if (needsProxyRespawn()) {
     handler(req, res);
   });
   server.requestTimeout = 330_000; // AI calls may legitimately take minutes.
+  server.keepAliveTimeout = 65_000; // longer than the load balancers in front (Render, Fly, nginx)
   server.listen(port, host, () => console.log(`genair-server listening on http://localhost:${port}`));
-  const stop = () => server.close(() => process.exit(0));
+  // Write the shared database before exiting; open SSE / long-poll connections are cut.
+  const stop = async () => {
+    server.close();
+    server.closeAllConnections?.();
+    await flushAll();
+    process.exit(0);
+  };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
 }

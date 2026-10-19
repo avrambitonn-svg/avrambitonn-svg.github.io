@@ -1,6 +1,6 @@
 // Google Calendar + Drive with a service account (JWT RS256 -> OAuth access token).
-import { createSign } from 'node:crypto';
-import { HttpError, fetchUpstream, readJson, readUpstream } from './http.js';
+import { createSign, randomBytes } from 'node:crypto';
+import { HttpError, fetchUpstream, readBody, readJson, readUpstream } from './http.js';
 
 const SERVICE = { code: 'google', label: 'Google', to: 'ל-Google' };
 export const TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -97,15 +97,17 @@ function requireAccount(cfg) {
 
 const scopesFor = (cfg) => [CALENDAR_SCOPE, cfg.google.driveScope];
 
-async function googleFetch(cfg, sa, url, body) {
+async function googleCall(cfg, sa, method, url, { json, body, headers = {}, okStatuses = [] } = {}) {
   const token = await getAccessToken(sa, { scopes: scopesFor(cfg), subject: cfg.google.subject || undefined });
+  const h = { authorization: `Bearer ${token}`, ...headers };
+  if (json !== undefined) h['content-type'] = 'application/json';
   const res = await fetchUpstream(
     url,
-    { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(body) },
-    { timeoutMs: 20_000, service: SERVICE },
+    { method, headers: h, body: json !== undefined ? JSON.stringify(json) : body },
+    { timeoutMs: body && body.length > 1_000_000 ? 120_000 : 20_000, service: SERVICE },
   );
   const data = await readUpstream(res);
-  if (!res.ok) {
+  if (!res.ok && !okStatuses.includes(res.status)) {
     const e = data && typeof data === 'object' ? data.error ?? {} : {};
     throw new HttpError(502, 'google_error', e.message ? `Google דחה את הבקשה: ${e.message}` : 'Google דחה את הבקשה', {
       status: res.status,
@@ -113,7 +115,19 @@ async function googleFetch(cfg, sa, url, body) {
       message: e.message ?? (typeof data === 'string' ? data : ''),
     });
   }
-  return data;
+  return { status: res.status, data };
+}
+
+async function googleFetch(cfg, sa, url, body) {
+  return (await googleCall(cfg, sa, 'POST', url, { json: body })).data;
+}
+
+const GOOGLE_ID_RE = /^[A-Za-z0-9_@.-]{3,1024}$/;
+function requireId(value, field) {
+  if (typeof value !== 'string' || !GOOGLE_ID_RE.test(value)) {
+    throw new HttpError(400, 'validation_error', 'מזהה לא תקין', { fields: [{ field, message: 'מזהה לא תקין' }] });
+  }
+  return value;
 }
 
 // ---------------------------------------------------------------- calendar
@@ -179,6 +193,34 @@ export async function createCalendarEvent({ req, cfg }) {
   return { status: 201, body: { id: data?.id ?? null, htmlLink: data?.htmlLink ?? null } };
 }
 
+function calendarFor(cfg, value) {
+  const calendarId = (typeof value === 'string' && value.trim()) || cfg.google.calendarId;
+  if (!calendarId) throw new HttpError(503, 'calendar_not_configured', 'לא הוגדר יומן Google בשרת (חסר GOOGLE_CALENDAR_ID)');
+  return calendarId;
+}
+
+/** PATCH /api/google/calendar/events/:id - new time, title or details; same body as create. */
+export async function updateCalendarEvent({ req, cfg, params }) {
+  const sa = requireAccount(cfg);
+  const id = requireId(params.id, 'id');
+  const body = await readJson(req);
+  const calendarId = calendarFor(cfg, body.calendarId);
+  const event = buildCalendarEvent(body);
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(id)}`;
+  const { data } = await googleCall(cfg, sa, 'PATCH', url, { json: event });
+  return { status: 200, body: { id: data?.id ?? id, htmlLink: data?.htmlLink ?? null } };
+}
+
+/** DELETE /api/google/calendar/events/:id?calendarId= - an event that is already gone counts as deleted. */
+export async function deleteCalendarEvent({ cfg, params, url }) {
+  const sa = requireAccount(cfg);
+  const id = requireId(params.id, 'id');
+  const calendarId = calendarFor(cfg, url.searchParams.get('calendarId'));
+  const target = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(id)}`;
+  const { status } = await googleCall(cfg, sa, 'DELETE', target, { okStatuses: [404, 410] });
+  return { status: 200, body: { ok: true, gone: status === 404 || status === 410 } };
+}
+
 // ---------------------------------------------------------------- drive
 
 export function buildDriveFolder(body, defaultParent) {
@@ -191,6 +233,19 @@ export function buildDriveFolder(body, defaultParent) {
   return { name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] };
 }
 
+/** subfolders: [{ key, name }] (the case's folders from the app's config) - created inside the new folder. */
+export function parseSubfolders(list) {
+  if (list === undefined) return [];
+  const bad = () => new HttpError(400, 'validation_error', 'רשימת תיקיות המשנה לא תקינה', { fields: [{ field: 'subfolders' }] });
+  if (!Array.isArray(list) || list.length > 20) throw bad();
+  return list.map((x) => {
+    const key = typeof x?.key === 'string' ? x.key.trim() : '';
+    const name = typeof x?.name === 'string' ? x.name.trim() : '';
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(key) || !name || name.length > 120) throw bad();
+    return { key, name };
+  });
+}
+
 export async function createDriveFolder({ req, cfg }) {
   const sa = requireAccount(cfg);
   const body = await readJson(req);
@@ -198,9 +253,80 @@ export async function createDriveFolder({ req, cfg }) {
   // Service accounts have no Drive storage of their own: always create inside a shared folder / shared drive.
   if (!parent) throw new HttpError(503, 'drive_not_configured', 'לא הוגדרה תיקיית אב ב-Google Drive (חסר GOOGLE_DRIVE_PARENT_ID)');
   const folder = buildDriveFolder(body, parent);
+  const subs = parseSubfolders(body.subfolders);
   const url = 'https://www.googleapis.com/drive/v3/files?supportsAllDrives=true&fields=id,webViewLink';
   const data = await googleFetch(cfg, sa, url, folder);
-  return { status: 201, body: { id: data?.id ?? null, webViewLink: data?.webViewLink ?? null } };
+  const out = { id: data?.id ?? null, webViewLink: data?.webViewLink ?? null };
+  if (subs.length && out.id) {
+    out.subfolders = {};
+    for (const sub of subs) {
+      const d = await googleFetch(cfg, sa, url, buildDriveFolder({ name: sub.name }, out.id));
+      out.subfolders[sub.key] = d?.id ?? null;
+    }
+  }
+  return { status: 201, body: out };
+}
+
+/** Uploads bytes into a Drive folder (multipart upload). Used by POST /api/files and /api/google/drive/files. */
+export async function uploadBufferToDrive(cfg, { name, mime, data, folderId }) {
+  const sa = requireAccount(cfg);
+  requireId(folderId, 'folderId');
+  const boundary = `genair${randomBytes(12).toString('hex')}`;
+  const meta = JSON.stringify({ name, parents: [folderId] });
+  const body = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: ${mime}\r\n\r\n`),
+    data,
+    Buffer.from(`\r\n--${boundary}--`),
+  ]);
+  const url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink';
+  const { data: res } = await googleCall(cfg, sa, 'POST', url, { body, headers: { 'content-type': `multipart/related; boundary=${boundary}` } });
+  return { id: res?.id ?? null, webViewLink: res?.webViewLink ?? null };
+}
+
+export const safeFileName = (raw) => {
+  let name = '';
+  try {
+    name = decodeURIComponent(String(raw ?? ''));
+  } catch {
+    name = String(raw ?? '');
+  }
+  name = name.replace(/[\u0000-\u001f\u007f/\\]/g, '_').trim().slice(0, 180);
+  return name || 'file';
+};
+export const safeMime = (raw) => {
+  const m = String(raw ?? '').split(';')[0].trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*$/.test(m) ? m : 'application/octet-stream';
+};
+
+/** POST /api/google/drive/files?folderId= - raw body, file name in x-file-name (URI-encoded). */
+export async function uploadDriveFile({ req, cfg, url }) {
+  requireAccount(cfg);
+  const folderId = url.searchParams.get('folderId') || req.headers['x-drive-folder-id'];
+  if (!folderId) throw new HttpError(400, 'validation_error', 'חסרה תיקיית יעד', { fields: [{ field: 'folderId' }] });
+  const data = await readBody(req, cfg.db?.filesMaxBytes);
+  if (!data.length) throw new HttpError(400, 'validation_error', 'הקובץ ריק');
+  const out = await uploadBufferToDrive(cfg, { name: safeFileName(req.headers['x-file-name']), mime: safeMime(req.headers['content-type']), data, folderId: String(folderId) });
+  return { status: 201, body: out };
+}
+
+/** POST /api/google/drive/files/:id/move { from?, to } */
+export async function moveDriveFile({ req, cfg, params }) {
+  const sa = requireAccount(cfg);
+  const id = requireId(params.id, 'id');
+  const body = await readJson(req);
+  const to = requireId(body.to, 'to');
+  const q = new URLSearchParams({ addParents: to, supportsAllDrives: 'true', fields: 'id,parents,webViewLink' });
+  if (body.from) q.set('removeParents', requireId(body.from, 'from'));
+  const { data } = await googleCall(cfg, sa, 'PATCH', `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?${q}`, { json: {} });
+  return { status: 200, body: { id: data?.id ?? id, webViewLink: data?.webViewLink ?? null } };
+}
+
+/** POST /api/google/drive/files/:id/trash - to Drive's trash (recoverable there for 30 days). */
+export async function trashDriveFile({ cfg, params }) {
+  const sa = requireAccount(cfg);
+  const id = requireId(params.id, 'id');
+  const { status } = await googleCall(cfg, sa, 'PATCH', `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?supportsAllDrives=true`, { json: { trashed: true }, okStatuses: [404] });
+  return { status: 200, body: { ok: true, gone: status === 404 } };
 }
 
 export function googleFeatures(cfg) {

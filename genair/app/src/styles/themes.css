@@ -1,0 +1,53 @@
+/* ערכות צבע (הגדרות ← רשימות ← ערכת צבע). ג'נאייר היא ברירת המחדל; כל ערכה דורסת את משתני המותג.
+   --brand-on-dark: גוון בהיר של הצבע הראשי לתפריט הכהה, כדי לשמור על ניגודיות */
+:root { --brand-on-dark: #00aeef; --brand-ring: rgba(0, 174, 239, 0.15); --brand-tint: rgba(0, 174, 239, 0.14); }
+
+[data-theme='navy'] {
+  --brand: #1d4ed8;
+  --brand-600: #1e40af;
+  --brand-700: #1e3a8a;
+  --brand-50: #eaf0fe;
+  --brand-100: #cfdcfb;
+  --ink: #14213d;
+  --ink-2: #1d2f55;
+  --ink-3: #2b4170;
+  --brand-on-dark: #93b4ff;
+  --brand-ring: rgba(29, 78, 216, 0.18);
+  --brand-tint: rgba(147, 180, 255, 0.16);
+}
+
+[data-theme='green'] {
+  --brand: #047857;
+  --brand-600: #065f46;
+  --brand-700: #065f46;
+  --brand-50: #e7f6ef;
+  --brand-100: #c3ead8;
+  --brand-on-dark: #5fd4a8;
+  --brand-ring: rgba(4, 120, 87, 0.18);
+  --brand-tint: rgba(95, 212, 168, 0.14);
+}
+
+[data-theme='orange'] {
+  --brand: #c2410c;
+  --brand-600: #9a3412;
+  --brand-700: #9a3412;
+  --brand-50: #fdf0e8;
+  --brand-100: #f9d9c4;
+  --brand-on-dark: #fb9a5f;
+  --brand-ring: rgba(194, 65, 12, 0.18);
+  --brand-tint: rgba(251, 154, 95, 0.14);
+}
+
+/* מקומות שבהם הצבע נכתב קבוע ב-app.css */
+:root[data-theme] .nav-link.active { background: var(--brand-tint); box-shadow: inset -3px 0 0 var(--brand-on-dark); }
+:root[data-theme] .nav-link.active svg,
+:root[data-theme] .wordmark b span,
+:root[data-theme] .demo-badge { color: var(--brand-on-dark); }
+:root[data-theme] .demo-badge { background: var(--brand-tint); }
+:root[data-theme] .input:focus,
+:root[data-theme] .select:focus,
+:root[data-theme] .textarea:focus { box-shadow: 0 0 0 3px var(--brand-ring); }
+:root[data-theme] .table tr.click:hover td,
+:root[data-theme] a.list-item:hover,
+:root[data-theme] .list-item.click:hover { background: color-mix(in srgb, var(--brand-50) 55%, #fff); }
+:root[data-theme] .cal-cell.today { background: color-mix(in srgb, var(--brand-50) 60%, #fff); }

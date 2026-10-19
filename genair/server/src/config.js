@@ -1,7 +1,7 @@
 // Reads every setting from environment variables. Called per request so a
 // change in env (tests, Vercel redeploy) is picked up without restarts.
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
 
 export const PRIORITY_DEMO = Object.freeze({
   // Priority's public sandbox. The credentials are published on Priority's
@@ -65,11 +65,30 @@ export function priorityConfig(env = process.env) {
   return { mode, configured, allowWrite, serviceRoot, user, password, appId, appKey };
 }
 
+// Shared database (users, login, sync). file = JSON file under DATA_DIR, memory = in-process only
+// (tests), off = integration-only server (the default on Vercel, where the file system is read-only).
+export function dbConfig(env = process.env) {
+  const raw = str(env.DB_MODE).toLowerCase();
+  const mode = ['file', 'memory', 'off'].includes(raw) ? raw : env.VERCEL ? 'off' : 'file';
+  const num = (v, d) => (Number(v) > 0 ? Number(v) : d);
+  return {
+    mode,
+    dataDir: str(env.DATA_DIR) || './data',
+    flushMs: num(env.DB_FLUSH_MS, 300),
+    authSecret: str(env.AUTH_SECRET),
+    tokenTtlHours: num(env.AUTH_TTL_HOURS, 12),
+    bootstrapToken: str(env.BOOTSTRAP_TOKEN),
+    filesMaxBytes: num(env.FILES_MAX_MB, 25) * 1024 * 1024,
+    trustProxy: bool(env.TRUST_PROXY),
+  };
+}
+
 export function loadConfig(env = process.env) {
   const priority = priorityConfig(env);
   return {
     allowedOrigins: list(env.ALLOWED_ORIGINS, DEFAULT_ORIGINS),
     appToken: str(env.APP_TOKEN),
+    db: dbConfig(env),
     priority,
     ai: {
       apiKey: str(env.ANTHROPIC_API_KEY),
