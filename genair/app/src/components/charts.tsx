@@ -185,8 +185,9 @@ export function Legend({ series, line }: { series: Series[]; line?: boolean }) {
 }
 
 // ---------- גרף שטח לאורך זמן (סדרה אחת או יותר, ציר אחד) ----------
-export function AreaChart({ labels, series, data, format, axisFormat = compact, height = 240, endLabel = true }: {
+export function AreaChart({ labels, series, data, format, axisFormat = compact, height = 240, endLabel = true, partialLast = false }: {
   labels: string[]; series: Series[]; data: number[][]; format: (n: number) => string; axisFormat?: (n: number) => string; height?: number; endLabel?: boolean
+  partialLast?: boolean // הנקודה האחרונה היא חודש שעוד לא נגמר: הקטע אליה מקווקו
 }) {
   const [box, w] = useWidth<HTMLDivElement>()
   const seen = useInView(box)
@@ -237,18 +238,22 @@ export function AreaChart({ labels, series, data, format, axisFormat = compact, 
           {labels.map((l, i) => (i % every === (n - 1) % every ? <text key={i} x={x(i)} y={height - 8} textAnchor="middle" className={`viz-axis ${hover === i ? 'on' : ''}`}>{l}</text> : null))}
           {series.map((s, si) => {
             const pts = data[si].map((v, i) => [x(i), y(v)] as [number, number])
-            const line = smoothPath(pts)
+            const cut = partialLast && n > 2
+            const line = smoothPath(cut ? pts.slice(0, -1) : pts)
+            const [px, py] = pts[n - 2] ?? pts[0]
+            const [lx, ly] = pts[n - 1]
             return (
               <g key={s.key}>
-                <path className="viz-area" style={{ transitionDelay: `${0.5 + si * 0.15}s` }} d={`${line} L${x(n - 1)},${y(0)} L${x(0)},${y(0)} Z`} fill={`url(#${gid}-${si})`} />
+                <path className="viz-area" style={{ transitionDelay: `${0.5 + si * 0.15}s` }} d={`${line}${cut ? ` L${lx},${ly}` : ''} L${x(n - 1)},${y(0)} L${x(0)},${y(0)} Z`} fill={`url(#${gid}-${si})`} />
                 <path className="viz-line" style={{ transitionDelay: `${si * 0.18}s` }} d={line} pathLength={1} fill="none" stroke={s.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                {cut && <path className="viz-area" style={{ transitionDelay: '1.3s' }} d={`M${px},${py} L${lx},${ly}`} fill="none" stroke={s.color} strokeWidth="2.5" strokeDasharray="5 5" strokeLinecap="round" />}
               </g>
             )
           })}
           {endLabel && series[0] && (
             <g className="viz-dot">
               <circle cx={x(n - 1)} cy={y(data[0][n - 1])} r="5" fill={series[0].color} stroke="var(--surface)" strokeWidth="2.5" />
-              <text x={x(n - 1) - 10} y={Math.max(12, y(data[0][n - 1]) - 10)} textAnchor="end" className="viz-endlbl">{format(data[0][n - 1])}</text>
+              <text x={x(n - 1) - 10} y={Math.max(12, y(data[0][n - 1]) - 10)} textAnchor="end" className="viz-endlbl">{partialLast ? `${format(data[0][n - 1])} עד היום` : format(data[0][n - 1])}</text>
             </g>
           )}
           {hover !== null && (
@@ -260,7 +265,7 @@ export function AreaChart({ labels, series, data, format, axisFormat = compact, 
         </svg>
       )}
       {hover !== null && w > 0 && (
-        <Tip x={x(hover)} y={padT} width={w} title={labels[hover]} rows={series.map((s, si) => ({ color: s.color, label: s.label, value: format(data[si][hover]), line: true }))} />
+        <Tip x={x(hover)} y={padT} width={w} title={partialLast && hover === n - 1 ? `${labels[hover]} (עד היום)` : labels[hover]} rows={series.map((s, si) => ({ color: s.color, label: s.label, value: format(data[si][hover]), line: true }))} />
       )}
     </div>
   )
@@ -336,14 +341,14 @@ export function Columns({ labels, series, data, format = (n: number) => String(n
   )
 }
 
-// ---------- עוגה (חלק מהשלם, עד 6 חלקים ועוד "אחר") ----------
+// ---------- עוגה (חלק מהשלם: עד 4 חלקים בצבע, והשאר מקובצים ל"אחר" אפור) ----------
 export interface Part { key: string; label: string; value: number; color: string }
-export function Donut({ parts, centerLabel, format = (n: number) => String(n), size = 168 }: { parts: Part[]; centerLabel: string; format?: (n: number) => string; size?: number }) {
+export function Donut({ parts, centerLabel, format = (n: number) => String(n), size = 168, max = 5 }: { parts: Part[]; centerLabel: string; format?: (n: number) => string; size?: number; max?: number }) {
   const ref = useRef<HTMLDivElement>(null)
   const seen = useInView(ref)
   const [hover, setHover] = useState<string | null>(null)
   const sorted = [...parts].filter((p) => p.value > 0)
-  const shown = sorted.length > 7 ? [...sorted.slice(0, 6), { key: '__other', label: 'אחר', color: '#94a3b8', value: sorted.slice(6).reduce((s, p) => s + p.value, 0) }] : sorted
+  const shown = sorted.length > max ? [...sorted.slice(0, max - 1), { key: '__other', label: 'אחר', color: '#94a3b8', value: sorted.slice(max - 1).reduce((s, p) => s + p.value, 0) }] : sorted
   const total = shown.reduce((s, p) => s + p.value, 0)
   const R = 54, SW = 18
   let acc = 0

@@ -8,7 +8,7 @@ import { useApp } from '../../lib/store'
 import { Avatar, Card, Empty, PageHead, Progress } from '../../components/ui'
 import { AreaChart, BarList, Columns, CountUp, Donut, KpiTile, Legend, Ring, Trend, compactMoney, type Series } from '../../components/charts'
 import { countByMonth, lastMonths, revenueByMonth, sumByMonth } from '../../lib/metrics'
-import { pipeline, projectTypeColor, projectTypeLabel, sourceLabel, stageColor, stageLabel } from '../../lib/labels'
+import { pipeline, projectTypeColor, projectTypeLabel, sourceLabel, stageLabel } from '../../lib/labels'
 import { addDays, date, daysBetween, money, pct, ymd } from '../../lib/format'
 import { totals } from '../../lib/quote'
 import { download } from '../../lib/integrations/links'
@@ -173,7 +173,10 @@ export default function ReportsPage() {
 
     // תיקים לפי סטטוס (שנפתחו בטווח)
     const opened = db.cases.filter((k) => inRange(k.createdAt))
-    const byStage = ([...pipeline, 'lost'] as CaseStage[]).map((st) => ({ st, n: opened.filter((k) => k.stage === st).length })).filter((x) => x.n > 0)
+    // סטטוס בארבע קבוצות, כדי שהעוגה תהיה קריאה: נסגרו בעסקה, בביצוע, בשלב המכירה, לא נסגרו
+    const bucket = (st: CaseStage) => (st === 'closed' || st === 'completed' ? 'won' : st === 'lost' ? 'lost' : ['approved', 'scheduled', 'installing'].includes(st) ? 'doing' : 'selling')
+    const bucketInfo = { won: ['נסגרו בעסקה', '#16a34a'], doing: ['אושרו ובביצוע', '#00aeef'], selling: ['בסקר ובהצעה', '#7c3aed'], lost: ['לא נסגרו', '#94a3b8'] } as const
+    const byStage = (['won', 'doing', 'selling', 'lost'] as const).map((b) => ({ key: b, label: bucketInfo[b][0], color: bucketInfo[b][1], value: opened.filter((k) => bucket(k.stage) === b).length })).filter((x) => x.value > 0)
 
     return { approved, decided, sent, revenue, profit, leadToQuote, quoteToApprove, pipeValue, sources, lostReasons, agents, agentRows, topCustomers, installers, service, recurring, months, outside, rev, typeSeries, typeData, spark, byStage, openedCount: opened.length, dayCost }
   }, [db, range.from, range.to])
@@ -265,7 +268,7 @@ export default function ReportsPage() {
             </div>
             <Legend line series={[{ key: 'rev', label: 'הכנסות', color: 'var(--brand)' }, { key: 'profit', label: 'רווח גולמי', color: 'var(--violet)' }]} />
           </div>
-          <AreaChart labels={r.months.map((m) => m.label)} format={money} axisFormat={compactMoney} height={250}
+          <AreaChart partialLast={r.months[r.months.length - 1].to > ymd(new Date())} labels={r.months.map((m) => m.label)} format={money} axisFormat={compactMoney} height={250}
             series={[{ key: 'rev', label: 'הכנסות', color: 'var(--brand)' }, { key: 'profit', label: 'רווח גולמי', color: 'var(--violet)' }]}
             data={[r.rev.revenue, r.rev.profit]} />
         </Card>
@@ -303,7 +306,7 @@ export default function ReportsPage() {
           )}
         </Card>
         <Card title={<div><h2>תיקים לפי סטטוס</h2><div className="tiny muted">תיקים שנפתחו בטווח</div></div>} pad>
-          {!r.byStage.length ? <Empty title="אין תיקים בתקופה" /> : <Donut parts={r.byStage.map((x) => ({ key: x.st, label: stageLabel[x.st], value: x.n, color: stageColor(x.st) }))} centerLabel="תיקים" size={156} />}
+          {!r.byStage.length ? <Empty title="אין תיקים בתקופה" /> : <Donut parts={r.byStage} centerLabel="תיקים" size={156} />}
         </Card>
       </div>
 

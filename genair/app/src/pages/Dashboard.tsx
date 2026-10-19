@@ -201,7 +201,7 @@ export default function Dashboard() {
               </div>
               <Legend line series={[{ key: 'rev', label: 'הכנסות', color: 'var(--brand)' }, { key: 'profit', label: 'רווח גולמי', color: 'var(--violet)' }]} />
             </div>
-            <AreaChart labels={months.map((m) => m.label)} format={money} axisFormat={compactMoney} height={230}
+            <AreaChart partialLast labels={months.map((m) => m.label)} format={money} axisFormat={compactMoney} height={230}
               series={[{ key: 'rev', label: 'הכנסות', color: 'var(--brand)' }, { key: 'profit', label: 'רווח גולמי', color: 'var(--violet)' }]}
               data={[trends.revenue, trends.profit]} />
           </Card>

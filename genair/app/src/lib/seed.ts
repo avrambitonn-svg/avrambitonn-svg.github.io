@@ -3,6 +3,7 @@ import { defaultConfig } from './configDefaults'
 import { applyPlatformSeed } from './seedPlatform'
 import { applyCollabSeed } from './seedCollab'
 import { applyAdminSeed } from './seedAdmin'
+import { applyHistorySeed } from './seedHistory'
 import type {
   Activity,
   Apartment,
@@ -460,5 +461,6 @@ export function seedDB(): DB {
   applyPlatformSeed(db)
   applyCollabSeed(db)
   applyAdminSeed(db)
+  applyHistorySeed(db)
   return db
 }

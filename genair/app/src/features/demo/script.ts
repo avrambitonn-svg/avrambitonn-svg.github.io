@@ -158,9 +158,9 @@ const raw: S[] = [
 
 export const steps: Step[] = raw.map((s, i) => ({ ...s, id: `s${i + 1}` }))
 
-// סיור קצר: רק מה שהכי חשוב, בערך דקה וחצי. נפתח מהתפריט או מקישור עם ?demo=short
+// סיור קצר: רק מה שהכי חשוב, פחות משתי דקות. נפתח מהתפריט או מקישור עם ?demo=short
 const short: S[] = [
-  { chapter: 'intro', route: '/', before: asUser('u-admin'), title: 'פתיחה', text: '', read: 3800, slide: { kicker: brand.name, title: 'מערכת התפעול לחברת מיזוג', sub: 'בדקה וחצי: מה שהכי חשוב לניהול העסק' } },
+  { chapter: 'intro', route: '/', before: asUser('u-admin'), title: 'פתיחה', text: '', read: 3800, slide: { kicker: brand.name, title: 'מערכת התפעול לחברת מיזוג', sub: 'בפחות משתי דקות: מה שהכי חשוב לניהול העסק' } },
   { chapter: 'dashboard', route: '/', target: '.content .grid.g4', title: 'העסק במבט אחד', text: 'הכנסות החודש, פניות חדשות, הצעות פתוחות וקריאות שירות. לכל מספר יש מגמה של שנה אחורה.', read: 3600 },
   { chapter: 'dashboard', target: card('הכנסות ורווח גולמי'), title: 'לאן העסק הולך', text: 'הכנסות ורווח גולמי לכל חודש, מול התקופה המקבילה בשנה שעברה.', read: 3400 },
   { chapter: 'dashboard', target: card('צנרת מכירות'), title: 'צנרת המכירות', text: 'כמה תיקים בכל שלב, כמה הם שווים, ומה יחס הסגירה בפועל.', read: 3200 },
