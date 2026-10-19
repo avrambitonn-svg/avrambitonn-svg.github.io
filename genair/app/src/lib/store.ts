@@ -6,6 +6,8 @@ import { nowIso, uid } from './format'
 import { seedDB } from './seed'
 import { defaultConfig } from './configDefaults'
 import { bridge, readSyncConfig, type Op } from './sync/bridge'
+import { brand } from '../brand'
+import { applyHistorySeed } from './seedHistory'
 
 // הנתונים נשמרים ב-IndexedDB של הדפדפן (מקום לתמונות). במצב הדגמה זה כל המאגר;
 // במצב משותף (sync/) זה עותק מקומי של מסד הנתונים בשרת, וכל פעולה כאן נשלחת אליו.
@@ -246,6 +248,8 @@ export const useApp = create<AppState>()(
           if (sc.anthropicKey !== undefined) settings.anthropicKey = sc.anthropicKey
           return { ...current, ...p, db, settings, currentUserId: sc.userId ?? p.currentUserId ?? current.currentUserId }
         }
+        // קישור ההדגמה (מותג ניטרלי): מי שפתח לפני שנוספה ההיסטוריה מקבל אותה עכשיו. במערכת אמיתית לא נוגעים בנתונים
+        if (brand.demo && p.db) applyHistorySeed(db)
         return { ...current, ...p, db, settings }
       },
       onRehydrateStorage: () => () => useApp.setState({ hydrated: true }),
