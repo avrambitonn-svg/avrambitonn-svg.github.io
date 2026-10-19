@@ -18,8 +18,9 @@ export interface Step {
   target?: Target
   title: string
   text: string
-  // click: לוחץ אחרי ההסבר; press: לוחץ קודם ואז מסביר; type: מקליד; select: בוחר אפשרות ברשימה (לפי טקסט)
-  action?: 'click' | 'press' | { type: string; clear?: boolean } | { select: string } | 'scroll'
+  // click: לוחץ אחרי ההסבר; press: לוחץ קודם ואז מסביר; type: מקליד; select: בוחר אפשרות ברשימה (לפי טקסט);
+  // scrub: הסמן עובר לרוחב הגרף, והטולטיפ מראה את הנתונים של כל נקודה
+  action?: 'click' | 'press' | { type: string; clear?: boolean } | { select: string } | 'scroll' | 'scrub'
   before?: () => void | Promise<void>
   after?: () => void | Promise<void>
   read?: number // זמן קריאה במילישניות (ברירת מחדל: לפי אורך הטקסט)

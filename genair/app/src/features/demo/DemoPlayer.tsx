@@ -33,6 +33,8 @@ export function DemoPlayer() {
   const [cardPos, setCardPos] = useState<CSSProperties>({})
   const [chOpen, setChOpen] = useState(false)
   const [track, setTrack] = useState<'full' | 'short'>('full')
+  const [noDim, setNoDim] = useState(false) // בלי הצללה סביב האלמנט (לסרטון): רואים את כל המסך
+  const [cursorT, setCursorT] = useState<number | null>(null) // מעבר מהיר של הסמן בזמן מעבר על גרף
   const steps = track === 'short' ? shortSteps : fullSteps
   const playingRef = useRef(playing)
   const speedRef = useRef(speed)
@@ -78,6 +80,7 @@ export function DemoPlayer() {
       const sp = Number(window.location.hash.match(/[?&]speed=([\d.]+)/)?.[1])
       // בקישור אפשר כל מהירות בין 0.5 ל-3 (למשל להקלטת סרטון); בכפתור יש 1, 1.5 ו-2
       if (sp >= 0.5 && sp <= 3) setSpeed(sp)
+      setNoDim(/[?&]dim=0/.test(window.location.hash))
       begin(m[1] === '1' || m[1] === 'full' ? undefined : m[1])
     }
     fromLink()
@@ -155,6 +158,26 @@ export function DemoPlayer() {
           setCursor({ x: window.innerWidth / 2, y: step.slide ? window.innerHeight + 90 : window.innerHeight * 0.72 })
         }
         setCardOn(true)
+        if (step.action === 'scrub' && el) {
+          // הסמן עובר לאורך הגרף משמאל לימין, ובכל נקודה הגרף מקבל אירוע של עכבר
+          const box = (el.querySelector('.viz svg') as SVGElement | null) ?? el
+          const r = box.getBoundingClientRect()
+          const y = r.top + r.height * 0.5
+          const n = 26
+          await run.sleep(300 / sp())
+          setCursorT(60)
+          for (let i = 0; i <= n; i++) {
+            const x = r.left + r.width * (0.05 + (0.9 * i) / n)
+            setCursor({ x, y })
+            const hit = document.elementsFromPoint(x, y).find((e) => !e.closest('.demo'))
+            if (hit) {
+              hit.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, clientX: x, clientY: y }))
+              hit.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: x, clientY: y }))
+            }
+            await run.sleep(1500 / n / sp())
+          }
+          setCursorT(null)
+        }
         await run.read(readTime(step) / sp())
         if (step.action === 'click' && el?.isConnected) {
           setClicks((c) => c + 1)
@@ -262,10 +285,10 @@ export function DemoPlayer() {
   const progress = ((idx + 1) / steps.length) * 100
   // כשהאלמנט המודגש בתחתית המסך, פס השליטה עובר למעלה כדי לא להסתיר אותו
   const flip = !!spot && spot.y + spot.h > window.innerHeight - 110
-  const tip = { '--x': `${cursor.x}px`, '--y': `${cursor.y}px`, '--t': `${950 / speed}ms` } as CSSProperties
+  const tip = { '--x': `${cursor.x}px`, '--y': `${cursor.y}px`, '--t': `${cursorT ?? 950 / speed}ms` } as CSSProperties
 
   return (
-    <div className={`demo ${playing ? '' : 'paused'} ${clean ? 'clean' : ''} ${flip ? 'flip' : ''}`} aria-live="polite">
+    <div className={`demo ${playing ? '' : 'paused'} ${clean ? 'clean' : ''} ${flip ? 'flip' : ''} ${noDim ? 'nodim' : ''}`} aria-live="polite">
       {/* שכבה שתופסת לחיצות בזמן ריצה (לחיצה = השהיה), כדי שלחיצה מקרית לא תשבור את ההדגמה */}
       {playing && <div className="demo-block" onClick={() => setPlaying(false)} />}
       {spot ? (

@@ -183,7 +183,8 @@ const steps_ = (...fns: (() => void)[]) => async () => {
 const short: S[] = [
   // דשבורד
   { chapter: 'dashboard', route: '/', before: asUser('u-admin'), target: '.content .grid.g4', title: 'הדשבורד', text: 'הכנסות החודש, פניות חדשות, הצעות פתוחות וקריאות שירות, עם מגמה של שנה.', read: 2600 },
-  { chapter: 'dashboard', target: card('הכנסות ורווח גולמי'), title: 'הכנסות ורווח', text: 'כל חודש, מול התקופה המקבילה אשתקד.', read: 1800 },
+  { chapter: 'dashboard', target: card('הכנסות ורווח גולמי'), action: 'scrub', title: 'הכנסות ורווח', text: 'עוברים על הגרף ורואים את ההכנסות והרווח של כל חודש, מול השנה שעברה.', read: 1200 },
+  { chapter: 'dashboard', target: card('צנרת מכירות'), title: 'צנרת מכירות', text: 'כמה תיקים בכל שלב, כמה הם שווים, ויחס הסגירה בפועל.', read: 1600 },
   { chapter: 'team', target: '.content input[aria-label="משימה חדשה"]', action: { type: 'להזמין מנוף לפרויקט נבון' }, title: 'משימה חדשה', text: 'כותבים משימה, בוחרים אחראי, משתפים ומגדירים תזכורת.', read: 1500 },
   { chapter: 'team', target: '.content .tk-add select[aria-label="אחראי"]', action: { select: 'משה כהן' }, title: 'למי', text: 'המשימה עוברת למשה מהמשרד, והוא מקבל התראה.', read: 1500, after: () => (document.querySelector('.content .tk-add button[type=submit]') as HTMLElement | null)?.click() },
 
@@ -223,16 +224,19 @@ const short: S[] = [
   { chapter: 'manage', route: '/users', target: btn('משתמש חדש'), action: 'click', title: 'עובד חדש', text: 'מוסיפים עובד וקובעים מה מותר לו לראות.', read: 1200 },
   { chapter: 'manage', target: field('שם מלא', '.modal'), action: { type: 'רון אברהם' }, title: 'שם', text: 'שם, טלפון ותפקיד.', read: 400 },
   { chapter: 'manage', target: field('תפקיד במערכת', '.modal'), action: { select: 'מתקין' }, title: 'תפקיד', text: 'מתקין רואה רק את העבודות שלו, בלי מחירים ורווחים.', read: 1600, after: steps_(setField('טלפון', '0529876543'), clickBtn('שמירה', '.modal')) },
-  { chapter: 'manage', target: { text: 'רון אברהם', sel: '.content *', closest: 'tr, .list-item, .card' }, optional: true, title: 'נוסף לצוות', text: 'רון כבר מופיע בצוות, ואפשר לשבץ אותו.', read: 1400 },
 
   // לקוחות, דוחות, הגדרות, Priority
   { chapter: 'manage', route: '/customers', target: '.content input[placeholder^="חיפוש שם"]', action: { type: 'נבון' }, title: 'לקוחות', text: 'כל לקוח עם סטטוס הסנכרון שלו ל-Priority.', read: 600 },
   { chapter: 'manage', target: { text: 'משפחת נבון', sel: '.content td, .content a, .content b', closest: 'tr' }, title: 'לקוח זמני', text: 'הלקוח שנפתח עכשיו מסומן "זמני" ו"ממתין" עד שייפתח ב-Priority.', read: 2000 },
-  { chapter: 'manage', route: '/reports', target: '.content .rp-kpis', title: 'דוחות', text: 'תיקים, תקציב, הוצאות ויתרה מול התקופה הקודמת. ייצוא ל-PDF ול-Excel.', read: 2400 },
-  { chapter: 'manage', target: card('תיקים שנפתחו לפי חודש וסוג פרויקט'), title: 'לפי חודש וסטטוס', text: 'תיקים לפי חודש וסטטוס, ובהמשך ביצועי סוכנים, לקוחות מובילים ותפוקת מתקינים.', read: 2000 },
+  { chapter: 'manage', route: '/reports', target: '.content .rp-kpis', title: 'דוחות', text: 'תיקים, תקציב, הוצאות ויתרה מול התקופה הקודמת, עם מגמה לכל מספר. ייצוא ל-PDF ול-Excel.', read: 2200 },
+  { chapter: 'manage', target: card('יעילות מכירות'), title: 'יעילות מכירות', text: 'יחס סגירה, שיעור רווח, מהירות העסקה והכנסה חוזרת מחוזים.', read: 1500 },
+  { chapter: 'manage', target: card('תיקים שנפתחו לפי חודש וסוג פרויקט'), action: 'scrub', title: 'תיקים לפי חודש', text: 'כמה תיקים נפתחו בכל חודש, ומאיזה סוג.', read: 1000 },
+  { chapter: 'manage', target: card('תיקים לפי סטטוס'), action: 'scrub', title: 'תיקים לפי סטטוס', text: 'כמה נסגרו בעסקה, כמה בביצוע וכמה לא נסגרו.', read: 1000 },
+  { chapter: 'manage', target: card('לקוחות מובילים'), title: 'לקוחות מובילים', text: 'מי מביא הכי הרבה עבודה, עם תקציב והוצאות.', read: 1300 },
+  { chapter: 'manage', target: card('מכירות לפי סוכן'), title: 'סוכנים', text: 'ערך העסקאות, מספר העסקאות ויחס הסגירה של כל סוכן.', read: 1300 },
+  { chapter: 'manage', target: card('שירות', true), action: 'scrub', title: 'שירות', text: 'קריאות שירות לפי חודש, זמן טיפול ממוצע והכנסות משירות.', read: 1000 },
   { chapter: 'manage', route: '/settings', target: tab('רשימות'), action: 'press', title: 'הגדרות', text: 'המנהל משנה לבד, בלי מתכנת.', read: 900, after: () => (document.querySelector('#ls-projectTypes .ls-head[aria-expanded="false"]') as HTMLElement | null)?.click() },
   { chapter: 'manage', target: '.content #ls-projectTypes input[aria-label="פריט חדש"]', action: { type: 'מיזוג חדר שרתים' }, title: 'סוג פרויקט חדש', text: 'מוסיפים, והוא מופיע מיד בפתיחת תיק.', read: 1200, after: () => (document.querySelector('#ls-projectTypes .ls-add button[type=submit]') as HTMLElement | null)?.click() },
-  { chapter: 'manage', target: tab('תהליכי עבודה'), action: 'press', title: 'תבניות ושלבי עבודה', text: 'לכל סוג פרויקט תבנית: שלבים, ומי מקבל איזו משימה בכל שלב.', read: 2000 },
   { chapter: 'integrations', route: '/settings/priority', target: '.content .page-head', title: 'סנכרון Priority', text: 'מה סונכרן, מה ממתין ומה נכשל, עם ניסיון חוזר.', read: 2000 },
   {
     chapter: 'end', route: '/', title: 'סיכום', text: '', read: 9000,
