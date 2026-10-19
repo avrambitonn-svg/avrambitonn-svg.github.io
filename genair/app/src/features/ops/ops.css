@@ -238,3 +238,8 @@
 .status-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .tl-msg { border-radius: 12px; padding: 8px 10px; background: var(--surface-2); font-size: 13.5px; white-space: pre-wrap; }
 .tl-msg.in { background: #e9f9ef; }
+
+/* ---------- מלאי ---------- */
+.po-line { gap: 10px; }
+.po-line input[type='checkbox'] { width: 18px; height: 18px; accent-color: var(--brand); flex: none; }
+.po-line.off .grow { opacity: 0.45; text-decoration: line-through; }

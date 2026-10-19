@@ -4,7 +4,7 @@ import { app } from '../../lib/store'
 import type {
   Address, Appointment, AppointmentType, Case, Certification, ChecklistItem, Contact, Contract, Customer, DB, ID, InstalledUnit, ServiceCall, Settings, StockEntry, User,
 } from '../../lib/types'
-import { addDays, dateLong, daysBetween, date as fmtDate, time as fmtTime, uid, ymd } from '../../lib/format'
+import { addDays, daysBetween, date as fmtDate, time as fmtTime, uid, ymd } from '../../lib/format'
 import { dayStatus, loadCalendar, type Calendar, type DayStatus } from '../../lib/integrations/hebcal'
 import { forecast, type DayForecast } from '../../lib/integrations/weather'
 import { addressText, portalUrl } from '../../lib/integrations/links'
@@ -103,12 +103,23 @@ export const addressLine = (a?: Address) => {
   return [addressText(a), extra].filter(Boolean).join(' · ')
 }
 
+// איך פונים ללקוח בהודעה: שם פרטי של איש הקשר, ולקוח פרטי בלי איש קשר לפי שמו הפרטי
+export function greetName(customer?: Pick<Customer, 'name' | 'type'>, contact?: Pick<Contact, 'name'>) {
+  if (contact) return firstName(contact.name)
+  if (!customer) return ''
+  return customer.type === 'private' && !/^משפחת /.test(customer.name) ? firstName(customer.name) : customer.name
+}
+
+// תאריך להודעה: "19 באוקטובר (יום שני)", כך שגם "ל-{date}" בתבניות נקרא טבעי
+const dayMonth = new Intl.DateTimeFormat('he-IL', { day: 'numeric', month: 'long' })
+export const msgDate = (d: Date | string) => `${dayMonth.format(typeof d === 'string' ? new Date(d) : d)} (יום ${dowLong(d)})`
+
 // משתנים לתבניות ההודעה
 export function messageVars(ctx: JobContext, ap: Pick<Appointment, 'start'>, extra: Record<string, string | number | undefined> = {}) {
   const s = app()
   return {
-    name: ctx.contact ? firstName(ctx.contact.name) : ctx.customer?.name,
-    date: dateLong(ap.start),
+    name: greetName(ctx.customer, ctx.contact),
+    date: msgDate(ap.start),
     time: fmtTime(ap.start),
     team: joinHe(ctx.team.map((u) => u.name)),
     address: addressText(ctx.address),
@@ -121,10 +132,10 @@ export function messageVars(ctx: JobContext, ap: Pick<Appointment, 'start'>, ext
 
 // הודעות שאין להן תבנית מוכנה במערכת ההודעות
 export const visitText: Partial<Record<AppointmentType, string>> = {
-  service: 'שלום {name}, נקבע ביקור טכנאי ל{date} בשעה {time} בכתובת {address}. הטכנאי: {team}. {brand}',
-  maintenance: 'שלום {name}, הטיפול התקופתי נקבע ל{date} בשעה {time}. הטכנאי: {team}. {brand}',
-  inspection: 'שלום {name}, הבדיקה השנתית למערכת שחרור העשן נקבעה ל{date} בשעה {time}. נבקש לדאוג לגישה לגג ולחדר הפיקוד. {brand}',
-  meeting: 'שלום {name}, נקבעה פגישה ל{date} בשעה {time}. {brand}',
+  service: 'שלום {name}, נקבע ביקור טכנאי ל-{date} בשעה {time} בכתובת {address}. הטכנאי: {team}. {brand}',
+  maintenance: 'שלום {name}, הטיפול התקופתי נקבע ל-{date} בשעה {time}. הטכנאי: {team}. {brand}',
+  inspection: 'שלום {name}, הבדיקה השנתית למערכת שחרור העשן נקבעה ל-{date} בשעה {time}. נבקש לדאוג לגישה לגג ולחדר הפיקוד. {brand}',
+  meeting: 'שלום {name}, נקבעה פגישה ל-{date} בשעה {time}. {brand}',
 }
 export const serviceDoneText = 'שלום {name}, הטיפול בקריאה {number} הסתיים. {resolution} אם משהו עדיין לא תקין, אפשר לענות להודעה הזו. {brand}'
 export const visitDoneText = 'שלום {name}, הטכנאי סיים את הביקור היום. תודה שבחרתם ב-{brand}!'
@@ -296,8 +307,11 @@ export function useHebcal(from: Date, to: Date): { cal: Calendar; ready: boolean
   useEffect(() => {
     let on = true
     loadCalendar(dayStart(fk), dayStart(tk)).then((c) => on && setState({ cal: c, ready: true }))
+    // רשת איטית או בלי קליטה: לא מחכים לנצח. שבת חסומה תמיד, והחגים יתעדכנו כשיגיעו
+    const t = setTimeout(() => on && setState((s) => (s.ready ? s : { ...s, ready: true })), 4000)
     return () => {
       on = false
+      clearTimeout(t)
     }
   }, [fk, tk])
   return state

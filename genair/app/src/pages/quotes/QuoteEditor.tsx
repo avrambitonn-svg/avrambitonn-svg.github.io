@@ -1,5 +1,5 @@
 // עורך הצעת מחיר: שורות מהקטלוג, הנחה, תנאים, רווחיות (להנהלה), שליחה ללקוח, גרסאות ואישור
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   AlertTriangle, ArrowDown, ArrowRight, ArrowUp, Ban, CalendarClock, Check, Copy, ExternalLink, Eye, FilePlus2, FileSignature, Lock, Mail, MapPin, MessageCircle,
@@ -39,6 +39,12 @@ export default function QuoteEditor() {
   const patch = useApp((s) => s.patch)
   const [dialog, setDialog] = useState<Dialog>(null)
   const [flashId, setFlashId] = useState<string | null>(null)
+  // מעבר בין גרסאות: מתחילים מראש העמוד
+  useEffect(() => {
+    window.scrollTo(0, 0)
+    document.scrollingElement?.scrollTo(0, 0)
+    document.body.scrollTo(0, 0)
+  }, [id])
 
   const q = quotes.find((x) => x.id === id)
   const k = q ? cases.find((x) => x.id === q.caseId) : undefined

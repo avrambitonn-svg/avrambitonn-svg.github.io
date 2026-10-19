@@ -429,7 +429,7 @@ function EventModal({ ap, onClose, onMessage }: { ap: Appointment; onClose: () =
 function ReminderModal({ ap, onClose }: { ap: Appointment; onClose: () => void }) {
   const db = useApp((s) => s.db)
   const ctx = jobContext(db, ap)
-  const text = fill(`שלום {name}, תזכורת: ${appointmentTypeLabel[ap.type]} נקבע ל{date} בשעה {time}${ctx.address ? ' בכתובת {address}' : ''}. לשינוי המועד אפשר לענות להודעה הזו. {brand}`, messageVars(ctx, ap))
+  const text = fill(`שלום {name}, תזכורת: ${appointmentTypeLabel[ap.type]} נקבע ל-{date} בשעה {time}${ctx.address ? ' בכתובת {address}' : ''}. לשינוי המועד אפשר לענות להודעה הזו. {brand}`, messageVars(ctx, ap))
   return (
     <MessageModal
       title="תזכורת ללקוח"

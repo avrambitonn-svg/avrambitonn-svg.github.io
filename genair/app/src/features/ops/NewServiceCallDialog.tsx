@@ -12,7 +12,7 @@ import { addressText } from '../../lib/integrations/links'
 import { fill, templates } from '../../lib/messaging'
 import { ScheduleDialog } from '../schedule/ScheduleDialog'
 import { MessageBox } from './MessageBox'
-import { firstName, symptomLabel, urgencyLabel, warrantyOf, type Symptom } from './ops'
+import { greetName, symptomLabel, urgencyLabel, warrantyOf, type Symptom } from './ops'
 import './ops.css'
 
 const symptoms = Object.keys(symptomLabel) as Symptom[]
@@ -111,7 +111,7 @@ export function NewServiceCallDialog({ customerId: c0, unitId: u0, onClose, onCr
   if (created) {
     const c = useApp.getState().db.customers.find((x) => x.id === created.customerId)
     const contact = db.contacts.find((x) => x.customerId === created.customerId && x.primary)
-    const text = fill(templates.service_received.text, { name: contact ? firstName(contact.name) : c?.name, number: created.number })
+    const text = fill(templates.service_received.text, { name: greetName(c, contact), number: created.number })
     return (
       <Modal
         title="הקריאה נפתחה"

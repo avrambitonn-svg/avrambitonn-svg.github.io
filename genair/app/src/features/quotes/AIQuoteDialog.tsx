@@ -61,7 +61,12 @@ export function AIQuoteDialog({ caseId, onClose, onCreated }: { caseId: ID; onCl
   const [progress, setProgress] = useState(0)
   const [local, setLocal] = useState(mode === 'demo')
   const alive = useRef(true)
-  useEffect(() => () => { alive.current = false }, [])
+  useEffect(() => {
+    alive.current = true
+    return () => {
+      alive.current = false
+    }
+  }, [])
 
   // התקדמות משוערת בזמן ההמתנה (הבקשה עצמה היא קריאה אחת)
   useEffect(() => {
@@ -183,7 +188,7 @@ export function AIQuoteDialog({ caseId, onClose, onCreated }: { caseId: ID; onCl
                           {r.notes && <div className="tiny muted">{r.notes}</div>}
                         </td>
                         <td className="num nowrap">{r.areaSqm ? `${r.areaSqm} מ״ר` : <span className="muted">חסר</span>}</td>
-                        <td className="num nowrap">{r.ceilingM ? `${r.ceilingM} מ׳` : <span className="muted">2.7 (הנחה)</span>}</td>
+                        <td className="num nowrap">{r.ceilingM ? `${r.ceilingM} מ׳` : <span className="muted">2.7 מ׳ (הנחה)</span>}</td>
                         <td>{r.sunExposure ? <span className={`ai-sun ${r.sunExposure}`}><Sun size={14} /> {sunLabel[r.sunExposure]}</span> : <span className="muted">לא ידוע</span>}</td>
                         <td className="num">{r.floor ?? '—'}</td>
                       </tr>
