@@ -129,7 +129,15 @@ function findRoute(method, path) {
 async function checkIntegration(req, cfg) {
   const given = req.headers['x-app-token'];
   if (cfg.appToken && typeof given === 'string' && safeEqual(given, cfg.appToken)) return;
-  const store = cfg.db.mode === 'off' ? null : await getStore(cfg).catch(() => null);
+  let store = null;
+  if (cfg.db.mode !== 'off') {
+    try {
+      store = await getStore(cfg);
+    } catch {
+      // never fall back to "open" because the database could not be read
+      throw new HttpError(503, 'db_unavailable', 'מסד הנתונים לא זמין כרגע');
+    }
+  }
   if (store) {
     const s = auth.readSession(req, store, cfg);
     if (s && !s.error) return;

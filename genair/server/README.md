@@ -1,6 +1,8 @@
-# Genair Ops - שרת אינטגרציות
+# Genair Ops - שרת אינטגרציות ומסד נתונים משותף
 
-שכבה דקה בין האפליקציה (genair/app, רצה בדפדפן) לבין המערכות החיצוניות. כל הסיסמאות והמפתחות נשמרים רק כאן, והדפדפן לא רואה אותם.
+שכבה דקה בין האפליקציה (genair/app, רצה בדפדפן) לבין המערכות החיצוניות, ומסד הנתונים המשותף של הצוות. כל הסיסמאות והמפתחות נשמרים רק כאן, והדפדפן לא רואה אותם.
+
+- **מסד נתונים משותף** - כל המשתמשים עובדים על אותם נתונים: התחברות עם טלפון או אימייל וסיסמה, הרשאות לפי תפקיד שנאכפות בשרת, שינויים בזמן אמת (SSE, ואם אין — long-poll), התראות בין משתמשים, קבצים, אזור אישי ללקוח וטופס פנייה ציבורי. פירוט בהמשך.
 
 - **פריוריטי (ERP)** - קריאת לקוחות, פריטים ומחירונים; יצירת לקוח, הצעת מחיר והזמנה (חסום כברירת מחדל).
 - **AI (Anthropic)** - מעביר את בקשת ה-Messages של האפליקציה ומוסיף את מפתח ה-API.
@@ -17,6 +19,8 @@ cp .env.example .env      # ולמלא את מה שצריך; בלי כלום ז�
 npm start                 # http://localhost:8787
 npm run dev               # אותו דבר עם טעינה מחדש בשינוי קבצים
 ```
+
+המסד המשותף פועל כברירת מחדל ונשמר ב-`./data` (לא נכנס לגיט). עד שמקימים אותו מהאפליקציה הוא ריק, והשרת מתנהג כשרת אינטגרציות רגיל. `DB_MODE=off` מכבה אותו.
 
 בדיקה מהירה:
 
@@ -44,8 +48,13 @@ curl 'localhost:8787/api/priority/customers?top=3&search=כהן'
 | `POST /api/whatsapp/send` | `{ to, text }` או `{ to, template:{ name, language:"he", params:[] } }` ← `{ id }` |
 | `GET/POST /api/whatsapp/webhook` | אימות ו-Webhook של Meta (לא דורש `x-app-token`) |
 | `GET /api/whatsapp/inbox?since=<iso>` | `{ items:[{ id, from, text, at, type, status?, name? }], cursor }` |
-| `POST /api/google/calendar/events` | `{ summary, description?, location?, start, end, allDay?, calendarId? }` ← `{ id, htmlLink }` |
-| `POST /api/google/drive/folders` | `{ name, parentId? }` ← `{ id, webViewLink }` |
+| `POST /api/google/calendar/events` | `{ summary, description?, location?, start, end, allDay?, calendarId? }` ← `{ id, htmlLink }`. `calendarId` = היומן האישי של העובד |
+| `PATCH /api/google/calendar/events/:id` | אותו גוף; מעדכן זמן, כותרת ופרטים ← `{ id, htmlLink }` |
+| `DELETE /api/google/calendar/events/:id?calendarId=` | ← `{ ok, gone }` (אירוע שכבר נמחק נחשב הצלחה) |
+| `POST /api/google/drive/folders` | `{ name, parentId?, subfolders?: [{ key, name }] }` ← `{ id, webViewLink, subfolders?: { key: id } }` |
+| `POST /api/google/drive/files?folderId=` | גוף גולמי (הקובץ), שם ב-`x-file-name` (URI-encoded) ← `{ id, webViewLink }` |
+| `POST /api/google/drive/files/:id/move` | `{ from?, to }` ← `{ id, webViewLink }` |
+| `POST /api/google/drive/files/:id/trash` | לפח של Drive ← `{ ok, gone }` |
 
 שגיאות תמיד בפורמט `{ "error": { "code": "...", "message": "<הודעה בעברית>", "details"?: ... } }`.
 קודים שימושיים: `validation_error` (400, ב-`details.fields` רשימת השדות), `unauthorized` (401), `priority_write_disabled` (403),
@@ -58,15 +67,89 @@ curl 'localhost:8787/api/priority/customers?top=3&search=כהן'
 - מגבלת קצב לפריוריטי: עד 90 קריאות לדקה לכל מופע שרת, וניסיון חוזר על 429/503 (עד 3 ניסיונות, לפי `Retry-After`). Timeout של 20 שניות.
 - גוף בקשה עד 25MB (413 מעל זה). **ב-Vercel המגבלה של הפלטפורמה היא 4.5MB**, ולכן כדאי להקטין תמונות בדפדפן לפני שליחה ל-AI.
 
+## מסד נתונים משותף והתחברות
+
+כל ישות (לקוח, תיק, הצעה, מועד...) נשמרת לפי אוסף ומזהה, עם רצף שינויים עולה (`seq`), מחיקה רכה ומיזוג לפי שדה: כל שדה זוכר מתי נכתב, והכתיבה המאוחרת (לפי `at` של הפעולה) מנצחת. כך שני משתמשים שמשנים שדות שונים באותו תיק לא דורסים זה את זה. ההגדרות (`config`) וההגדרות הארגוניות (`settings`) הן מסמכים בודדים עם המזהה `org`.
+
+האחסון: קובץ `db.json` בתיקיית `DATA_DIR`, נטען לזיכרון ונכתב כקובץ זמני + `rename` (לא נשאר קובץ חצי כתוב), כמה מאות מילישניות אחרי השינוי. פעם ביום נשמר עותק ב-`DATA_DIR/backups` (14 אחרונים), והקבצים שהועלו ב-`DATA_DIR/files`. האחסון עובר דרך ממשק קטן (`load` / `save`, ב-`src/db/adapters.js`), כך שאפשר להחליף אותו ב-Postgres בלי לגעת בשאר.
+
+### הקמה
+
+1. להריץ את השרת על אחסון קבוע (ראו "פריסה") עם `AUTH_SECRET` ו-`BOOTSTRAP_TOKEN`.
+2. באפליקציה: הגדרות ← חיבורים ← "מסד נתונים משותף" ← כתובת השרת ← בדיקה.
+3. השרת ריק, ולכן מופיעה "הקמה ראשונה": בוחרים את מנהל המערכת, סיסמה (וקוד ההקמה). הנתונים שבדפדפן (לקוחות, תיקים, משתמשים, הגדרות, קבצים) עולים לשרת. אפשר להקים פעם אחת בלבד. קישורי אזור אישי קצרים מנתוני ההדגמה מוחלפים בקישורים אקראיים.
+4. בעמוד המשתמשים המנהל קובע לכל עובד סיסמה (או סיסמה זמנית, שהעובד מחליף בכניסה הראשונה).
+5. בכל מכשיר אחר: אותו מסך ← "מעבר למסד המשותף" ← כניסה. בבנייה עם `VITE_SERVER_URL` האפליקציה נפתחת ישר במסך הכניסה.
+
+### נקודות קצה
+
+כולן דורשות `Authorization: Bearer <token>` חוץ מהכניסה, ההקמה, האזור האישי וטופס הפנייה.
+
+| שיטה ונתיב | מה עושה |
+|---|---|
+| `POST /api/auth/login` | `{ login: טלפון או אימייל, password }` ← `{ token, expiresAt, user, mustChange }`. עד 8 ניסיונות שגויים ל-15 דקות לכל משתמש, 30 לכל כתובת IP |
+| `POST /api/auth/logout` | סוגר את החיבור הזה (הטוקן נפסל) |
+| `GET /api/auth/me` | המשתמש המחובר |
+| `POST /api/auth/password` | `{ current, next }` - החלפת סיסמה; שאר המכשירים מתנתקים, ומוחזר טוקן חדש |
+| `GET /api/auth/users` | ניהול ומשרד: למי יש סיסמה ומתי נכנס לאחרונה (בלי hash) |
+| `POST /api/auth/users/:id/password` | מנהל מערכת בלבד: `{ password? }`. בלי סיסמה מוחזרת `temporaryPassword` חד-פעמית |
+| `POST /api/auth/bootstrap` | רק כשהמסד ריק: `{ snapshot: { collections, config, settings, counters }, adminUserId, password, bootstrapToken? }` |
+| `GET /api/db/snapshot` | כל האוספים, `config`, `settings`, מונים ו-`seq` נוכחי |
+| `GET /api/db/changes?since=<seq>&wait=25` | שינויים אחרי `seq` (ישן ← חדש). בלי שינויים מחכה עד `wait` שניות. `reset: true` = לטעון snapshot |
+| `GET /api/db/events?since=<seq>` | SSE: `hello`, `changes` (id = seq), `reset`, `signout`; פעימה כל 20 שניות |
+| `POST /api/db/ops` | `{ ops: [{ op: upsert\|patch\|remove, collection, id, data?, unset?, at, ifUnset? }], clientId }` ← `{ seq, results: [{ status, seq }] }`. סטטוס: `ok`, `partial` (חלק מהשדות כבר נכתבו מאוחר יותר), `stale`, `missing`, `conflict` (ל-`ifUnset`), `denied` |
+| `POST /api/db/fetch` | `{ items: [{ c, id }] }` - המצב הנוכחי בשרת (אחרי `denied`/`stale`) |
+| `POST /api/db/counters/reserve` | `{ key, count }` ← `{ from, to }` - בלוק מספרים שמור למכשיר (מספרי תיקים, הצעות, קריאות) |
+| `POST /api/files` | גוף גולמי; `content-type`, `x-file-name`, ואופציונלי `x-case-id`, `x-folder`, `x-drive-folder-id` (גם העתק ל-Drive) ← `{ fileId, name, mime, size, driveFileId?, webViewLink? }` |
+| `GET /api/files/:id[?download=1]` | הקובץ, למשתמש מחובר בלבד. HTML ו-SVG תמיד כהורדה, עם CSP sandbox |
+
+**הרשאות (נאכפות בשרת לכל פעולה):** כל משתמש מחובר קורא הכול. ניהול ומשרד כותבים הכול. סוכן ומהנדס - הכול חוץ ממשתמשים, `config` ו-`settings`. מתקין - מועדים, קריאות שירות, מלאי, מסמכים, הודעות, צ'אט, משימות, התראות, חופשות, יחידות ויומן פעילות, ובתיק רק את השדות שסיום עבודה מעדכן (`stage`, `updatedAt`, `closedAt`, `flow`, `installerIds`), וחוזה רק כ"מוצע". התראה אפשר ליצור לכל אחד, אבל רק הנמען מסמן או מוחק אותה. בקשת חופשה - רק של עצמי, ואת האישור נותנים ניהול ומשרד. רק מנהל מערכת יוצר או משנה מנהל מערכת, ואי אפשר להשבית את המנהל הפעיל האחרון. משתמש שהושבת מתנתק מיד.
+
+**סיסמאות:** scrypt (`node:crypto`), נשמרות בחלק נפרד של `db.json` ולא באוסף `users`, ולא נשלחות לאף לקוח. שדות כמו `password` שנשלחים בטעות עם משתמש נמחקים. הטוקן הוא JWT (HS256) עם מזהה חיבור; תוקף 12 שעות שמתחדש בכל שימוש (כותרת `x-auth-token`).
+
+### אזור אישי ללקוח וטופס פנייה (בלי התחברות)
+
+| שיטה ונתיב | מה עושה |
+|---|---|
+| `GET /api/portal/:token` | רק התיק של הקישור: פרטי התיק, שם פרטי, הכתובת, ההצעה האחרונה שנשלחה (בלי עלויות והערות AI), מועדים עם השם הפרטי של הצוות, מסמכים גלויים ללקוח, יחידות, הודעות הצ'אט |
+| `POST /api/portal/:token/view` | כניסה: "נצפה לאחרונה", הצעה שנשלחה ← "נצפתה", התראה לסוכן |
+| `POST /api/portal/:token/approve` | `{ quoteId, signature: { name, dataUrl }, deposit: { method } }` - השרת מחשב את המקדמה, מעדכן הצעה ותיק, דוחה הצעות פתוחות אחרות, רושם תשלום ושולח התראות. ההצעה מסומנת `approvedVia: 'portal'`, ומכשיר של המשרד משלים פעם אחת עמלה, פלואו ו-Priority |
+| `POST /api/portal/:token/reject` | `{ quoteId, reason? }` |
+| `POST /api/portal/:token/service` | `{ unitId?, symptom?, errorCode?, text }` ← `{ number }` (מספר מהמונה המשותף) |
+| `POST /api/portal/:token/upload` | תמונה או PDF עד 10MB, נכנס לתיקיית "לקוח" של התיק |
+| `POST /api/portal/:token/messages` | `{ body }` - הודעה מהלקוח (`Message` עם `channel: 'portal'`, `direction: 'in'`). תשובות הצוות: `direction: 'out'` |
+| `GET /api/portal/:token/files/:docId` | קובץ שגלוי ללקוח, רק מהתיק של הקישור |
+| `POST /api/public/leads` | `{ name, phone, city?, type, text?, photos?, source?, website }` (`website` = מלכודת לבוטים) ← לקוח, איש קשר ותיק; `{ number, portalToken }`. עד 5 פניות ל-10 דקות לכל IP |
+
 ## אבטחה
 
 - `ALLOWED_ORIGINS` - רק הדומיין של האפליקציה. בקשה מדפדפן מ-Origin אחר נחסמת (403).
-- `APP_TOKEN` - סוד משותף שהאפליקציה שולחת בכותרת `x-app-token`. זו לא הזדהות משתמשים (הטוקן נמצא בקוד של האפליקציה), רק מחסום נגד שימוש מזדמן בשרת. אם רוצים יותר, צריך להוסיף התחברות משתמשים.
+- `APP_TOKEN` - סוד משותף שהאפליקציה שולחת בכותרת `x-app-token`, לנתיבי האינטגרציות. במסד המשותף משתמש מחובר נכנס גם בלעדיו, ואחרי ההקמה הנתיבים האלה כבר לא פתוחים בלי אחד מהשניים.
+- `AUTH_SECRET` - חותם את טוקני ההתחברות. להגדיר בייצור (אחרת נוצר סוד ונשמר ב-`db.json`). החלפה שלו מנתקת את כולם.
+- `BOOTSTRAP_TOKEN` - בלעדיו, מי שמגיע ראשון לשרת ריק יכול להקים אותו.
+- `TRUST_PROXY=true` מאחורי פרוקסי, כדי שמגבלות הקצב יהיו לפי כתובת הלקוח ולא של הפרוקסי.
 - ה-AI מוגבל לרשימת מודלים (`AI_ALLOWED_MODELS`) ולרשימת ערכי `anthropic-beta`.
 - `WHATSAPP_APP_SECRET` - בלעדיו כל אחד יכול לשלוח ל-Webhook הודעות מזויפות. בייצור חובה.
 - השרת לא רושם בלוג גופי בקשות, query strings או מפתחות.
 
-## פריסה ל-Vercel
+## פריסה
+
+**המסד המשותף צריך שרת שרץ כל הזמן עם דיסק קבוע** (החיבורים החיים והנתונים בזיכרון). כל אחד מאלה מתאים:
+
+- **Docker** (בכל VPS): `docker build -t genair-server genair/server` ואז `docker run -d -p 8787:8787 -v genair-data:/data --env-file .env genair-server`. ה-`Dockerfile` מבוסס `node:22-alpine`, בלי `npm install`.
+- **Render**: Web Service מה-repo, Root Directory `genair/server`, Runtime Docker (או Node עם `npm start`), Disk שמחובר ל-`/data` ו-`DATA_DIR=/data`, `TRUST_PROXY=true`.
+- **Railway / Fly.io**: אותו Dockerfile, Volume שמחובר ל-`/data`, ומופע אחד בלבד (המסד בזיכרון של התהליך; לא להריץ כמה מופעים).
+- **שרת משלכם**: `node src/server.js` מאחורי nginx (עם `proxy_buffering off` לנתיב `/api/db/events`) ו-systemd.
+
+בכל המקרים: `ALLOWED_ORIGINS` לכתובת האפליקציה, `AUTH_SECRET`, `BOOTSTRAP_TOKEN`, ובאפליקציה לבנות עם `VITE_SERVER_URL=https://<השרת>` כדי שקישורי האזור האישי וטופס הפנייה יעבדו אצל לקוחות. כשהתהליך נעצר (SIGTERM) הוא כותב את הנתונים לפני היציאה. גיבוי: להעתיק את `DATA_DIR` (או את `backups/`).
+
+**להמשך (Postgres):** מימוש של `load`/`save` ב-`src/db/adapters.js` שכותב רק את הישויות ששונו, ו-LISTEN/NOTIFY במקום אירוע בתוך התהליך, יאפשרו כמה מופעי שרת.
+
+### Vercel (אינטגרציות בלבד)
+
+ב-Vercel אין תהליך שרץ כל הזמן ואין דיסק קבוע, ולכן שם `DB_MODE` כבוי כברירת מחדל: השרת נותן Priority, AI, וואטסאפ ו-Google, והאפליקציה עובדת במצב הדגמה (נתונים בכל דפדפן). אפשר לשלב: שרת אינטגרציות ב-Vercel ושרת מסד נתונים נפרד, או הכול בשרת אחד עם דיסק.
+
+### פריסה ל-Vercel
 
 1. ב-Vercel: New Project ← לבחור את ה-repo ← **Root Directory: `genair/server`**, Framework Preset: Other. אין Build Command.
 2. Environment Variables: כל מה שצריך מ-`.env.example`, ובנוסף:
@@ -98,6 +181,8 @@ curl 'localhost:8787/api/priority/customers?top=3&search=כהן'
 - פרויקט ב-Google Cloud (בחשבון של Genair) עם **Google Calendar API** ו-**Google Drive API** מופעלים.
 - **חשבון שירות** + מפתח JSON ← `GOOGLE_SERVICE_ACCOUNT_JSON` (התוכן או base64 שלו).
 - לשתף את **היומן** עם כתובת המייל של חשבון השירות בהרשאה "ביצוע שינויים באירועים" ← `GOOGLE_CALENDAR_ID`.
+- **יומן אישי לכל עובד**: בעמוד המשתמשים ממלאים "יומן Google אישי" (בדרך כלל האימייל שלו), וכל עובד משתף את היומן שלו עם חשבון השירות באותה הרשאה. מי שאין לו יומן אישי מקבל את האירוע ביומן של החברה. שינוי מועד או צוות מעדכן את האירועים, וביטול מוחק אותם.
+- **תיקיות התיק ב-Drive**: לכל תיק נפתחת תיקייה עם תיקיות המשנה מההגדרות (משרד, לקוח, מתקין, הנדסה, ספקים, ארכיון), וכל קובץ עולה לתיקייה שלו.
 - לשתף **תיקייה ב-Drive** עם חשבון השירות כעורך (או להוסיף אותו ל-Shared Drive כ-Content manager) ← `GOOGLE_DRIVE_PARENT_ID`. לחשבון שירות אין נפח אחסון משלו, ולכן תיקיית אב היא חובה.
 - את כל זה עושה מי שמנהל את חשבון Google של Genair. אם Drive מחזיר `appNotAuthorizedToFile`, להגדיר `GOOGLE_DRIVE_SCOPE=https://www.googleapis.com/auth/drive`.
 
@@ -107,7 +192,7 @@ curl 'localhost:8787/api/priority/customers?top=3&search=כהן'
 ## בדיקות
 
 ```bash
-npm test            # בדיקות יחידה, בלי רשת
+npm test            # בדיקות יחידה, בלי רשת (כולל המסד, התחברות, הרשאות, סנכרון, SSE, מונים, קבצים, אזור אישי וטופס פנייה)
 npm run test:live   # קריאה בלבד מול דמו פריוריטי (דורש אינטרנט)
 ```
 

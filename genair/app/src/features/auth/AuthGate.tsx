@@ -23,8 +23,22 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (bridge.mode !== 'server') return <>{children}</>
   if (!token) return <LoginScreen />
   if (mustChange) return <NewPassword />
-  if (!ready || !hasMe) return <Loading />
+  if (!ready) return <Loading />
+  if (!hasMe) return <NoUser />
   return <>{children}</>
+}
+
+// המשתמש נמחק או הושבת בזמן שהיה מחובר
+function NoUser() {
+  return (
+    <Shell foot={<ServerFoot />}>
+      <div className="auth-card" style={{ textAlign: 'center' }}>
+        <h1>המשתמש לא פעיל</h1>
+        <div className="sub">פנו למנהל המערכת כדי לקבל גישה מחדש.</div>
+        <button className="btn primary mt16" onClick={() => void signOut()}>יציאה</button>
+      </div>
+    </Shell>
+  )
 }
 
 function Shell({ children, foot }: { children: ReactNode; foot?: ReactNode }) {
@@ -65,10 +79,13 @@ function LoginScreen() {
     setBusy(true)
     setErr('')
     try {
+      tempPassword = pw // לפני הכניסה: מסך הסיסמה החדשה עולה מיד כשהשרת מבקש
       const r = await login(serverUrl, id.trim(), pw)
+      if (!r.mustChange) tempPassword = ''
       useApp.setState({ currentUserId: r.user.id })
       nav(r.user.role === 'installer' ? '/field' : '/', { replace: true })
     } catch (e2) {
+      tempPassword = ''
       setErr((e2 as Error).message)
     } finally {
       setBusy(false)
@@ -99,10 +116,14 @@ function LoginScreen() {
   )
 }
 
+// הסיסמה הזמנית שהוקלדה הרגע (רק בזיכרון), כדי לא לבקש אותה שוב
+let tempPassword = ''
+
 function NewPassword() {
   const [pw, setPw] = useState('')
   const [pw2, setPw2] = useState('')
-  const [current, setCurrent] = useState('')
+  const [current, setCurrent] = useState(tempPassword)
+  const [known] = useState(Boolean(tempPassword))
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   async function submit(e: FormEvent) {
@@ -113,6 +134,7 @@ function NewPassword() {
     setErr('')
     try {
       await changePassword(current, pw)
+      tempPassword = ''
     } catch (e2) {
       setErr((e2 as Error).message)
     } finally {
@@ -125,7 +147,7 @@ function NewPassword() {
         <h1>סיסמה חדשה</h1>
         <div className="sub">נכנסתם עם סיסמה זמנית. בחרו סיסמה משלכם כדי להמשיך.</div>
         <form onSubmit={submit} noValidate>
-          <Field label="הסיסמה הזמנית"><input className="input ltr" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} /></Field>
+          {!known && <Field label="הסיסמה הזמנית"><input className="input ltr" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} /></Field>}
           <Field label="סיסמה חדשה" hint="לפחות 8 תווים"><input className="input ltr" type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} /></Field>
           <Field label="שוב, לאימות"><input className="input ltr" type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} /></Field>
           {err && <Callout tone="danger">{err}</Callout>}
