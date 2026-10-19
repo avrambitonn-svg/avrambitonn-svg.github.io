@@ -1,9 +1,11 @@
-// האזור האישי של הלקוח: איפה הפרויקט עומד, ההצעה עם חתימה ומקדמה, מועדים, מסמכים, אחריות וקריאת שירות
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useParams } from 'react-router-dom'
+// האזור האישי של הלקוח: איפה הפרויקט עומד, ההצעה עם חתימה ומקדמה, מועדים, מסמכים, אחריות, קריאת שירות וצ'אט עם המשרד.
+// שני מקורות נתונים לאותו מסך: במצב הדגמה — המאגר בדפדפן; במסד המשותף — השרת (/api/portal/:token, בלי התחברות,
+// רק הנתונים של התיק הזה). הלקוח לא שולח ישויות לשרת: רק פעולות (אישור, דחייה, קריאה, קובץ, הודעה).
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useParams, useSearchParams } from 'react-router-dom'
 import {
   CalendarDays, CalendarPlus, Check, CheckCircle2, ClipboardCheck, Clock, CreditCard, FileSignature, FileText, Landmark, Mail, MapPin, MessageCircle, Phone,
-  Printer, ShieldCheck, Smartphone, Snowflake, Sparkles, Wrench, Hammer, Ruler, Search, Hourglass, XCircle,
+  Printer, ShieldCheck, Smartphone, Snowflake, Sparkles, Wrench, Hammer, Ruler, Search, Hourglass, XCircle, Paperclip, Send, RefreshCw,
 } from 'lucide-react'
 import { brand } from '../../brand'
 import { app, useDB, useSettings } from '../../lib/store'
@@ -12,10 +14,12 @@ import { lineTotal, totals } from '../../lib/quote'
 import { appointmentTypeLabel } from '../../lib/labels'
 import { date, dateLong, dateTime, daysBetween, money, nowIso, pct, sameDay, time, uid, ymd } from '../../lib/format'
 import { addressText, googleCalendarLink, telLink, whatsappLink } from '../../lib/integrations/links'
-import type { Appointment, Case, Customer, InstalledUnit, Quote, ServiceCall, User } from '../../lib/types'
+import type { Address, Appointment, CatalogItem, Case, Doc, InstalledUnit, Message, Quote, ServiceCall, Signature } from '../../lib/types'
 import { Wordmark } from '../../components/Layout'
 import { Callout, Field, Modal, SignaturePad, toast } from '../../components/ui'
 import { appUrl, caseContact, customerQuote, firstName, viaMethod, greetName, groupByRoom, isQuoteExpired } from '../../features/quotes/util'
+import { publicServerUrl } from '../../lib/sync/bridge'
+import { docBlob, saveLocalBlob, sizeLabel } from '../../lib/files'
 import './portal.css'
 
 // כל כניסה נרשמת פעם אחת לכל ביקור בדף
@@ -54,23 +58,50 @@ function openWhatsApp(text: string) {
   window.open(whatsappLink(brand.whatsapp, text), '_blank', 'noopener')
 }
 
-export default function Portal() {
-  const { token } = useParams()
-  const cases = useDB((d) => d.cases)
-  const customers = useDB((d) => d.customers)
-  const contacts = useDB((d) => d.contacts)
-  const quotes = useDB((d) => d.quotes)
-  const appointments = useDB((d) => d.appointments)
-  const users = useDB((d) => d.users)
-  const docs = useDB((d) => d.docs)
-  const units = useDB((d) => d.units)
-  const catalog = useDB((d) => d.catalog)
+const docVisible = (d: Doc) => d.customerVisible ?? (d.folder === 'customer' || (d.folder === 'installer' && /מסירה|אחריות|הוראות/.test(d.name)))
+const UPLOAD_MAX = 10 * 1024 * 1024
 
-  const k = cases.find((c) => c.portal.token === token)
-  const ok = !!k && k.portal.enabled
-  const customer = k ? customers.find((c) => c.id === k.customerId) : undefined
-  const contact = caseContact(k, contacts)
-  const quote = useMemo(() => (k ? customerQuote(quotes, k.id) : undefined), [quotes, k])
+// ---------- מודל משותף לשני מקורות הנתונים ----------
+
+type PortalCase = Pick<Case, 'id' | 'number' | 'title' | 'stage' | 'installWindow'>
+interface PortalAppt { id: string; type: Appointment['type']; start: string; end: string; allDay?: boolean; status: Appointment['status']; team: string[] }
+interface PortalDoc { id: string; name: string; size?: number; uploadedAt: string; fromCustomer?: boolean; href?: string; doc?: Doc }
+interface PortalMsg { id: string; direction: 'in' | 'out'; body: string; at: string; by?: string }
+interface ServiceInput { unitId?: string; symptom?: ServiceCall['symptom']; errorCode?: string; text: string }
+
+interface Model {
+  k: PortalCase
+  customerName: string
+  signerName: string
+  hello: string
+  addressLabel: string
+  agent?: { name: string; phone?: string }
+  quote?: Quote
+  depositPct: number
+  upcoming: PortalAppt[]
+  units: InstalledUnit[]
+  docs: PortalDoc[]
+  messages: PortalMsg[]
+  catalog: CatalogItem[]
+}
+
+interface Actions {
+  remote: boolean
+  view: () => void
+  approve: (q: Quote, sig: { name: string; dataUrl: string }, method: Method, deposit: number) => Promise<Quote['deposit']>
+  reject: (q: Quote, reason: string) => Promise<void>
+  service: (p: ServiceInput) => Promise<{ number: string; underWarranty?: boolean | null }>
+  upload: (file: File) => Promise<void>
+  send: (body: string) => Promise<void>
+  openDoc: (d: PortalDoc) => Promise<void>
+  printQuote: (q: Quote) => void
+  logAsk?: (q: Quote) => void
+}
+
+export default function Portal() {
+  const { token = '' } = useParams()
+  const [params] = useSearchParams()
+  const server = publicServerUrl(params.get('server'))
 
   useEffect(() => {
     const prev = document.title
@@ -80,46 +111,294 @@ export default function Portal() {
     }
   }, [])
 
-  // רישום כניסה ועדכון "נצפה לאחרונה"
-  useEffect(() => {
-    if (!k || !k.portal.enabled || seen.has(k.portal.token)) return
-    seen.add(k.portal.token)
-    const s = app()
-    s.patch('cases', k.id, { portal: { ...k.portal, lastViewedAt: nowIso() } })
-    s.log({ kind: 'portal', caseId: k.id, customerId: k.customerId, text: 'הלקוח נכנס לאזור האישי' })
-  }, [k])
+  return server ? <RemotePortal token={token} server={server} /> : <LocalPortal token={token} />
+}
 
-  // צפייה ראשונה בהצעה
-  useEffect(() => {
-    if (ok && quote?.status === 'sent') markQuoteViewed(quote.id)
-  }, [ok, quote?.id, quote?.status]) // eslint-disable-line react-hooks/exhaustive-deps
+// ---------- מצב הדגמה: מהמאגר בדפדפן ----------
 
-  const upcoming = useMemo(() => {
-    if (!k) return []
+function LocalPortal({ token }: { token: string }) {
+  const cases = useDB((d) => d.cases)
+  const customers = useDB((d) => d.customers)
+  const contacts = useDB((d) => d.contacts)
+  const quotes = useDB((d) => d.quotes)
+  const appointments = useDB((d) => d.appointments)
+  const users = useDB((d) => d.users)
+  const docs = useDB((d) => d.docs)
+  const units = useDB((d) => d.units)
+  const catalog = useDB((d) => d.catalog)
+  const messages = useDB((d) => d.messages)
+  const contracts = useDB((d) => d.contracts)
+  const settings = useSettings()
+
+  const k = cases.find((c) => c.portal.token === token)
+  const ok = !!k && k.portal.enabled
+  const customer = k ? customers.find((c) => c.id === k.customerId) : undefined
+
+  const model = useMemo<Model | null>(() => {
+    if (!k || !ok || !customer) return null
+    const contact = caseContact(k, contacts)
+    const address = customer.addresses.find((a) => a.id === k.addressId) ?? customer.addresses[0]
+    const agent = users.find((u) => u.id === k.agentId)
     const today = ymd()
-    return appointments
-      .filter((a) => (a.caseId === k.id || (!a.caseId && a.customerId === k.customerId)) && a.status !== 'cancelled' && a.status !== 'done' && ymd(a.end) >= today)
-      .sort((a, b) => a.start.localeCompare(b.start))
-  }, [appointments, k])
+    return {
+      k,
+      customerName: customer.name,
+      signerName: contact?.name ?? customer.name,
+      hello: greetName(contact, customer),
+      addressLabel: addressText(address),
+      agent: agent && { name: agent.name, phone: agent.phone },
+      quote: customerQuote(quotes, k.id),
+      depositPct: settings.depositPct,
+      upcoming: appointments
+        .filter((a) => (a.caseId === k.id || (!a.caseId && a.customerId === k.customerId)) && a.status !== 'cancelled' && a.status !== 'done' && ymd(a.end) >= today)
+        .sort((a, b) => a.start.localeCompare(b.start))
+        .map((a) => ({ ...a, team: a.userIds.map((id) => users.find((u) => u.id === id)).filter(Boolean).map((u) => firstName(u!.name)) })),
+      units: units.filter((u) => u.customerId === k.customerId && (u.caseId === k.id || u.addressId === k.addressId)),
+      docs: docs
+        .filter((d) => d.caseId === k.id && docVisible(d))
+        .map((d) => ({ id: d.id, name: d.name, size: d.size, uploadedAt: d.uploadedAt, fromCustomer: d.source === 'portal', href: d.url ?? d.dataUrl, doc: d })),
+      messages: messages
+        .filter((m) => m.caseId === k.id && m.channel === 'portal')
+        .sort((a, b) => a.at.localeCompare(b.at))
+        .map((m) => ({ id: m.id, direction: m.direction, body: m.body, at: m.at, by: m.direction === 'out' ? firstName(users.find((u) => u.id === m.by)?.name) : undefined })),
+      catalog,
+    }
+  }, [k, ok, customer, contacts, users, quotes, settings.depositPct, appointments, units, docs, messages, catalog])
 
-  const myDocs = useMemo(
-    () => (k ? docs.filter((d) => d.caseId === k.id && (d.folder === 'customer' || (d.folder === 'installer' && /מסירה|אחריות|הוראות/.test(d.name)))) : []),
-    [docs, k],
-  )
-  const myUnits = useMemo(() => (k ? units.filter((u) => u.customerId === k.customerId && (u.caseId === k.id || u.addressId === k.addressId)) : []), [units, k])
+  const staff = useCallback(() => {
+    const s = app()
+    return k?.agentId ? [k.agentId] : s.db.users.filter((u) => u.role === 'office' || u.role === 'admin').map((u) => u.id)
+  }, [k?.agentId])
 
-  if (!k || !ok || !customer) return <NotFound />
+  const actions = useMemo<Actions>(() => ({
+    remote: false,
+    view: () => {
+      if (!k || seen.has(k.portal.token)) return
+      seen.add(k.portal.token)
+      const s = app()
+      s.patch('cases', k.id, { portal: { ...k.portal, lastViewedAt: nowIso() } })
+      s.log({ kind: 'portal', caseId: k.id, customerId: k.customerId, text: 'הלקוח נכנס לאזור האישי' })
+      const q = customerQuote(s.db.quotes, k.id)
+      if (q?.status === 'sent') markQuoteViewed(q.id)
+    },
+    approve: async (q, sig, method, deposit) => {
+      // הדגמה: אין חיוב אמיתי. בייצור כאן נפתח דף תשלום מאובטח של חברת הסליקה.
+      await new Promise((r) => setTimeout(r, 900))
+      const at = nowIso()
+      const dep: Quote['deposit'] = { amount: deposit, method, paidAt: method === 'transfer' ? undefined : at }
+      approveQuote(q.id, { name: sig.name, dataUrl: sig.dataUrl, at } as Signature, dep)
+      return dep
+    },
+    reject: async (q, reason) => {
+      const s = app()
+      rejectQuote(q.id, `מהאזור האישי${reason ? `: ${reason}` : ''}`)
+      if (k?.agentId) s.notify(k.agentId, `הלקוח דחה את ההצעה ${q.number}${reason ? `: ${reason}` : ''}`, `/cases/${k.id}`)
+    },
+    service: async (p) => {
+      const s = app()
+      if (!k || !customer) throw new Error('התיק לא נמצא')
+      const unit = s.db.units.find((u) => u.id === p.unitId)
+      const contract = contracts.find((c) => c.customerId === customer.id && c.status !== 'cancelled' && c.status !== 'expired' && (!unit || c.unitIds.includes(unit.id)))
+      const label = symptoms.find((x) => x.id === p.symptom)?.label
+      const sc: ServiceCall = {
+        id: uid('sc'), number: s.nextNumber('service', 'SC-', 4), customerId: customer.id, addressId: unit?.addressId ?? k.addressId, unitId: unit?.id, contractId: contract?.id,
+        description: [label, p.text].filter(Boolean).join(': ') + (unit?.location ? ` (${unit.location})` : ''),
+        symptom: p.symptom, errorCode: p.errorCode, urgency: p.symptom === 'leak' || p.symptom === 'no_power' ? 'high' : 'normal', status: 'new',
+        underWarranty: unit ? unit.warrantyUntil >= ymd() : undefined, source: 'portal', createdAt: nowIso(),
+      }
+      s.upsert('serviceCalls', sc)
+      s.log({ kind: 'service', serviceCallId: sc.id, customerId: customer.id, caseId: k.id, text: `קריאת שירות ${sc.number} נפתחה מהאזור האישי` })
+      s.db.users.filter((u) => u.role === 'office' || u.role === 'admin').forEach((u) => s.notify(u.id, `קריאת שירות מהאזור האישי: ${customer.name}`, `/service/${sc.id}`))
+      return { number: sc.number, underWarranty: sc.underWarranty }
+    },
+    upload: async (file) => {
+      if (!k) return
+      const s = app()
+      const id = uid('d')
+      const blobKey = await saveLocalBlob(id, file)
+      s.upsert('docs', { id, caseId: k.id, customerId: k.customerId, folder: 'customer', name: file.name, mime: file.type || 'application/octet-stream', size: file.size, uploadedAt: nowIso(), blobKey, source: 'portal', customerVisible: true })
+      s.log({ kind: 'document', caseId: k.id, customerId: k.customerId, text: `הלקוח העלה קובץ מהאזור האישי: ${file.name}` })
+      staff().forEach((u) => s.notify(u, `קובץ חדש מהלקוח: ${file.name}`, `/cases/${k.id}`))
+    },
+    send: async (body) => {
+      if (!k) return
+      const s = app()
+      const m: Message = { id: uid('m'), caseId: k.id, customerId: k.customerId, channel: 'portal', direction: 'in', body, at: nowIso(), status: 'delivered' }
+      s.upsert('messages', m)
+      staff().forEach((u) => s.notify(u, `הודעה מ${customer?.name ?? 'הלקוח'}: ${body.slice(0, 60)}`, `/cases/${k.id}`))
+    },
+    openDoc: async (d) => {
+      if (d.href) return void window.open(d.href, '_blank', 'noopener')
+      const b = d.doc && (await docBlob(d.doc))
+      if (!b) return openWhatsApp(`שלום, אשמח לקבל את המסמך "${d.name}" (תיק ${k?.number}). תודה!`)
+      const url = URL.createObjectURL(b)
+      window.open(url, '_blank', 'noopener')
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    },
+    printQuote: (q) => window.open(appUrl(`/quotes/${q.id}/print`), '_blank', 'noopener'),
+    logAsk: (q) => k && app().log({ kind: 'portal', caseId: k.id, customerId: k.customerId, text: `הלקוח פתח שאלה בוואטסאפ על ההצעה ${q.number}` }),
+  }), [k, customer, contracts, staff])
 
-  const address = customer.addresses.find((a) => a.id === k.addressId) ?? customer.addresses[0]
-  const hello = greetName(contact, customer)
-  const agent = users.find((u) => u.id === k.agentId)
+  if (!model) return <NotFound />
+  return <PortalView m={model} a={actions} />
+}
+
+// ---------- מסד משותף: מהשרת, לפי הקישור בלבד ----------
+
+interface RemoteData {
+  case: PortalCase
+  customer: { firstName: string; name?: string }
+  contact: { firstName: string; name: string } | null
+  address?: Pick<Address, 'id' | 'city' | 'street' | 'number' | 'floor' | 'apartment' | 'label'>
+  agent: { firstName: string; name: string; phone?: string } | null
+  quote: Quote | null
+  appointments: PortalAppt[]
+  units: InstalledUnit[]
+  docs: { id: string; name: string; size?: number; uploadedAt: string; url?: string; fromCustomer?: boolean }[]
+  messages: PortalMsg[]
+  settings: { depositPct: number }
+}
+
+async function call<T>(server: string, path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
+  let res: Response
+  try {
+    res = await fetch(server + path, { ...init, headers: { ...(init.json !== undefined ? { 'content-type': 'application/json' } : {}), ...(init.headers as Record<string, string>) }, body: init.json !== undefined ? JSON.stringify(init.json) : init.body })
+  } catch {
+    throw Object.assign(new Error('אין חיבור. בדקו את האינטרנט ונסו שוב.'), { status: 0 })
+  }
+  const text = await res.text()
+  let body: unknown = null
+  try {
+    body = text ? JSON.parse(text) : null
+  } catch {
+    body = null
+  }
+  if (!res.ok) throw Object.assign(new Error((body as { error?: { message?: string } })?.error?.message ?? `שגיאה ${res.status}`), { status: res.status })
+  return body as T
+}
+
+function RemotePortal({ token, server }: { token: string; server: string }) {
+  const [data, setData] = useState<RemoteData | null>(null)
+  const [state, setState] = useState<'loading' | 'ok' | 'missing' | 'offline'>('loading')
+  const base = `/api/portal/${encodeURIComponent(token)}`
+
+  const load = useCallback(async () => {
+    try {
+      const d = await call<RemoteData>(server, base)
+      setData(d)
+      setState('ok')
+    } catch (e) {
+      const status = (e as { status?: number }).status
+      setState((s) => (status === 404 ? 'missing' : s === 'ok' ? 'ok' : 'offline'))
+    }
+  }, [server, base])
+
+  useEffect(() => {
+    void load()
+    // תשובות מהמשרד ועדכוני מועדים מגיעים בלי לרענן את הדף
+    const t = setInterval(() => document.visibilityState === 'visible' && void load(), 15_000)
+    const onVis = () => document.visibilityState === 'visible' && void load()
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [load])
+
+  const model = useMemo<Model | null>(() => {
+    if (!data) return null
+    const today = ymd()
+    return {
+      k: data.case,
+      customerName: data.customer.name ?? data.customer.firstName,
+      signerName: data.contact?.name ?? data.customer.name ?? '',
+      hello: data.contact?.firstName || data.customer.firstName,
+      addressLabel: data.address ? addressText(data.address as Address) : '',
+      agent: data.agent ? { name: data.agent.name, phone: data.agent.phone } : undefined,
+      quote: data.quote ?? undefined,
+      depositPct: data.settings.depositPct,
+      upcoming: data.appointments.filter((a) => a.status !== 'done' && ymd(a.end) >= today),
+      units: data.units,
+      docs: data.docs.map((d) => ({ ...d, href: d.url ? (d.url.startsWith('/api/') ? server + d.url : d.url) : undefined })),
+      messages: data.messages,
+      catalog: [],
+    }
+  }, [data, server])
+
+  const actions = useMemo<Actions>(() => ({
+    remote: true,
+    view: () => {
+      if (seen.has(token)) return
+      seen.add(token)
+      void call(server, `${base}/view`, { method: 'POST', json: {} }).catch(() => {})
+    },
+    approve: async (q, sig, method) => {
+      const r = await call<{ deposit: Quote['deposit'] }>(server, `${base}/approve`, { method: 'POST', json: { quoteId: q.id, signature: sig, deposit: { method } } })
+      void load()
+      return r.deposit
+    },
+    reject: async (q, reason) => {
+      await call(server, `${base}/reject`, { method: 'POST', json: { quoteId: q.id, reason } })
+      void load()
+    },
+    service: async (p) => {
+      const r = await call<{ number: string; underWarranty: boolean | null }>(server, `${base}/service`, { method: 'POST', json: p })
+      void load()
+      return r
+    },
+    upload: async (file) => {
+      await call(server, `${base}/upload`, { method: 'POST', headers: { 'content-type': file.type || 'application/octet-stream', 'x-file-name': encodeURIComponent(file.name) }, body: file })
+      void load()
+    },
+    send: async (body) => {
+      await call(server, `${base}/messages`, { method: 'POST', json: { body } })
+      await load()
+    },
+    openDoc: async (d) => {
+      if (d.href) return void window.open(d.href, '_blank', 'noopener')
+      openWhatsApp(`שלום, אשמח לקבל את המסמך "${d.name}" (תיק ${data?.case.number}). תודה!`)
+    },
+    printQuote: () => {
+      document.body.classList.add('pt-print-quote')
+      window.print()
+      setTimeout(() => document.body.classList.remove('pt-print-quote'), 500)
+    },
+  }), [server, base, token, load, data?.case.number])
+
+  if (state === 'missing') return <NotFound />
+  if (!model) {
+    return (
+      <div className="pt-page" dir="rtl">
+        <header className="pt-hero"><div className="pt-hero-in"><div className="pt-top"><Wordmark /></div><div className="pt-eyebrow">האזור האישי</div><h1>{state === 'offline' ? 'אין חיבור כרגע' : 'טוען...'}</h1></div></header>
+        {state === 'offline' && (
+          <main className="pt-wrap">
+            <section className="pt-card">
+              <p>לא הצלחנו לטעון את הפרטים. בדקו את החיבור לאינטרנט ונסו שוב.</p>
+              <div className="pt-cta"><button className="btn primary block" onClick={() => void load()}><RefreshCw size={18} /> לנסות שוב</button></div>
+            </section>
+          </main>
+        )}
+      </div>
+    )
+  }
+  return <PortalView m={model} a={actions} />
+}
+
+// ---------- המסך ----------
+
+function PortalView({ m, a }: { m: Model; a: Actions }) {
+  const { k, quote } = m
+  useEffect(() => {
+    a.view()
+  }, [a])
+
   const idx = stageIdx[k.stage]
   const quoteFirst = !!quote && (quote.status === 'sent' || quote.status === 'viewed')
-  const showService = myUnits.length > 0 || ['completed', 'closed'].includes(k.stage)
+  const showService = m.units.length > 0 || ['completed', 'closed'].includes(k.stage)
 
-  const quoteCard = <QuoteSection key="q" k={k} quote={quote} customer={customer} defaultName={contact?.name ?? customer.name} catalog={catalog} />
-  const apptCard = (upcoming.length > 0 || (k.installWindow && ['approved', 'scheduled', 'installing'].includes(k.stage))) && (
-    <Appointments key="a" list={upcoming} users={users} k={k} addressLabel={addressText(address)} />
+  const quoteCard = <QuoteSection key="q" m={m} a={a} />
+  const apptCard = (m.upcoming.length > 0 || (k.installWindow && ['approved', 'scheduled', 'installing'].includes(k.stage))) && (
+    <Appointments key="a" list={m.upcoming} k={k} addressLabel={m.addressLabel} />
   )
 
   return (
@@ -131,10 +410,10 @@ export default function Portal() {
             <a className="pt-call" href={telLink(brand.phone)}><Phone size={15} /> <span className="ltr">{brand.phone}</span></a>
           </div>
           <div className="pt-eyebrow">האזור האישי</div>
-          <h1>שלום{hello ? ` ${hello}` : ''},</h1>
+          <h1>שלום{m.hello ? ` ${m.hello}` : ''},</h1>
           <div className="proj">{k.title}</div>
           <div className="meta">
-            {addressText(address)} · תיק <span className="ltr">{k.number}</span>
+            {m.addressLabel}{m.addressLabel ? ' · ' : ''}תיק <span className="ltr">{k.number}</span>
           </div>
           <div className="pt-promise"><Snowflake size={15} /> {brand.promise}</div>
         </div>
@@ -160,64 +439,27 @@ export default function Portal() {
           ) : null}
           <div className="pt-next">
             <Clock size={18} />
-            <div>{nextStep(k, quote, upcoming)}</div>
+            <div>{nextStep(k, quote, m.upcoming)}</div>
           </div>
         </section>
 
         {quoteFirst ? [quoteCard, apptCard] : [apptCard, quoteCard]}
 
-        {myUnits.length > 0 && <UnitsSection list={myUnits} />}
-        {(myDocs.length > 0 || quote?.status === 'approved') && (
-          <section className="pt-card">
-            <div className="pt-card-head"><h2><FileText size={18} /> המסמכים שלכם</h2></div>
-            <div className="pt-list">
-              {quote?.status === 'approved' && (
-                <a className="pt-item" href={appUrl(`/quotes/${quote.id}/print`)} target="_blank" rel="noreferrer">
-                  <span className="ic"><FileSignature size={19} /></span>
-                  <div className="grow">
-                    <div className="nm">הצעת מחיר חתומה <span className="ltr">{quote.number}</span></div>
-                    <div className="mt">נחתמה {quote.signature ? date(quote.signature.at) : ''} · לצפייה ולהורדה</div>
-                  </div>
-                  <Printer size={17} className="muted" />
-                </a>
-              )}
-              {myDocs.map((d) => {
-                const href = d.url ?? d.dataUrl
-                const body = (
-                  <>
-                    <span className="ic"><FileText size={19} /></span>
-                    <div className="grow">
-                      <div className="nm">{d.name.replace(/\.pdf$/i, '')}</div>
-                      <div className="mt">{date(d.uploadedAt)}{d.size ? ` · ${Math.max(1, Math.round(d.size / 1024 / 102.4) / 10)} MB` : ''}{href ? '' : ' · נשלח לפי בקשה'}</div>
-                    </div>
-                  </>
-                )
-                return href ? (
-                  <a key={d.id} className="pt-item" href={href} target="_blank" rel="noreferrer" download={d.dataUrl ? d.name : undefined}>{body}</a>
-                ) : (
-                  <button key={d.id} className="pt-item" style={{ border: 0, borderBottom: '1px solid var(--line-2)', background: 'none', width: '100%', textAlign: 'start', cursor: 'pointer' }}
-                    onClick={() => openWhatsApp(`שלום, אשמח לקבל את המסמך "${d.name}" (תיק ${k.number}). תודה!`)}>
-                    {body}
-                    <span className="small" style={{ color: 'var(--brand-700)', fontWeight: 600 }}>בקשת עותק</span>
-                  </button>
-                )
-              })}
-            </div>
-          </section>
-        )}
-
-        {showService && <ServiceSection k={k} customer={customer} units={myUnits} />}
+        {m.units.length > 0 && <UnitsSection list={m.units} />}
+        {k.stage !== 'lost' && <DocsSection m={m} a={a} />}
+        {showService && <ServiceSection m={m} a={a} />}
+        <ChatSection m={m} a={a} />
 
         <section className="pt-card">
           <div className="pt-card-head">
             <div>
               <h2><MessageCircle size={18} /> אנחנו כאן</h2>
-              {agent && <div className="sub">היועץ שלכם: {agent.name}</div>}
+              {m.agent && <div className="sub">היועץ שלכם: {m.agent.name}</div>}
             </div>
           </div>
           <div className="pt-contact">
-            <a href={telLink(agent?.phone ?? brand.phone)}><Phone size={20} /> שיחה</a>
-            <a className="wa" href={whatsappLink(brand.whatsapp, `שלום, אני ${customer.name} (תיק ${k.number}).`)} target="_blank" rel="noreferrer"><MessageCircle size={20} /> וואטסאפ</a>
+            <a href={telLink(m.agent?.phone ?? brand.phone)}><Phone size={20} /> שיחה</a>
+            <a className="wa" href={whatsappLink(brand.whatsapp, `שלום, אני ${m.customerName} (תיק ${k.number}).`)} target="_blank" rel="noreferrer"><MessageCircle size={20} /> וואטסאפ</a>
             <a href={`mailto:${brand.email}?subject=${encodeURIComponent(`תיק ${k.number}`)}`}><Mail size={20} /> מייל</a>
           </div>
           <div className="pt-contact-meta">
@@ -236,7 +478,7 @@ export default function Portal() {
   )
 }
 
-function nextStep(k: Case, quote: Quote | undefined, upcoming: Appointment[]) {
+function nextStep(k: PortalCase, quote: Quote | undefined, upcoming: PortalAppt[]) {
   const survey = upcoming.find((a) => a.type === 'survey')
   const install = upcoming.find((a) => a.type === 'installation')
   switch (k.stage) {
@@ -263,10 +505,10 @@ function nextStep(k: Case, quote: Quote | undefined, upcoming: Appointment[]) {
 }
 
 // ---------- הצעת המחיר ----------
-function QuoteSection({ k, quote, customer, defaultName, catalog }: { k: Case; quote?: Quote; customer: Customer; defaultName: string; catalog: Parameters<typeof totals>[1] }) {
-  const settings = useSettings()
+function QuoteSection({ m, a }: { m: Model; a: Actions }) {
+  const { k, quote } = m
   const [dialog, setDialog] = useState<null | 'approve' | 'reject'>(null)
-  const t = useMemo(() => (quote ? totals(quote, catalog) : undefined), [quote, catalog])
+  const t = useMemo(() => (quote ? totals(quote, m.catalog) : undefined), [quote, m.catalog])
   const groups = useMemo(() => (quote ? groupByRoom(quote.lines, 'עבודה וחומרים') : []), [quote])
 
   if (!quote || !t) {
@@ -286,15 +528,15 @@ function QuoteSection({ k, quote, customer, defaultName, catalog }: { k: Case; q
 
   const expired = isQuoteExpired(quote)
   const open = (quote.status === 'sent' || quote.status === 'viewed') && !expired
-  const deposit = Math.round((t.total * settings.depositPct) / 100)
+  const deposit = Math.round((t.total * m.depositPct) / 100)
   const terms = quote.terms.split('\n').map((x) => x.trim()).filter(Boolean)
   const ask = () => {
-    app().log({ kind: 'portal', caseId: k.id, customerId: customer.id, text: `הלקוח פתח שאלה בוואטסאפ על ההצעה ${quote.number}` })
-    openWhatsApp(`שלום, יש לי שאלה לגבי הצעת המחיר ${quote.number} (${customer.name}):\n`)
+    a.logAsk?.(quote)
+    openWhatsApp(`שלום, יש לי שאלה לגבי הצעת המחיר ${quote.number} (${m.customerName}):\n`)
   }
 
   return (
-    <section className="pt-card">
+    <section className="pt-card pt-quote-card">
       <div className="pt-card-head">
         <div>
           <h2><FileText size={18} /> הצעת המחיר שלכם</h2>
@@ -302,7 +544,7 @@ function QuoteSection({ k, quote, customer, defaultName, catalog }: { k: Case; q
             <span className="ltr">{quote.number}</span>{quote.version > 1 ? ` · גרסה ${quote.version}` : ''} · {open ? `בתוקף עד ${date(quote.validUntil)}` : date(quote.sentAt ?? quote.createdAt)}
           </div>
         </div>
-        <a className="btn sm" href={appUrl(`/quotes/${quote.id}/print`)} target="_blank" rel="noreferrer"><Printer size={15} /> PDF</a>
+        <button className="btn sm pt-noprint" onClick={() => a.printQuote(quote)}><Printer size={15} /> PDF</button>
       </div>
 
       {quote.status === 'approved' && (
@@ -355,7 +597,7 @@ function QuoteSection({ k, quote, customer, defaultName, catalog }: { k: Case; q
         <div className="r"><span>לפני מע״מ</span><span>{money(t.net)}</span></div>
         <div className="r"><span>מע״מ {pct(quote.vatPct)}</span><span>{money(t.vat)}</span></div>
         <div className="r g"><span>סה״כ</span><span>{money(t.total)}</span></div>
-        {open && <div className="dep">מקדמה באישור: {money(deposit)} ({settings.depositPct}%). היתרה בסיום ההתקנה.</div>}
+        {open && <div className="dep">מקדמה באישור: {money(deposit)} ({m.depositPct}%). היתרה בסיום ההתקנה.</div>}
       </div>
 
       {quote.notes && <div className="pt-note">{quote.notes}</div>}
@@ -380,13 +622,13 @@ function QuoteSection({ k, quote, customer, defaultName, catalog }: { k: Case; q
         </div>
       )}
 
-      {dialog === 'approve' && <ApproveFlow quote={quote} total={t.total} deposit={deposit} depositPct={settings.depositPct} defaultName={defaultName} terms={terms} onClose={() => setDialog(null)} />}
-      {dialog === 'reject' && <RejectFlow k={k} quote={quote} onClose={() => setDialog(null)} />}
+      {dialog === 'approve' && <ApproveFlow quote={quote} a={a} total={t.total} deposit={deposit} depositPct={m.depositPct} defaultName={m.signerName} terms={terms} onClose={() => setDialog(null)} />}
+      {dialog === 'reject' && <RejectFlow quote={quote} a={a} onClose={() => setDialog(null)} />}
     </section>
   )
 }
 
-function ApproveFlow({ quote, total, deposit, depositPct, defaultName, terms, onClose }: { quote: Quote; total: number; deposit: number; depositPct: number; defaultName: string; terms: string[]; onClose: () => void }) {
+function ApproveFlow({ quote, a, total, deposit, depositPct, defaultName, terms, onClose }: { quote: Quote; a: Actions; total: number; deposit: number; depositPct: number; defaultName: string; terms: string[]; onClose: () => void }) {
   const [step, setStep] = useState<'sign' | 'pay' | 'done'>('sign')
   const [name, setName] = useState(defaultName.startsWith('משפחת') ? '' : defaultName)
   const [sig, setSig] = useState<string | null>(null)
@@ -395,18 +637,22 @@ function ApproveFlow({ quote, total, deposit, depositPct, defaultName, terms, on
   const [method, setMethod] = useState<Method>('credit')
   const [busy, setBusy] = useState(false)
   const [signedAt, setSignedAt] = useState('')
+  const [paid, setPaid] = useState(deposit)
   const canSign = name.trim().length >= 2 && !!sig && agree
 
   async function confirm() {
     if (!sig) return
     setBusy(true)
-    // הדגמה: אין חיוב אמיתי. בייצור כאן נפתח דף תשלום מאובטח של חברת הסליקה.
-    await new Promise((r) => setTimeout(r, 900))
-    const at = nowIso()
-    approveQuote(quote.id, { name: name.trim(), dataUrl: sig, at }, { amount: deposit, method, paidAt: method === 'transfer' ? undefined : at })
-    setSignedAt(at)
-    setBusy(false)
-    setStep('done')
+    try {
+      const dep = await a.approve(quote, { name: name.trim(), dataUrl: sig }, method, deposit)
+      if (dep?.amount) setPaid(dep.amount)
+      setSignedAt(nowIso())
+      setStep('done')
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
   }
 
   const methods: { id: Method; label: string; sub: string; icon: ReactNode }[] = [
@@ -428,7 +674,7 @@ function ApproveFlow({ quote, total, deposit, depositPct, defaultName, terms, on
         ) : step === 'pay' ? (
           <>
             <button className="btn" onClick={() => setStep('sign')} disabled={busy}>חזרה</button>
-            <button className="btn primary" onClick={confirm} disabled={busy}>
+            <button className="btn primary" onClick={() => void confirm()} disabled={busy}>
               {busy ? 'מאשר...' : method === 'transfer' ? 'אישור ההזמנה' : `אישור ותשלום ${money(deposit)}`}
             </button>
           </>
@@ -483,11 +729,11 @@ function ApproveFlow({ quote, total, deposit, depositPct, defaultName, terms, on
           <div className="field">
             <span className="label">איך נוח לשלם?</span>
             <div className="pt-methods">
-              {methods.map((m) => (
-                <button key={m.id} type="button" className={`choice ${method === m.id ? 'on' : ''}`} onClick={() => setMethod(m.id)} aria-pressed={method === m.id}>
-                  {m.icon}
-                  <b>{m.label}</b>
-                  <small>{m.sub}</small>
+              {methods.map((x) => (
+                <button key={x.id} type="button" className={`choice ${method === x.id ? 'on' : ''}`} onClick={() => setMethod(x.id)} aria-pressed={method === x.id}>
+                  {x.icon}
+                  <b>{x.label}</b>
+                  <small>{x.sub}</small>
                 </button>
               ))}
             </div>
@@ -508,7 +754,7 @@ function ApproveFlow({ quote, total, deposit, depositPct, defaultName, terms, on
             <div><span>הצעה</span><b className="ltr">{quote.number}</b></div>
             <div><span>נחתם ע״י</span><b>{name}</b></div>
             <div><span>מועד</span><b>{dateTime(signedAt)}</b></div>
-            <div><span>מקדמה</span><b>{money(deposit)} · {method === 'transfer' ? 'ממתינה להעברה' : `שולמה ${viaMethod(method)}`}</b></div>
+            <div><span>מקדמה</span><b>{money(paid)} · {method === 'transfer' ? 'ממתינה להעברה' : `שולמה ${viaMethod(method)}`}</b></div>
           </div>
         </div>
       )}
@@ -518,14 +764,20 @@ function ApproveFlow({ quote, total, deposit, depositPct, defaultName, terms, on
 
 const rejectReasons = ['המחיר גבוה בשבילי', 'בחרתי בהצעה אחרת', 'דחינו את הפרויקט']
 
-function RejectFlow({ k, quote, onClose }: { k: Case; quote: Quote; onClose: () => void }) {
+function RejectFlow({ quote, a, onClose }: { quote: Quote; a: Actions; onClose: () => void }) {
   const [reason, setReason] = useState('')
-  function send() {
-    const s = app()
-    rejectQuote(quote.id, `מהאזור האישי${reason.trim() ? `: ${reason.trim()}` : ''}`)
-    if (k.agentId) s.notify(k.agentId, `הלקוח דחה את ההצעה ${quote.number}${reason.trim() ? `: ${reason.trim()}` : ''}`, `/cases/${k.id}`)
-    toast.info('תודה על העדכון')
-    onClose()
+  const [busy, setBusy] = useState(false)
+  async function send() {
+    setBusy(true)
+    try {
+      await a.reject(quote, reason.trim())
+      toast.info('תודה על העדכון')
+      onClose()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
   }
   return (
     <Modal
@@ -535,7 +787,7 @@ function RejectFlow({ k, quote, onClose }: { k: Case; quote: Quote; onClose: () 
       footer={
         <>
           <button className="btn" onClick={onClose}>חזרה להצעה</button>
-          <button className="btn dark" onClick={send}>שליחה</button>
+          <button className="btn dark" disabled={busy} onClick={() => void send()}>שליחה</button>
         </>
       }
     >
@@ -555,7 +807,7 @@ function RejectFlow({ k, quote, onClose }: { k: Case; quote: Quote; onClose: () 
 }
 
 // ---------- מועדים ----------
-function Appointments({ list, users, k, addressLabel }: { list: Appointment[]; users: User[]; k: Case; addressLabel: string }) {
+function Appointments({ list, k, addressLabel }: { list: PortalAppt[]; k: PortalCase; addressLabel: string }) {
   const today = new Date()
   return (
     <section className="pt-card">
@@ -570,7 +822,6 @@ function Appointments({ list, users, k, addressLabel }: { list: Appointment[]; u
         </div>
       )}
       {list.map((a) => {
-        const team = a.userIds.map((id) => users.find((u) => u.id === id)).filter(Boolean).map((u) => firstName(u!.name))
         const isToday = sameDay(a.start, today)
         const days = daysBetween(ymd(today), ymd(a.start))
         return (
@@ -582,10 +833,10 @@ function Appointments({ list, users, k, addressLabel }: { list: Appointment[]; u
             <div className="grow">
               <div className="t">{visitLabel[a.type]}{a.status === 'on_the_way' ? ' · הצוות בדרך אליכם' : a.status === 'in_progress' ? ' · בביצוע עכשיו' : ''}</div>
               <div className="s">
-                {dateLong(a.start)}{a.allDay ? '' : `, ${time(a.start)}–${time(a.end)}`}
+                {dateLong(a.start)}{a.allDay ? '' : <>, <span className="ltr">{time(a.start)}–{time(a.end)}</span></>}
                 {!isToday && days > 0 && days <= 7 ? ` · בעוד ${days === 1 ? 'יום' : `${days} ימים`}` : ''}
               </div>
-              {team.length > 0 && <div className="s">{a.type === 'service' || a.type === 'maintenance' ? 'הטכנאי' : 'הצוות'}: {joinNames(team)}</div>}
+              {a.team.length > 0 && <div className="s">{a.type === 'service' || a.type === 'maintenance' ? 'הטכנאי' : 'הצוות'}: {joinNames(a.team)}</div>}
               <div className="acts">
                 <a className="btn sm" href={googleCalendarLink({ title: `${brand.name}: ${visitLabel[a.type]}`, start: a.start, end: a.end, location: addressLabel, details: k.title })} target="_blank" rel="noreferrer">
                   <CalendarPlus size={14} /> הוספה ליומן
@@ -632,41 +883,82 @@ function UnitsSection({ list }: { list: InstalledUnit[] }) {
   )
 }
 
+// ---------- מסמכים (ושליחת קובץ למשרד) ----------
+function DocsSection({ m, a }: { m: Model; a: Actions }) {
+  const ref = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState(false)
+  const quote = m.quote
+  async function pick(files: File[]) {
+    for (const f of files) {
+      if (f.size > UPLOAD_MAX) {
+        toast.error(`${f.name}: עד 10MB לקובץ`)
+        continue
+      }
+      setBusy(true)
+      try {
+        await a.upload(f)
+        toast.success('הקובץ התקבל, תודה!')
+      } catch (e) {
+        toast.error((e as Error).message)
+      } finally {
+        setBusy(false)
+      }
+    }
+  }
+  return (
+    <section className="pt-card">
+      <div className="pt-card-head">
+        <h2><FileText size={18} /> המסמכים שלכם</h2>
+        <button className="btn sm" onClick={() => ref.current?.click()} disabled={busy}><Paperclip size={15} /> {busy ? 'שולח...' : 'שליחת תמונה או מסמך'}</button>
+        <input ref={ref} type="file" accept="image/*,application/pdf" multiple hidden onChange={(e) => { void pick(Array.from(e.target.files ?? [])); e.target.value = '' }} />
+      </div>
+      <div className="pt-list">
+        {quote?.status === 'approved' && (
+          <button className="pt-item pt-item-btn" onClick={() => a.printQuote(quote)}>
+            <span className="ic"><FileSignature size={19} /></span>
+            <div className="grow">
+              <div className="nm">הצעת מחיר חתומה <span className="ltr">{quote.number}</span></div>
+              <div className="mt">נחתמה {quote.signature ? date(quote.signature.at) : ''} · לצפייה ולהדפסה</div>
+            </div>
+            <Printer size={17} className="muted" />
+          </button>
+        )}
+        {m.docs.map((d) => (
+          <button key={d.id} className="pt-item pt-item-btn" onClick={() => void a.openDoc(d).catch((e) => toast.error((e as Error).message))}>
+            <span className="ic"><FileText size={19} /></span>
+            <div className="grow">
+              <div className="nm">{d.name.replace(/\.pdf$/i, '')}</div>
+              <div className="mt">{date(d.uploadedAt)}{d.size ? <> · <span className="ltr">{sizeLabel(d.size)}</span></> : ''}{d.fromCustomer ? ' · נשלח מכם' : ''}{d.href || d.doc?.blobKey || d.doc?.fileId ? '' : ' · נשלח לפי בקשה'}</div>
+            </div>
+            {!(d.href || d.doc?.blobKey || d.doc?.fileId) && <span className="small" style={{ color: 'var(--brand-700)', fontWeight: 600 }}>בקשת עותק</span>}
+          </button>
+        ))}
+        {m.docs.length === 0 && quote?.status !== 'approved' && <div className="small muted">עוד אין מסמכים. אפשר לשלוח לנו כאן תמונות של המזגן הקיים, תוכניות או כל מסמך אחר.</div>}
+      </div>
+    </section>
+  )
+}
+
 // ---------- קריאת שירות ----------
-function ServiceSection({ k, customer, units }: { k: Case; customer: Customer; units: InstalledUnit[] }) {
-  const contracts = useDB((d) => d.contracts)
+function ServiceSection({ m, a }: { m: Model; a: Actions }) {
+  const units = m.units
   const [unitId, setUnitId] = useState('')
   const [symptom, setSymptom] = useState<ServiceCall['symptom']>()
   const [code, setCode] = useState('')
   const [text, setText] = useState('')
-  const [done, setDone] = useState<ServiceCall | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState<{ number: string; underWarranty?: boolean | null } | null>(null)
 
-  function submit() {
+  async function submit() {
     if (!symptom && text.trim().length < 3) return toast.error('ספרו לנו בקצרה מה קרה')
-    const s = app()
-    const unit = units.find((u) => u.id === unitId)
-    const contract = contracts.find((c) => c.customerId === customer.id && c.status !== 'cancelled' && c.status !== 'expired' && (!unit || c.unitIds.includes(unit.id)))
-    const label = symptoms.find((x) => x.id === symptom)?.label
-    const sc: ServiceCall = {
-      id: uid('sc'),
-      number: s.nextNumber('service', 'SC-', 4),
-      customerId: customer.id,
-      addressId: unit?.addressId ?? k.addressId,
-      unitId: unit?.id,
-      contractId: contract?.id,
-      description: [label, text.trim()].filter(Boolean).join(': ') + (unit?.location ? ` (${unit.location})` : ''),
-      symptom,
-      errorCode: symptom === 'error_code' && code.trim() ? code.trim().toUpperCase() : undefined,
-      urgency: symptom === 'leak' || symptom === 'no_power' ? 'high' : 'normal',
-      status: 'new',
-      underWarranty: unit ? unit.warrantyUntil >= ymd() : undefined,
-      source: 'portal',
-      createdAt: nowIso(),
+    setBusy(true)
+    try {
+      setDone(await a.service({ unitId: unitId || undefined, symptom, errorCode: symptom === 'error_code' && code.trim() ? code.trim().toUpperCase() : undefined, text: text.trim() }))
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally {
+      setBusy(false)
     }
-    s.upsert('serviceCalls', sc)
-    s.log({ kind: 'service', serviceCallId: sc.id, customerId: customer.id, caseId: k.id, text: `קריאת שירות ${sc.number} נפתחה מהאזור האישי` })
-    s.db.users.filter((u) => u.role === 'office' || u.role === 'admin').forEach((u) => s.notify(u.id, `קריאת שירות מהאזור האישי: ${customer.name}`, `/service/${sc.id}`))
-    setDone(sc)
   }
 
   return (
@@ -682,10 +974,7 @@ function ServiceSection({ k, customer, units }: { k: Case; customer: Customer; u
           <span className="ico"><ClipboardCheck size={20} /></span>
           <div className="grow">
             <div className="strong">הקריאה התקבלה · <span className="ltr">{done.number}</span></div>
-            <div className="small">נחזור אליכם לתיאום ביקור, בדרך כלל באותו יום עבודה.{done.underWarranty ? ' היחידה באחריות.' : ''}</div>
-            <button className="btn sm wa mt8" onClick={() => openWhatsApp(`שלום, פתחתי קריאת שירות ${done.number}. מצרף/ת תמונה:`)}>
-              <MessageCircle size={14} /> שליחת תמונה בוואטסאפ
-            </button>
+            <div className="small">נחזור אליכם לתיאום ביקור, בדרך כלל באותו יום עבודה.{done.underWarranty ? ' היחידה באחריות.' : ''} אפשר לשלוח תמונה בחלק "המסמכים שלכם".</div>
           </div>
         </div>
       ) : (
@@ -714,9 +1003,60 @@ function ServiceSection({ k, customer, units }: { k: Case; customer: Customer; u
           <Field label="כמה מילים (לא חובה)">
             <textarea className="textarea" rows={3} value={text} placeholder="מתי זה התחיל, מה שמתם לב" onChange={(e) => setText(e.target.value)} />
           </Field>
-          <button className="btn dark lg block" onClick={submit}><Wrench size={17} /> פתיחת קריאת שירות</button>
+          <button className="btn dark lg block" disabled={busy} onClick={() => void submit()}><Wrench size={17} /> {busy ? 'שולח...' : 'פתיחת קריאת שירות'}</button>
         </div>
       )}
+    </section>
+  )
+}
+
+// ---------- צ'אט עם המשרד (Message, channel 'portal': in = מהלקוח, out = תשובת הצוות) ----------
+function ChatSection({ m, a }: { m: Model; a: Actions }) {
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const end = useRef<HTMLDivElement>(null)
+  const count = m.messages.length
+  useEffect(() => {
+    if (count) end.current?.scrollIntoView({ block: 'nearest' })
+  }, [count])
+  async function send(e: FormEvent) {
+    e.preventDefault()
+    const body = text.trim()
+    if (!body) return
+    setBusy(true)
+    try {
+      await a.send(body)
+      setText('')
+    } catch (err) {
+      toast.error((err as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <section className="pt-card">
+      <div className="pt-card-head">
+        <div>
+          <h2><MessageCircle size={18} /> כתבו לנו</h2>
+          <div className="sub">הודעה כאן מגיעה ישר לצוות שמטפל בכם. התשובה תופיע כאן.</div>
+        </div>
+      </div>
+      {count > 0 && (
+        <div className="pt-chat" aria-live="polite">
+          {m.messages.map((x) => (
+            <div key={x.id} className={`pt-msg ${x.direction === 'in' ? 'me' : 'them'}`}>
+              <div className="b">{x.body}</div>
+              <div className="w">{x.direction === 'in' ? 'אתם' : x.by || brand.name} · <span className="ltr">{time(x.at)}</span>{sameDay(x.at, new Date()) ? '' : ` · ${date(x.at)}`}</div>
+            </div>
+          ))}
+          <div ref={end} />
+        </div>
+      )}
+      <form className="pt-chat-form" onSubmit={send}>
+        <textarea className="textarea" rows={2} value={text} maxLength={2000} placeholder="למשל: אפשר להקדים את ההתקנה?" onChange={(e) => setText(e.target.value)} aria-label="ההודעה שלכם"
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.currentTarget.form?.requestSubmit() } }} />
+        <button className="btn primary" type="submit" disabled={busy || !text.trim()} aria-label="שליחה"><Send size={17} /> שליחה</button>
+      </form>
     </section>
   )
 }

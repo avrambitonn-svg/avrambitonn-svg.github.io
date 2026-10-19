@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CalendarCheck, CalendarPlus, CheckCircle2, Clock, Download, Sparkles, Users } from 'lucide-react'
+import { Bell, CalendarCheck, CalendarPlus, CheckCircle2, Clock, Download, MapPin, Palmtree, Sparkles, Users } from 'lucide-react'
 import type { Appointment, AppointmentType, ID, User } from '../../lib/types'
 import { Avatar, Badge, Callout, Field, Modal, toast } from '../../components/ui'
 import { useApp, useSettings } from '../../lib/store'
@@ -12,7 +12,7 @@ import { addressText, download, googleCalendarLink, icsFile } from '../../lib/in
 import { fill, templates, type TemplateKey } from '../../lib/messaging'
 import {
   at, busyOn, certIssue, dow, checklistFor, conflictsFor, dayEndMin, dayStart, defaultDuration, durationLabel, fieldRoles, fromMin, hhmmOf, icsEvent, jobContext,
-  messageVars, needsHeightWork, nextWorkDays, outdoorTypes, suggestSlots, toMin, useForecast, useHebcal, visitText,
+  leaveConflicts, leavesOn, messageVars, needsHeightWork, nextWorkDays, outdoorTypes, suggestSlots, toMin, useForecast, useHebcal, visitText,
 } from '../ops/ops'
 import { MessageBox } from '../ops/MessageBox'
 import '../ops/ops.css'
@@ -31,6 +31,14 @@ interface Props {
 }
 
 const allTypes: AppointmentType[] = ['survey', 'installation', 'service', 'maintenance', 'inspection', 'meeting']
+// תזכורת לצוות לפני המועד (בדקות)
+const reminderOptions: { min: number; label: string }[] = [
+  { min: 0, label: 'בלי תזכורת' },
+  { min: 15, label: '15 דקות לפני' },
+  { min: 30, label: 'חצי שעה לפני' },
+  { min: 60, label: 'שעה לפני' },
+  { min: 1440, label: 'יום לפני' },
+]
 
 export function ScheduleDialog({ type: type0, caseId, serviceCallId, contractId, customerId: customerId0, title: title0, date: date0, userIds: users0, onClose, onScheduled }: Props) {
   const db = useApp((s) => s.db)
@@ -84,6 +92,8 @@ export function ScheduleDialog({ type: type0, caseId, serviceCallId, contractId,
   const [days, setDays] = useState(1)
   const [height, setHeight] = useState(() => type0 === 'installation' && needsHeightWork(db, caseId))
   const [notes, setNotes] = useState('')
+  const [reminderMin, setReminderMin] = useState(type0 === 'meeting' ? 30 : 0)
+  const [location, setLocation] = useState('')
   const [done, setDone] = useState<Appointment[] | null>(null)
 
   const today = useMemo(() => dayStart(new Date()), [])
@@ -94,8 +104,8 @@ export function ScheduleDialog({ type: type0, caseId, serviceCallId, contractId,
   const fullDay = type === 'installation' && toMin(startT) <= toMin(settings.workStart) && toMin(endT) >= toMin(settings.workEnd)
 
   const suggestions = useMemo(
-    () => suggestSlots({ appts: db.appointments, userIds, durationMin: fullDay ? 0 : durationMin || 60, cal, settings, count: 3 }),
-    [db.appointments, userIds, durationMin, fullDay, cal, settings],
+    () => suggestSlots({ appts: db.appointments, userIds, durationMin: fullDay ? 0 : durationMin || 60, cal, settings, count: 3, leaves: db.leaves }),
+    [db.appointments, userIds, durationMin, fullDay, cal, settings, db.leaves],
   )
 
   // ברירת מחדל: המועד הפנוי הראשון, אחרי שלוח החגים נטען
@@ -121,6 +131,21 @@ export function ScheduleDialog({ type: type0, caseId, serviceCallId, contractId,
     () => dates.flatMap((d) => conflictsFor(db.appointments, userIds, at(d, startT), at(d, endT))),
     [dates, db.appointments, userIds, startT, endT],
   )
+  // חופשות שאושרו: מי מהצוות שנבחר לא זמין במועד
+  const leaveHits = useMemo(
+    () => dates.flatMap((d) => leaveConflicts(db.leaves, userIds, at(d, startT), at(d, endT)).map((x) => ({ ...x, day: d }))),
+    [dates, db.leaves, userIds, startT, endT],
+  )
+  const leaveOf = (uid0: ID) => {
+    for (const d of dates) {
+      const hit = leaveConflicts(db.leaves, [uid0], at(d, startT), at(d, endT))[0]
+      if (hit) return { ...hit, day: d }
+    }
+    const part = dates.map((d) => leavesOn(db.leaves, d, uid0)[0]).find(Boolean)
+    return part ? { userId: uid0, leave: part, day: part.from, partial: true } : undefined
+  }
+  const leaveLabel = (key: string) => db.config.leaveTypes.find((o) => o.key === key)?.label ?? 'חופשה'
+
   const certIssues = useMemo(() => {
     if (!height || type !== 'installation' || !dates.length) return []
     const last = dates[dates.length - 1]
@@ -140,7 +165,7 @@ export function ScheduleDialog({ type: type0, caseId, serviceCallId, contractId,
   }, [db.users, relevantRoles, allUsers, userIds])
 
   const blocked = Boolean(st && !st.ok)
-  const invalid = !day || blocked || durationMin <= 0 || afterCandles || !userIds.length || !shownTitle.trim()
+  const invalid = !day || blocked || durationMin <= 0 || afterCandles || !userIds.length || !shownTitle.trim() || leaveHits.length > 0
 
   const strip = useMemo(() => Array.from({ length: 21 }, (_, i) => addDays(today, i)), [today])
 
@@ -160,6 +185,8 @@ export function ScheduleDialog({ type: type0, caseId, serviceCallId, contractId,
         userIds,
         notes: notes.trim() || undefined,
         checklist: checklistFor(type),
+        ...(reminderMin ? { reminderMin } : {}),
+        ...(location.trim() ? { location: location.trim() } : {}),
       }),
     )
     const s = useApp.getState()
@@ -182,7 +209,8 @@ export function ScheduleDialog({ type: type0, caseId, serviceCallId, contractId,
     const tKey: TemplateKey = type === 'survey' ? 'survey' : type === 'installation' ? 'schedule' : 'free'
     const raw = tKey === 'free' ? visitText[type] ?? '' : templates[tKey].text
     const text = fill(raw, messageVars(ctx, first))
-    const ev = icsEvent(useApp.getState().db, first)
+    const withLoc = (a: Appointment) => { const e = icsEvent(useApp.getState().db, a); return a.location ? { ...e, location: a.location } : e }
+    const ev = withLoc(first)
     return (
       <Modal title="המועד נקבע" onClose={onClose} footer={<button className="btn primary" onClick={onClose}>סיום</button>}>
         <div className="col">
@@ -192,6 +220,8 @@ export function ScheduleDialog({ type: type0, caseId, serviceCallId, contractId,
               <div key={a.id}>{dateLong(a.start)} · {fmtTime(a.start)}–{fmtTime(a.end)}</div>
             ))}
             {ctx.team.length > 0 && <div className="muted">צוות: {ctx.team.map((u) => u.name).join(', ')}</div>}
+            {first.location && <div className="muted"><MapPin size={13} style={{ verticalAlign: -2 }} /> {first.location}</div>}
+            {first.reminderMin ? <div className="muted"><Bell size={13} style={{ verticalAlign: -2 }} /> תזכורת לצוות {reminderOptions.find((o) => o.min === first.reminderMin)?.label}</div> : null}
           </Callout>
           {ctx.phone && raw ? (
             <div className="card flat card-body">
@@ -201,7 +231,7 @@ export function ScheduleDialog({ type: type0, caseId, serviceCallId, contractId,
           ) : null}
           <div className="row wrap">
             <a className="btn" href={googleCalendarLink(ev)} target="_blank" rel="noreferrer"><CalendarPlus size={16} /> הוספה ליומן גוגל</a>
-            <button className="btn" onClick={() => download(icsFile(done.map((a) => icsEvent(useApp.getState().db, a))), `genair-${ymd(first.start)}.ics`)}><Download size={16} /> קובץ ליומן (‎.ics)</button>
+            <button className="btn" onClick={() => download(icsFile(done.map(withLoc)), `genair-${ymd(first.start)}.ics`)}><Download size={16} /> קובץ ליומן (‎.ics)</button>
           </div>
         </div>
       </Modal>
@@ -226,7 +256,7 @@ export function ScheduleDialog({ type: type0, caseId, serviceCallId, contractId,
           {!linked && (
             <div className="row wrap" role="radiogroup" aria-label="סוג">
               {allTypes.map((t) => (
-                <button key={t} type="button" className={`chip ${t === type ? 'on' : ''}`} onClick={() => { setType(t); setEndT(defaultDuration[t] ? fromMin(toMin(startT) + defaultDuration[t]) : dayEnd) }}>
+                <button key={t} type="button" className={`chip ${t === type ? 'on' : ''}`} onClick={() => { setType(t); setEndT(defaultDuration[t] ? fromMin(toMin(startT) + defaultDuration[t]) : dayEnd); if (t === 'meeting' && !reminderMin) setReminderMin(30) }}>
                   <span className="dotc" style={{ background: appointmentTypeColor[t] }} /> {appointmentTypeLabel[t]}
                 </button>
               ))}
@@ -265,6 +295,7 @@ export function ScheduleDialog({ type: type0, caseId, serviceCallId, contractId,
                 const k = ymd(d)
                 const ds = dayStatus(d, cal)
                 const off = !settings.workDays.includes(d.getDay())
+                const away = ds.ok && userIds.some((id) => leavesOn(db.leaves, k, id).some((l) => !l.hours))
                 return (
                   <button
                     key={k}
@@ -276,7 +307,7 @@ export function ScheduleDialog({ type: type0, caseId, serviceCallId, contractId,
                   >
                     <span className="dw">{dow(d)}</span>
                     <b>{d.getDate()}</b>
-                    <span className="lb">{!ds.ok ? ds.label : ds.short ? `עד ${ds.endBy}` : k === ymd(today) ? 'היום' : ' '}</span>
+                    <span className="lb" style={away ? { color: 'var(--danger)', fontWeight: 600 } : undefined}>{!ds.ok ? ds.label : away ? 'חופשה' : ds.short ? `עד ${ds.endBy}` : k === ymd(today) ? 'היום' : ' '}</span>
                   </button>
                 )
               })}
@@ -315,14 +346,29 @@ export function ScheduleDialog({ type: type0, caseId, serviceCallId, contractId,
                 const on = userIds.includes(u.id)
                 const busy = day ? busyOn(db.appointments, u.id, day) : []
                 const clash = busy.some((a) => toMin(hhmmOf(a.start)) < toMin(endT) && toMin(startT) < toMin(hhmmOf(a.end)))
+                const away = day ? leaveOf(u.id) : undefined
+                const out = !!away && !('partial' in away)
                 return (
-                  <button key={u.id} type="button" className={`pick-user ${on ? 'on' : ''}`} onClick={() => setUserIds((l) => (on ? l.filter((x) => x !== u.id) : [...l, u.id]))} aria-pressed={on}>
+                  <button
+                    key={u.id}
+                    type="button"
+                    className={`pick-user ${on ? 'on' : ''}`}
+                    style={out ? { borderColor: on ? 'var(--danger)' : undefined, background: on ? 'var(--danger-50)' : 'var(--surface-2)', cursor: on ? 'pointer' : 'not-allowed' } : undefined}
+                    disabled={out && !on}
+                    title={out && away ? `${u.name} בחופשה (${leaveLabel(away.leave.type)})` : undefined}
+                    onClick={() => setUserIds((l) => (on ? l.filter((x) => x !== u.id) : [...l, u.id]))}
+                    aria-pressed={on}
+                  >
                     <Avatar user={u} />
-                    <span className="grow" style={{ textAlign: 'start' }}>
+                    <span className="grow" style={{ textAlign: 'start', opacity: out && !on ? 0.6 : 1 }}>
                       <span className="strong">{u.name}</span>
                       <span className="tiny muted" style={{ display: 'block' }}>{u.title || roleLabel[u.role]}</span>
                     </span>
-                    {day && (
+                    {day && out ? (
+                      <span className="tiny txt-danger strong" style={{ textAlign: 'end', display: 'inline-flex', alignItems: 'center', gap: 4 }}><Palmtree size={13} /> בחופשה</span>
+                    ) : day && away ? (
+                      <span className="tiny txt-warning" style={{ textAlign: 'end' }}>חופשה {away.leave.hours?.start}–{away.leave.hours?.end}</span>
+                    ) : day && (
                       busy.length ? (
                         <span className={`tiny ${clash ? 'txt-danger' : 'muted'}`} style={{ textAlign: 'end' }}>
                           {busy.slice(0, 2).map((a) => <span key={a.id} style={{ display: 'block' }}>{fmtTime(a.start)}–{fmtTime(a.end)}</span>)}
@@ -343,6 +389,19 @@ export function ScheduleDialog({ type: type0, caseId, serviceCallId, contractId,
               <input type="checkbox" checked={height} onChange={(e) => setHeight(e.target.checked)} /> עבודה בגובה / מנוף
             </label>
           )}
+
+          <div className="grid g2">
+            {(type === 'meeting' || !customer) && (
+              <Field label={<span><MapPin size={13} style={{ verticalAlign: -2 }} /> מיקום</span>}>
+                <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} placeholder={customer ? 'אם לא אצל הלקוח: משרד, אתר, זום...' : 'משרד, אתר הבנייה, זום...'} />
+              </Field>
+            )}
+            <Field label={<span><Bell size={13} style={{ verticalAlign: -2 }} /> תזכורת לצוות</span>}>
+              <select className="select" value={reminderMin} onChange={(e) => setReminderMin(Number(e.target.value))}>
+                {reminderOptions.map((o) => <option key={o.min} value={o.min}>{o.label}</option>)}
+              </select>
+            </Field>
+          </div>
 
           <Field label="הערות לצוות">
             <textarea className="textarea" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="חניה, קוד כניסה, ציוד מיוחד..." />
@@ -404,6 +463,18 @@ export function ScheduleDialog({ type: type0, caseId, serviceCallId, contractId,
                 const who = a.userIds.filter((x) => userIds.includes(x)).map((x) => db.users.find((u) => u.id === x)?.name).join(', ')
                 return <div key={a.id}>{who}: {a.title} ({dateShortDay(a.start)} {fmtTime(a.start)}–{fmtTime(a.end)})</div>
               })}
+            </Callout>
+          )}
+          {leaveHits.length > 0 && (
+            <Callout tone="danger" icon={<Palmtree size={18} />}>
+              <div className="strong">בחופשה במועד הזה</div>
+              {[...new Map(leaveHits.map((h) => [h.userId, h])).values()].map((h) => (
+                <div key={h.userId} className="row between wrap" style={{ gap: 6 }}>
+                  <span>{db.users.find((u) => u.id === h.userId)?.name}: {leaveLabel(h.leave.type)} ({h.leave.from === h.leave.to ? dateShortDay(h.leave.from) : `${dateShortDay(h.leave.from)} – ${dateShortDay(h.leave.to)}`}{h.leave.hours ? ` ${h.leave.hours.start}–${h.leave.hours.end}` : ''})</span>
+                  <button type="button" className="btn sm" onClick={() => setUserIds((l) => l.filter((x) => x !== h.userId))}>הסרה מהשיבוץ</button>
+                </div>
+              ))}
+              <div className="tiny mt8">אי אפשר לשבץ עובד בחופשה שאושרה. בחרו מישהו אחר או יום אחר.</div>
             </Callout>
           )}
           {certIssues.map((c, i) => <Callout key={i} tone={c.tone}>{c.text}. לעבודה בגובה צריך אישור בתוקף.</Callout>)}

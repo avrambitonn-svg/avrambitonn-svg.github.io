@@ -54,6 +54,20 @@ test('bootstrap: only while empty, strips secrets and device settings, returns a
   assert.equal(snap.json.settings.depositPct, 20);
   assert.deepEqual(snap.json.counters, { case: 142, quote: 2, service: 313 });
   assert.equal(snap.json.collections.users.length, 4);
+  assert.equal(snap.json.collections.cases.find((k) => k.id === 'k1').portal.token, 'TokenK1abcdefgh', 'strong portal links stay');
+});
+
+test('bootstrap replaces short demo portal links with random ones', async (t) => {
+  useEnv(t);
+  const s = await startServer(t);
+  const snap = orgSnapshot();
+  snap.collections.cases[0].portal.token = 'pt-k1';
+  const r = await s.request('POST', '/api/auth/bootstrap', { body: { snapshot: snap, adminUserId: 'u-admin', password: ADMIN_PASSWORD } });
+  const d = await s.request('GET', '/api/db/snapshot', { headers: bearer(r.json.token) });
+  const tok = d.json.collections.cases.find((k) => k.id === 'k1').portal.token;
+  assert.match(tok, /^[A-Za-z0-9]{18}$/);
+  assert.equal((await s.request('GET', '/api/portal/pt-k1')).status, 404);
+  assert.equal((await s.request('GET', `/api/portal/${tok}`)).status, 200);
 });
 
 test('BOOTSTRAP_TOKEN protects the first run', async (t) => {

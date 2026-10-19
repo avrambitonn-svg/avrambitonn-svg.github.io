@@ -1,0 +1,24 @@
+/* חופשות: בקשה, אישור ולוח היעדרויות */
+.lv-item { display: flex; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line-2); align-items: flex-start; }
+.lv-item:last-child { border-bottom: 0; }
+.lv-item .grow { display: flex; flex-direction: column; gap: 4px; }
+.lv-when { font-weight: 700; color: var(--ink); }
+.lv-sub { font-size: 12.5px; color: var(--text-3); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.lv-reason { font-size: 13.5px; color: var(--text-2); white-space: pre-wrap; }
+.lv-note { font-size: 13px; background: var(--surface-2); border-radius: 8px; padding: 6px 10px; color: var(--text-2); }
+.lv-acts { display: flex; gap: 6px; flex-wrap: wrap; flex: none; }
+@media (max-width: 560px) { .lv-item { flex-wrap: wrap; } .lv-acts { width: 100%; } .lv-acts .btn { flex: 1; } }
+.lv-conf { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.lv-conf a { font-weight: 600; }
+.lv-today { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+.lv-chip { display: flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; border-radius: 6px; padding: 1px 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; border: 1px solid transparent; min-width: 0; line-height: 1.5; }
+.lv-chip.pending { border-style: dashed; background: #fff !important; opacity: 0.85; }
+.lv-board { border-inline-start: 0; }
+.lv-board .cal-cell { min-height: 92px; min-width: 0; }
+.lv-board .cal-cell.today .cal-num { background: var(--brand); color: #fff; }
+.lv-legend { display: flex; flex-wrap: wrap; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--line-2); font-size: 12.5px; color: var(--text-2); }
+.lv-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.lv-days .lv-day { padding: 10px 16px; border-bottom: 1px solid var(--line-2); display: flex; flex-direction: column; gap: 6px; }
+.lv-days .lv-day:last-child { border-bottom: 0; }
+.lv-days .lv-day .row { flex-wrap: wrap; gap: 6px; }

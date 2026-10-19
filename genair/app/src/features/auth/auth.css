@@ -1,0 +1,53 @@
+/* מסך הכניסה, טעינת הנתונים והמשתמש המחובר בתפריט */
+.auth-page {
+  min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; padding: 28px 16px;
+  background:
+    radial-gradient(560px 300px at 85% 0%, rgba(0, 174, 239, 0.26), transparent 70%),
+    radial-gradient(480px 260px at 0% 100%, rgba(0, 174, 239, 0.14), transparent 70%),
+    var(--ink);
+  color: #d7dde3;
+}
+.auth-brand { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.auth-brand .wordmark b { font-size: 30px; }
+.auth-brand .wordmark small { font-size: 9.5px; }
+.auth-brand .slogan { font-size: 14px; color: #9fb0bf; }
+.auth-card { width: min(410px, 100%); background: #fff; color: var(--text); border-radius: 20px; padding: 26px 24px 22px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35); }
+.auth-card h1 { font-size: 24px; font-weight: 300; }
+.auth-card .sub { color: var(--text-3); font-size: 14px; margin-top: 4px; }
+.auth-card form { display: flex; flex-direction: column; gap: 14px; margin-top: 20px; }
+.auth-pass { position: relative; }
+.auth-pass .input { padding-inline-end: 44px; }
+.auth-pass button { position: absolute; inset-inline-end: 4px; top: 50%; transform: translateY(-50%); }
+.auth-foot { width: min(410px, 100%); display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12.5px; color: #8a96a2; text-align: center; }
+.auth-foot button { background: none; border: 0; color: #bfeeff; font-weight: 600; cursor: pointer; padding: 4px; }
+.auth-foot button:hover { color: #fff; }
+.auth-spin { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, 0.15); border-top-color: var(--brand); animation: auth-spin 0.9s linear infinite; }
+@keyframes auth-spin { to { transform: rotate(360deg); } }
+
+/* המשתמש המחובר בתחתית התפריט */
+.um-user { display: flex; align-items: center; gap: 10px; }
+.um-user .grow { min-width: 0; }
+.um-user .nm { color: #fff; font-weight: 600; }
+.um-user .icon-btn { color: #9fb0bf; width: 32px; height: 32px; }
+.um-user .icon-btn:hover { background: var(--ink-2); color: #fff; }
+.um-status { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.um-pill { display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.06); color: #cfd6dd; font-size: 11.5px; font-weight: 600; border: 0; cursor: pointer; font-family: inherit; }
+.um-pill:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.um-dot { width: 8px; height: 8px; border-radius: 50%; background: #64748b; flex: none; }
+.um-dot.online { background: #22c55e; box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18); }
+.um-dot.connecting { background: #eab308; }
+.um-dot.offline { background: #f97316; }
+.um-dot.error { background: #ef4444; }
+.um-link { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; background: none; border: 0; padding: 0; color: #9fb0bf; font-size: 12px; cursor: pointer; font-family: inherit; }
+.um-link:hover { color: #fff; }
+@media (min-width: 961px) {
+  .shell.collapsed .sidebar-foot .um-status, .shell.collapsed .sidebar-foot .um-link, .shell.collapsed .sidebar-foot .um-user .icon-btn { display: none; }
+}
+
+/* הגדרות ← חיבורים: מסד הנתונים */
+.sync-modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.sync-modes .choice { text-align: start; align-items: flex-start; }
+.sync-modes .choice b { font-size: 14.5px; }
+.sync-modes .choice small { color: var(--text-3); font-size: 12.5px; line-height: 1.45; font-weight: 400; }
+@media (max-width: 700px) { .sync-modes { grid-template-columns: minmax(0, 1fr); } }
+.sync-temp { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); border: 1px dashed var(--line); font-size: 20px; font-weight: 700; letter-spacing: 0.08em; }

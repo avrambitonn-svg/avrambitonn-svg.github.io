@@ -82,7 +82,7 @@ export function MoneyTab({ caseId }: { caseId: ID }) {
     for (const l of lines) rows.push([kindLabel[l.kind], l.at, catText(l, cfg), l.description, suppliers.find((s) => s.id === l.supplierId)?.name ?? '', users.find((u) => u.id === (l.agentId ?? l.userId))?.name ?? '', optLabel(cfg.paymentMethods, l.method), l.kind === 'commission' ? (isPaid(l) ? 'שולם' : 'ממתין') : '', String(l.amount)])
     rows.push([], ['תקציב', '', '', '', '', '', '', '', String(budget)], ['הוצאות', '', '', '', '', '', '', '', String(expenses)], ['עמלות', '', '', '', '', '', '', '', String(commissions)], ['תשלומים', '', '', '', '', '', '', '', String(paid)])
     const csv = '﻿' + rows.map((r) => r.map((x) => `"${String(x ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')
-    download(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `${k.number}-כספים-${ymd()}.csv`)
+    download(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `${k.number}-finance-${ymd()}.csv`)
   }
 
   return (

@@ -301,7 +301,7 @@ function PurchaseCard({ onOpenPo }: { onOpenPo: (id: ID) => void }) {
   )
 }
 
-// הזמנות שעוד לא הגיעו: קבלה למלאי בלחיצה
+// הזמנות שעוד לא התקבלו: קבלה למלאי בלחיצה
 function OpenOrdersCard({ onOpenPo }: { onOpenPo: (id: ID) => void }) {
   const pos = useApp((s) => s.db.purchaseOrders)
   const suppliers = useApp((s) => s.db.suppliers)
@@ -310,7 +310,7 @@ function OpenOrdersCard({ onOpenPo }: { onOpenPo: (id: ID) => void }) {
   const today = new Date().toISOString().slice(0, 10)
   const rpo = open.find((p) => p.id === receiving)
   return (
-    <Card title={<div className="row" style={{ gap: 8 }}><Truck size={16} className="muted" /><h2>הזמנות בדרך</h2></div>} actions={<Link className="btn sm ghost" to="/suppliers?tab=orders">הכל</Link>}>
+    <Card title={<div className="row" style={{ gap: 8 }}><Truck size={16} className="muted" /><h2>הזמנות פתוחות</h2></div>} actions={<Link className="btn sm ghost" to="/suppliers?tab=orders">הכל</Link>}>
       {!open.length ? <div className="card-body small muted">אין הזמנות פתוחות</div> : (
         <div className="list">
           {open.slice(0, 6).map((p) => {

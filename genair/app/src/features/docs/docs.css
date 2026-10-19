@@ -1,0 +1,29 @@
+/* מסמכים בתיקיות: גרירה לתיקייה, התקדמות העלאה, תצוגה מקדימה */
+.dp-folder { transition: border-color 0.15s, box-shadow 0.15s; }
+.dp-folder.drag { border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 18%, transparent); }
+.dp-folder .card-head { gap: 8px; }
+.dp-folder .card-head h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dp-ico { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; flex: none; }
+.dp-drop { padding: 18px; text-align: center; color: var(--text-3); font-size: 13px; }
+.dp-drop b { color: var(--text-2); font-weight: 600; }
+.dp-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line-2); }
+.dp-row:last-child { border-bottom: 0; }
+.dp-row[draggable='true'] { cursor: grab; }
+.dp-row .grow { min-width: 0; }
+.dp-name { display: block; max-width: 100%; border: 0; background: none; padding: 0; font: inherit; font-weight: 600; font-size: 13.5px; color: var(--ink); text-align: start; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dp-name:hover { color: var(--brand-700); text-decoration: underline; }
+.dp-name.off { cursor: default; text-decoration: none; color: var(--text-2); }
+.dp-acts { display: flex; align-items: center; gap: 0; flex: none; }
+.dp-acts .icon-btn { width: 32px; height: 32px; }
+.dp-acts select { width: 34px; height: 32px; padding: 0; border: 0; background: transparent; color: transparent; cursor: pointer; position: absolute; inset: 0; opacity: 0; }
+.dp-move { position: relative; width: 32px; height: 32px; display: grid; place-items: center; color: var(--text-2); border-radius: 10px; }
+.dp-move:hover { background: var(--line-2); }
+.dp-move:focus-within { outline: 2px solid var(--brand); outline-offset: 1px; }
+.dp-up { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line-2); }
+.dp-up:last-child { border-bottom: 0; }
+.dp-up .grow { min-width: 0; }
+.dp-up .progress { margin-top: 6px; }
+.dp-preview { display: grid; place-items: center; min-height: 240px; background: var(--surface-2); border-radius: 12px; overflow: hidden; }
+.dp-preview img { max-height: 70vh; object-fit: contain; }
+.dp-preview iframe { width: 100%; height: 70vh; border: 0; background: #fff; }
+.dp-label-input { height: 30px; font-size: 14px; font-weight: 700; padding: 0 8px; width: 140px; }

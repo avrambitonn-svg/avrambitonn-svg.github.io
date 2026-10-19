@@ -6,7 +6,7 @@ import { useApp } from '../../lib/store'
 import { Badge, Card, Empty, Stat, Tabs } from '../../components/ui'
 import { DocsPanel } from '../../features/docs/DocsPanel'
 import { Dot, Stars } from '../../features/case/controls'
-import { date, money } from '../../lib/format'
+import { date, money, phone as fmtPhone } from '../../lib/format'
 import { telLink, whatsappLink } from '../../lib/integrations/links'
 import { isOpenPo, poStatusLabel, poStatusTone, poTotal } from './po'
 import { SupplierDialog } from './SupplierDialog'
@@ -64,7 +64,7 @@ export default function SupplierPage({ id: idProp, onBack, onOpenPo }: { id?: ID
             </div>
           </div>
           <div className="row wrap" style={{ gap: 6 }}>
-            {sup.phone && <a className="btn sm" href={telLink(sup.phone)}><Phone size={15} /> <span className="ltr">{sup.phone}</span></a>}
+            {sup.phone && <a className="btn sm" href={telLink(sup.phone)}><Phone size={15} /> <span className="ltr">{fmtPhone(sup.phone)}</span></a>}
             {digits.length >= 9 && <a className="btn sm wa" href={whatsappLink(sup.phone!, `שלום${sup.contactName ? ` ${sup.contactName}` : ''}, `)} target="_blank" rel="noreferrer"><MessageCircle size={15} /> וואטסאפ</a>}
             {sup.email && <a className="btn sm" href={`mailto:${sup.email}`}><Mail size={15} /> מייל</a>}
             <button className="btn sm" onClick={() => setEdit(true)}><Pencil size={15} /> עריכה</button>
@@ -139,7 +139,7 @@ export default function SupplierPage({ id: idProp, onBack, onOpenPo }: { id?: ID
         {tab === 'details' && (
           <div className="card-body grid g2 small sp-details">
             <div><span className="muted">איש קשר: </span>{sup.contactName ?? '—'}</div>
-            <div><span className="muted">טלפון: </span>{sup.phone ? <a href={telLink(sup.phone)} className="ltr">{sup.phone}</a> : '—'}</div>
+            <div><span className="muted">טלפון: </span>{sup.phone ? <a href={telLink(sup.phone)} className="ltr">{fmtPhone(sup.phone)}</a> : '—'}</div>
             <div><span className="muted">אימייל: </span>{sup.email ? <a href={`mailto:${sup.email}`} className="ltr">{sup.email}</a> : '—'}</div>
             <div><span className="muted">אתר: </span>{sup.website ? <a href={sup.website} target="_blank" rel="noreferrer" className="ltr"><Globe size={13} /> {sup.website.replace(/^https?:\/\//, '')} <ExternalLink size={12} /></a> : '—'}</div>
             <div><span className="muted">כתובת: </span>{sup.address ? <a href={`https://waze.com/ul?q=${encodeURIComponent(sup.address)}&navigate=yes`} target="_blank" rel="noreferrer"><MapPin size={13} /> {sup.address}</a> : '—'}</div>

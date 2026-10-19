@@ -38,5 +38,7 @@
 .fs-mini { display: inline-flex; gap: 2px; flex: none; }
 .fs-mini .icon-btn { width: 30px; height: 30px; }
 .fs-save { position: sticky; bottom: 12px; z-index: 6; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 14px; border-radius: 12px; background: var(--ink); color: #fff; box-shadow: var(--shadow-lg); }
-@media (max-width: 960px) { .fs-save { bottom: 76px; } }
+/* משאירים מקום לכפתור הצ'אט הצף (שמאל במחשב, ימין בנייד) */
+.fs-save { margin-inline-end: 72px; }
+@media (max-width: 960px) { .fs-save { bottom: calc(76px + env(safe-area-inset-bottom)); margin-inline-end: 0; margin-inline-start: 62px; } }
 .fs-mini .icon-btn:disabled { opacity: 0.3; cursor: default; background: none; }

@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { CalendarPlus, ChevronLeft, ChevronRight, Download, FolderOpen, HardHat, MessageCircle, Navigation, Phone, Plus, Wrench, XCircle } from 'lucide-react'
+import { Bell, CalendarPlus, ChevronLeft, ChevronRight, Download, FolderOpen, HardHat, MapPin, MessageCircle, Navigation, Palmtree, Phone, Plus, Wrench, XCircle } from 'lucide-react'
 import { Avatars, Badge, Card, Confirm, Empty, Modal, PageHead, toast } from '../../components/ui'
 import { useApp, useMe } from '../../lib/store'
-import type { Appointment, AppointmentStatus, AppointmentType, ID } from '../../lib/types'
+import type { Appointment, AppointmentStatus, AppointmentType, ID, LeaveRequest, User } from '../../lib/types'
 import { appointmentStatusLabel, appointmentTypeColor, appointmentTypeLabel } from '../../lib/labels'
 import { addDays, dateLong, monthTitle, phone as fmtPhone, time as fmtTime, ymd } from '../../lib/format'
 import { dayStatus } from '../../lib/integrations/hebcal'
@@ -13,11 +13,12 @@ import { fill } from '../../lib/messaging'
 import { ScheduleDialog } from '../../features/schedule/ScheduleDialog'
 import { MessageModal } from '../../features/ops/MessageBox'
 import {
-  addressLine, dayStart, dow, dowLetters, dowNames, hhmmOf, icsEvent, jobContext, layoutLanes, messageVars, readPref, toMin, useForecast, useHebcal, useMedia, writePref,
+  addressLine, dayStart, dow, dowLetters, dowNames, hhmmOf, icsEvent, jobContext, layoutLanes, leavesOn, messageVars, readPref, toMin, useForecast, useHebcal, useMedia, writePref,
 } from '../../features/ops/ops'
 import '../../features/ops/ops.css'
+import './calendar.css'
 
-type View = 'month' | 'week'
+type View = 'month' | 'week' | 'day'
 const allTypes: AppointmentType[] = ['installation', 'survey', 'service', 'maintenance', 'inspection', 'meeting']
 const HOUR = 44
 const statusTone: Record<AppointmentStatus, 'muted' | 'info' | 'brand' | 'warning' | 'success' | 'danger'> = {
@@ -28,9 +29,11 @@ export default function CalendarPage() {
   const appts = useApp((s) => s.db.appointments)
   const users = useApp((s) => s.db.users)
   const customers = useApp((s) => s.db.customers)
+  const leaves = useApp((s) => s.db.leaves)
+  const leaveTypes = useApp((s) => s.db.config.leaveTypes)
   const me = useMe()
   const mobile = useMedia('(max-width: 700px)')
-  const [view, setViewState] = useState<View>(() => readPref('genair-cal-view', 'month', ['month', 'week'] as const))
+  const [view, setViewState] = useState<View>(() => readPref('genair-cal-view', 'month', ['month', 'week', 'day'] as const))
   const setView = (v: View) => { setViewState(v); writePref('genair-cal-view', v) }
   const [anchor, setAnchor] = useState(() => dayStart(new Date()))
   const [userF, setUserF] = useState<ID | ''>(me.role === 'installer' ? me.id : '')
@@ -44,9 +47,23 @@ export default function CalendarPage() {
   const [params, setParams] = useSearchParams()
   const deep = params.get('new') as AppointmentType | null
   const closeDeep = () => setParams({}, { replace: true })
+  // קישור למשימה מסוימת: /calendar?open=<id> (למשל מאישור חופשה)
+  const openParam = params.get('open')
+  useEffect(() => {
+    if (!openParam) return
+    const a = appts.find((x) => x.id === openParam)
+    if (a) {
+      setAnchor(dayStart(a.start))
+      setSelDay(ymd(a.start))
+      setOpenId(a.id)
+    }
+    params.delete('open')
+    setParams(params, { replace: true })
+  }, [openParam])
 
   // טווח התצוגה
   const range = useMemo(() => {
+    if (view === 'day') return { start: anchor, days: [anchor] }
     if (view === 'week') {
       const s = addDays(anchor, -anchor.getDay())
       return { start: s, days: Array.from({ length: 7 }, (_, i) => addDays(s, i)) }
@@ -81,14 +98,20 @@ export default function CalendarPage() {
   const opened = openId ? appts.find((a) => a.id === openId) : undefined
 
   const step = (n: number) => {
-    if (view === 'week') setAnchor((d) => addDays(d, 7 * n))
+    if (view === 'day') {
+      const next = addDays(anchor, n)
+      setAnchor(next)
+      setSelDay(ymd(next))
+    } else if (view === 'week') setAnchor((d) => addDays(d, 7 * n))
     else setAnchor((d) => new Date(d.getFullYear(), d.getMonth() + n, 1))
   }
   const goToday = () => { setAnchor(dayStart(new Date())); setSelDay(todayKey) }
 
   const title = view === 'month'
     ? monthTitle(anchor)
-    : (() => {
+    : view === 'day'
+      ? dateLong(anchor)
+      : (() => {
         const a = range.days[0]
         const b = range.days[6]
         return a.getMonth() === b.getMonth() ? `${a.getDate()}–${b.getDate()} ${monthTitle(a)}` : `${a.getDate()}.${a.getMonth() + 1} – ${b.getDate()}.${b.getMonth() + 1}.${String(b.getFullYear()).slice(2)}`
@@ -97,7 +120,7 @@ export default function CalendarPage() {
   const exportIcs = () => {
     if (!visible.length) return toast.info('אין משימות בתצוגה לייצוא')
     const db = useApp.getState().db
-    download(icsFile(visible.map((a) => icsEvent(db, a))), `genair-${view === 'week' ? 'week' : 'month'}-${ymd(range.start)}.ics`)
+    download(icsFile(visible.map((a) => icsEvent(db, a))), `genair-${view}-${ymd(range.start)}.ics`)
     toast.success(`יוצאו ${visible.length} משימות לקובץ יומן`)
   }
 
@@ -107,6 +130,11 @@ export default function CalendarPage() {
     return { all: visible.length, inst, svc }
   }, [visible])
 
+  // חופשות שאושרו (לפי סינון העובד)
+  const leavesFor = (k: string) => leavesOn(leaves, k).filter((l) => !userF || l.userId === userF)
+  const leaveType = (key: string) => leaveTypes.find((o) => o.key === key)
+  const outInRange = useMemo(() => new Set(range.days.flatMap((d) => leavesOn(leaves, ymd(d)).filter((l) => !userF || l.userId === userF).map((l) => l.userId))).size, [leaves, range.days, userF])
+  const userOf = (id: ID) => users.find((u) => u.id === id)
   const selStatus = dayStatus(dayStart(selDay), cal)
   const selEvents = byDay[selDay] ?? []
   const canAddOn = (k: string) => k >= todayKey && dayStatus(dayStart(k), cal).ok
@@ -115,7 +143,7 @@ export default function CalendarPage() {
     <div className="col" style={{ gap: 16 }}>
       <PageHead
         title="לוח זמנים"
-        sub={`${counts.all} משימות ב${view === 'week' ? 'שבוע' : 'חודש'} הזה · ${counts.inst} התקנות · ${counts.svc} שירות ותחזוקה`}
+        sub={`${counts.all} משימות ב${view === 'week' ? 'שבוע' : view === 'day' ? 'יום' : 'חודש'} הזה · ${counts.inst} התקנות · ${counts.svc} שירות ותחזוקה${outInRange ? ` · ${outInRange} בחופשה` : ''}`}
         actions={
           <>
             <button className="btn" onClick={exportIcs}><Download size={16} /> ייצוא ליומן</button>
@@ -156,6 +184,7 @@ export default function CalendarPage() {
             <div className="seg">
               <button className={view === 'month' ? 'on' : ''} onClick={() => setView('month')}>חודש</button>
               <button className={view === 'week' ? 'on' : ''} onClick={() => setView('week')}>שבוע</button>
+              <button className={view === 'day' ? 'on' : ''} onClick={() => { setView('day'); setAnchor(dayStart(selDay)) }}>יום</button>
             </div>
           </div>
         </div>
@@ -195,9 +224,11 @@ export default function CalendarPage() {
                     <div className="cal-dots">
                       {evs.slice(0, 4).map((a) => <i key={a.id} style={{ background: appointmentTypeColor[a.type] }} />)}
                       {evs.length > 4 && <span className="tiny muted">+</span>}
+                      {ds.ok && leavesFor(k).length > 0 && <Palmtree size={10} className="cal-out-ic" aria-label="יש עובדים בחופשה" />}
                     </div>
                   ) : (
                     <>
+                      {ds.ok && <LeaveLine list={leavesFor(k)} userOf={userOf} typeOf={leaveType} />}
                       {evs.slice(0, 3).map((a) => (
                         <div
                           key={a.id}
@@ -230,13 +261,15 @@ export default function CalendarPage() {
                     {ds.label && <Badge tone={!ds.ok ? 'muted' : ds.short ? 'warning' : 'info'}>{ds.label}{ds.short && ds.endBy ? ` · עד ${ds.endBy}` : ''}</Badge>}
                     {k === todayKey && <Badge tone="brand">היום</Badge>}
                   </div>
+                  {ds.ok && leavesFor(k).length > 0 && <OutToday list={leavesFor(k)} userOf={userOf} typeOf={leaveType} />}
                   {evs.length ? evs.map((a) => <EventRow key={a.id} a={a} customer={custName(a)} team={team(a)} onClick={() => setOpenId(a.id)} />) : <div className="tiny muted" style={{ padding: '4px 2px' }}>{ds.ok ? 'אין משימות' : 'לא עובדים'}</div>}
                 </div>
               )
             })}
           </div>
         ) : (
-          <WeekGrid days={range.days} byDay={byDay} cal={cal} todayKey={todayKey} onOpen={setOpenId} onNew={(k) => canAddOn(k) && setNewOn(k)} customerName={custName} />
+          <WeekGrid days={range.days} byDay={byDay} cal={cal} todayKey={todayKey} onOpen={setOpenId} onNew={(k) => canAddOn(k) && setNewOn(k)} customerName={custName} leavesFor={leavesFor} userOf={userOf} typeOf={leaveType}
+            onDay={view === 'week' ? (k) => { setSelDay(k); setAnchor(dayStart(k)); setView('day') } : undefined} />
         )}
       </Card>
 
@@ -250,6 +283,7 @@ export default function CalendarPage() {
           }
           actions={canAddOn(selDay) ? <button className="btn sm" onClick={() => setNewOn(selDay)}><Plus size={15} /> שיבוץ ביום הזה</button> : undefined}
         >
+          {selStatus.ok && leavesFor(selDay).length > 0 && <OutToday list={leavesFor(selDay)} userOf={userOf} typeOf={leaveType} />}
           {selEvents.length ? (
             <div className="list">{selEvents.map((a) => <EventRow key={a.id} a={a} customer={custName(a)} team={team(a)} onClick={() => setOpenId(a.id)} />)}</div>
           ) : (
@@ -291,9 +325,44 @@ function EventRow({ a, customer, team, onClick }: { a: Appointment; customer?: s
   )
 }
 
-function WeekGrid({ days, byDay, cal, todayKey, onOpen, onNew, customerName }: {
+type LeaveTypeOf = (key: string) => { label: string; color?: string } | undefined
+type UserOf = (id: ID) => User | undefined
+
+// מי בחופשה ביום: שורה קצרה בתא של החודש
+function LeaveLine({ list, userOf, typeOf }: { list: LeaveRequest[]; userOf: UserOf; typeOf: LeaveTypeOf }) {
+  if (!list.length) return null
+  const names = list.map((l) => userOf(l.userId)?.name.split(' ')[0]).filter(Boolean)
+  const color = typeOf(list[0].type)?.color ?? '#16a34a'
+  const title = list.map((l) => `${userOf(l.userId)?.name ?? ''} · ${typeOf(l.type)?.label ?? 'חופשה'}${l.hours ? ` ${l.hours.start}–${l.hours.end}` : ''}`).join('\n')
+  return (
+    <div className="cal-out" style={{ color, background: `${color}14`, borderColor: `${color}55` }} title={title}>
+      <Palmtree size={11} /> <span className="truncate">{names.length > 2 ? `${names.slice(0, 2).join(', ')} +${names.length - 2}` : names.join(', ')}</span>
+    </div>
+  )
+}
+
+function OutToday({ list, userOf, typeOf }: { list: LeaveRequest[]; userOf: UserOf; typeOf: LeaveTypeOf }) {
+  return (
+    <div className="cal-out-list">
+      <Palmtree size={14} />
+      <span className="small">לא בעבודה:</span>
+      {list.map((l) => {
+        const t = typeOf(l.type)
+        return (
+          <span key={l.id} className="cal-out" style={{ color: t?.color, background: `${t?.color ?? '#16a34a'}14`, borderColor: `${t?.color ?? '#16a34a'}55` }}>
+            {userOf(l.userId)?.name} · {t?.label ?? 'חופשה'}{l.hours ? <> <span className="ltr">{l.hours.start}–{l.hours.end}</span></> : null}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+function WeekGrid({ days, byDay, cal, todayKey, onOpen, onNew, customerName, leavesFor, userOf, typeOf, onDay }: {
   days: Date[]; byDay: Record<string, Appointment[]>; cal: Parameters<typeof dayStatus>[1]; todayKey: string; onOpen: (id: ID) => void; onNew: (k: string) => void; customerName: (a: Appointment) => string | undefined
+  leavesFor: (k: string) => LeaveRequest[]; userOf: UserOf; typeOf: LeaveTypeOf; onDay?: (k: string) => void
 }) {
+  const one = days.length === 1
   const all = days.flatMap((d) => byDay[ymd(d)] ?? [])
   const minH = Math.min(7, ...all.map((a) => new Date(a.start).getHours()))
   const maxH = Math.max(19, ...all.map((a) => Math.ceil(toMin(hhmmOf(a.end)) / 60)))
@@ -302,16 +371,17 @@ function WeekGrid({ days, byDay, cal, todayKey, onOpen, onNew, customerName }: {
   const now = new Date()
   return (
     <div className="wk-wrap">
-      <div className="wk" style={{ ['--h' as string]: `${hours.length * HOUR}px` }}>
+      <div className={`wk ${one ? 'one' : ''}`} style={{ ['--h' as string]: `${hours.length * HOUR}px` }}>
         <div className="wk-corner" />
         {days.map((d) => {
           const k = ymd(d)
           const ds = dayStatus(d, cal)
           return (
-            <div key={k} className={`wk-dh ${k === todayKey ? 'today' : ''} ${!ds.ok ? 'blocked' : ''}`}>
+            <div key={k} className={`wk-dh ${k === todayKey ? 'today' : ''} ${!ds.ok ? 'blocked' : ''} ${onDay ? 'click' : ''}`} onClick={onDay ? () => onDay(k) : undefined} title={onDay ? 'תצוגת יום' : undefined}>
               <span className="tiny muted">{dowNames[d.getDay()]}</span>
               <b className={k === todayKey ? 'today-num' : ''}>{d.getDate()}</b>
               <span className={`tiny truncate ${ds.short ? 'txt-warning' : 'muted'}`} title={ds.label}>{ds.label && ds.label !== dowNames[d.getDay()] ? (ds.short && ds.endBy ? `עד ${ds.endBy}` : ds.label) :' '}</span>
+              {ds.ok && leavesFor(k).length > 0 && (one ? <OutToday list={leavesFor(k)} userOf={userOf} typeOf={typeOf} /> : <LeaveLine list={leavesFor(k)} userOf={userOf} typeOf={typeOf} />)}
             </div>
           )
         })}
@@ -326,6 +396,11 @@ function WeekGrid({ days, byDay, cal, todayKey, onOpen, onNew, customerName }: {
           return (
             <div key={k} className={`wk-col ${!ds.ok ? 'blocked' : ''} ${k === todayKey ? 'today' : ''}`} onDoubleClick={() => onNew(k)}>
               {!ds.ok && <div className="wk-blk">{ds.label}</div>}
+              {ds.ok && leavesFor(k).filter((l) => l.hours).map((l) => (
+                <div key={l.id} className="wk-leave" style={{ top: Math.max(0, y(l.hours!.start)), height: Math.max(18, y(l.hours!.end) - y(l.hours!.start)) }} title={`${userOf(l.userId)?.name} · ${typeOf(l.type)?.label ?? 'חופשה'}`}>
+                  <span><Palmtree size={11} /> {userOf(l.userId)?.name.split(' ')[0]}</span>
+                </div>
+              ))}
               {ds.ok && ds.short && ds.endBy && (
                 <div className="wk-after" style={{ top: Math.max(0, y(ds.endBy)) }}>
                   <span>{candles ? `נרות ${candles}` : `לסיים עד ${ds.endBy}`}</span>
@@ -362,7 +437,8 @@ function EventModal({ ap, onClose, onMessage }: { ap: Appointment; onClose: () =
   const patch = useApp((s) => s.patch)
   const [confirm, setConfirm] = useState(false)
   const ctx = jobContext(db, ap)
-  const ev = icsEvent(db, ap)
+  const ev0 = icsEvent(db, ap)
+  const ev = ap.location ? { ...ev0, location: ap.location } : ev0
   const setStatus = (status: AppointmentStatus) => {
     patch('appointments', ap.id, { status })
     toast.success(`סטטוס: ${appointmentStatusLabel[status]}`)
@@ -380,6 +456,8 @@ function EventModal({ ap, onClose, onMessage }: { ap: Appointment; onClose: () =
           {ctx.customer && (<><dt>לקוח</dt><dd>{ctx.customer.name}{ctx.contact && ctx.contact.name !== ctx.customer.name ? ` · ${ctx.contact.name}` : ''}{ctx.phone ? <> · <a href={telLink(ctx.phone)} className="ltr">{fmtPhone(ctx.phone)}</a></> : null}</dd></>)}
           {ctx.address && (<><dt>כתובת</dt><dd>{addressLine(ctx.address)}{ctx.address.entryNotes ? <div className="tiny muted">{ctx.address.entryNotes}</div> : null}</dd></>)}
           {ctx.team.length > 0 && (<><dt>צוות</dt><dd className="row" style={{ gap: 8 }}><Avatars users={ctx.team} /> {ctx.team.map((u) => u.name).join(', ')}</dd></>)}
+          {ap.location && (<><dt>מיקום</dt><dd><MapPin size={13} style={{ verticalAlign: -2 }} /> {ap.location}</dd></>)}
+          {ap.reminderMin ? (<><dt>תזכורת</dt><dd><Bell size={13} style={{ verticalAlign: -2 }} /> {ap.reminderMin >= 1440 ? 'יום לפני' : ap.reminderMin === 60 ? 'שעה לפני' : ap.reminderMin === 30 ? 'חצי שעה לפני' : `${ap.reminderMin} דקות לפני`}{ap.remindedAt ? ' · נשלחה' : ''}</dd></>) : null}
           {ap.notes && (<><dt>הערות</dt><dd>{ap.notes}</dd></>)}
           {ap.checklist.length > 0 && (<><dt>צ׳קליסט</dt><dd>{ap.checklist.filter((c) => c.done).length} מתוך {ap.checklist.length} הושלמו</dd></>)}
         </dl>

@@ -61,6 +61,7 @@ export function defaultConfig(): Config {
     ],
     caseNumbering: { mode: 'global', prefix: 'GN-', pad: 4 },
     theme: 'genair',
+    installerDayCost: 1100,
   }
 }
 

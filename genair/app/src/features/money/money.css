@@ -1,5 +1,8 @@
 /* כספי התיק: מדדים, אזורים, טבלה וכרטיסים */
-.money-kpis { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.money-kpis { grid-template-columns: repeat(auto-fit, minmax(136px, 1fr)); gap: 10px; }
+.money-kpis .stat { padding: 12px; gap: 10px; flex-direction: column; align-items: flex-start; }
+.money-kpis .stat .ico { width: 34px; height: 34px; border-radius: 10px; }
+.money-kpis .stat .grow { width: 100%; }
 .money-kpis .stat .val .mv { font-size: 20px; }
 .money-kpis .stat .delta .progress { margin-top: 6px; height: 6px; }
 .money-ico { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--brand-50); color: var(--brand-700); flex: none; }
@@ -14,6 +17,11 @@
 .budget-row.off { opacity: 0.55; }
 @media (max-width: 700px) {
   .money-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .money-kpis .stat .val .mv { font-size: 17px; }
+  .money-kpis .stat { flex-direction: row; align-items: center; padding: 10px; gap: 8px; }
+  .money-kpis .stat .ico { width: 30px; height: 30px; }
+  .money-kpis .stat .ico svg { width: 17px; height: 17px; }
+  .money-kpis .stat .lbl { font-size: 12px; }
+  .money-kpis .stat .val .mv { font-size: 16px; }
+  .money-kpis .stat:last-child { grid-column: 1 / -1; }
   .money-cards { grid-template-columns: minmax(0, 1fr); padding: 10px; }
 }

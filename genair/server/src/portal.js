@@ -10,7 +10,7 @@ import { googleFeatures, jerusalemDate, uploadBufferToDrive } from './google.js'
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-const TOKEN_RE = /^[A-Za-z0-9]{8,64}$/;
+const TOKEN_RE = /^[A-Za-z0-9]{12,64}$/;
 const uid = (prefix) => `${prefix}${randomBytes(6).toString('hex')}`;
 const nowIso = () => new Date().toISOString();
 const today = () => jerusalemDate(nowIso());

@@ -1,0 +1,69 @@
+/* דוחות: טווח תאריכים, מדדים עם שינוי, גרפים (CSS ו-SVG) וגיליון הדפסה ל-A4 */
+.rp-range { gap: 6px; margin-top: -8px; }
+.rp-dates { gap: 10px; }
+.rp-dates .input { width: auto; }
+.rp-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+.rp-kpis .stat { flex-direction: column; align-items: flex-start; gap: 8px; padding: 14px; }
+.rp-kpis .stat .ico { width: 36px; height: 36px; border-radius: 10px; }
+.rp-kpis .stat .val { font-size: 24px; }
+.rp-mv { font-size: 19px; }
+.rp-delta { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; font-weight: 600; flex-wrap: wrap; }
+.rp-delta.good { color: var(--success); }
+.rp-delta.bad { color: var(--danger); }
+.rp-delta.flat { color: var(--text-3); }
+@media (max-width: 1250px) { .rp-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .rp-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .rp-mv { font-size: 16px; } }
+
+/* עמודות מוערמות */
+.rp-stack { display: flex; align-items: flex-end; gap: 6px; height: 180px; padding-top: 18px; }
+.rp-col { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; position: relative; }
+.rp-col.out { opacity: 0.38; }
+.rp-bar { width: 100%; max-width: 40px; display: flex; flex-direction: column-reverse; border-radius: 7px 7px 3px 3px; overflow: hidden; min-height: 0; }
+.rp-bar > div { min-height: 2px; }
+.rp-n { font-size: 11px; color: var(--text-2); font-weight: 700; }
+.rp-lbl { font-size: 11px; color: var(--text-3); white-space: nowrap; }
+.rp-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 12px; font-size: 12.5px; color: var(--text-2); }
+.rp-legend i, .rp-dlegend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; margin-inline-end: 5px; flex: none; }
+@media (max-width: 700px) { .rp-stack { gap: 3px; } .rp-lbl { font-size: 9.5px; } }
+
+/* עוגה */
+.rp-donut { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+.rp-donut svg { flex: none; }
+.rp-donut-n { font-size: 26px; font-weight: 700; fill: var(--ink); font-family: var(--font); }
+.rp-donut-l { font-size: 12px; fill: var(--text-3); font-family: var(--font); }
+.rp-dlegend { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 6px; }
+.rp-dlegend i { border-radius: 50%; }
+.rp-rank { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; background: var(--brand-50); color: var(--brand-700); font-size: 11px; font-weight: 700; margin-inline-end: 8px; }
+
+/* הדפסה / PDF */
+.rp-print-head { display: none; }
+@page report { size: A4; margin: 11mm 10mm; }
+@media print {
+  body.print-report { background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body.print-report .shell > :not(.main), body.print-report .main > :not(.content) { display: none !important; }
+  body.print-report .reports { page: report; gap: 10px !important; font-size: 11.5px; }
+  body.print-report .rp-print-head { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 3px solid #00aeef; padding-bottom: 6px; font-size: 12px; }
+  body.print-report .rp-brand { direction: ltr; display: inline-block; letter-spacing: 0.04em; font-size: 16px; }
+  body.print-report .rp-brand span { color: #00aeef; }
+  body.print-report .page-head { margin-bottom: 4px; }
+  body.print-report .page-head .row, body.print-report .no-print { display: none !important; }
+  body.print-report .page-head h1 { font-size: 20px; }
+  body.print-report .card { border: 1px solid #dfe4e9 !important; box-shadow: none; break-inside: avoid; }
+  body.print-report .card-head { padding: 8px 12px; }
+  body.print-report .card-body { padding: 8px 12px; }
+  body.print-report .rp-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  body.print-report .grid.g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  body.print-report .grid.g2.rp-pair { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  body.print-report .stat { padding: 8px 10px; gap: 6px; break-inside: avoid; }
+  body.print-report .stat .ico { display: none; }
+  body.print-report .stat .val { font-size: 17px; }
+  body.print-report .stat .lbl { font-size: 11px; }
+  body.print-report .table-wrap { overflow: visible; }
+  body.print-report .table th, body.print-report .table td { padding: 4px 6px; font-size: 10.5px; white-space: normal; }
+  body.print-report .avatar { width: 20px; height: 20px; font-size: 9px; }
+  body.print-report .hide-mobile { display: table-cell !important; }
+  body.print-report .rp-stack { height: 130px; }
+  body.print-report .rp-donut svg { width: 120px; height: 120px; }
+  body.print-report .bar-chart { height: 120px; }
+  body.print-report .empty { padding: 12px; }
+}

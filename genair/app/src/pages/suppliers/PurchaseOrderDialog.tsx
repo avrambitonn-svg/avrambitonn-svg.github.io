@@ -102,8 +102,8 @@ export function PurchaseOrderDialog({ po, initial, onClose, onSaved }: { po?: Pu
                   {grouped.map(([c, list]) => <optgroup key={c} label={categoryLabel[c]}>{list.map((it) => <option key={it.id} value={it.id}>{it.sku} · {it.name}</option>)}</optgroup>)}
                 </select>
                 <input className="input sm" value={l.description} onChange={(e) => setLine(i, { description: e.target.value })} placeholder="מה מזמינים" aria-label="תיאור" />
-                <input className="input sm num" type="number" min={0} inputMode="decimal" value={l.qty} onChange={(e) => setLine(i, { qty: Math.max(0, Number(e.target.value) || 0) })} aria-label="כמות" />
-                <input className="input sm num" type="number" min={0} inputMode="decimal" value={l.unitCost} onChange={(e) => setLine(i, { unitCost: Math.max(0, Number(e.target.value) || 0) })} aria-label="עלות ליחידה" />
+                <label className="po-num"><span className="show-mobile">כמות</span><input className="input sm num" type="number" min={0} inputMode="decimal" value={l.qty} onChange={(e) => setLine(i, { qty: Math.max(0, Number(e.target.value) || 0) })} aria-label="כמות" /></label>
+                <label className="po-num"><span className="show-mobile">עלות ליח׳</span><input className="input sm num" type="number" min={0} inputMode="decimal" value={l.unitCost} onChange={(e) => setLine(i, { unitCost: Math.max(0, Number(e.target.value) || 0) })} aria-label="עלות ליחידה" /></label>
                 <span className="num small strong end">{money(l.qty * l.unitCost)}</span>
                 <button className="icon-btn sm" onClick={() => setLines((ls) => (ls.length > 1 ? ls.filter((_, j) => j !== i) : [{ description: '', qty: 1, unitCost: 0 }]))} aria-label="מחיקת שורה"><Trash2 size={15} /></button>
               </div>

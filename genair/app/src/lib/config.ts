@@ -18,7 +18,7 @@ export function useConfig<T>(sel: (c: Config) => T): T {
 }
 export const setConfig = (p: Partial<Config>) => app().setConfig(p)
 
-export type ListKey = { [K in keyof Config]: Config[K] extends ListOption[] ? K : never }[keyof Config]
+export type ListKey = { [K in keyof Config]-?: Config[K] extends ListOption[] ? K : never }[keyof Config]
 export function optionOf(list: ListKey, key?: string): ListOption | undefined {
   return key ? (config()[list] as ListOption[]).find((o) => o.key === key) : undefined
 }

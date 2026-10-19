@@ -1,5 +1,6 @@
 // טופס "השאירו פרטים" ציבורי: לקישור מהאתר, מאינסטגרם או מוואטסאפ. כל פנייה נפתחת כליד בתיק חדש.
 // מקור הפנייה נקבע מהקישור: #/request?src=instagram | facebook | whatsapp (ברירת מחדל: אתר)
+// במסד המשותף הפנייה נשלחת לשרת (/api/public/leads), שפותח לקוח, איש קשר ותיק; במצב הדגמה — בדפדפן הזה.
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
@@ -7,11 +8,12 @@ import {
 } from 'lucide-react'
 import { brand } from '../../brand'
 import { app } from '../../lib/store'
+import { publicServerUrl } from '../../lib/sync/bridge'
 import { createCase, createCustomer, touchCase } from '../../lib/actions'
 import { projectTypeLabel, sourceLabel } from '../../lib/labels'
 import { nowIso, uid } from '../../lib/format'
 import { telLink, whatsappLink } from '../../lib/integrations/links'
-import type { Case, CustomerType, LeadSource, ProjectType } from '../../lib/types'
+import type { CustomerType, LeadSource, ProjectType } from '../../lib/types'
 import { Wordmark } from '../../components/Layout'
 import { PhotoInput } from '../../components/ui'
 import { firstName } from '../../features/quotes/util'
@@ -73,7 +75,11 @@ export default function RequestForm() {
   const [photos, setPhotos] = useState<string[]>([])
   const [trap, setTrap] = useState('')
   const [tried, setTried] = useState(false)
-  const [done, setDone] = useState<Case | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [sendError, setSendError] = useState('')
+  const [done, setDone] = useState<Done | null>(null)
+  const serverParam = params.get('server')
+  const server = publicServerUrl(serverParam)
 
   useEffect(() => {
     const prev = document.title
@@ -91,13 +97,33 @@ export default function RequestForm() {
   }
   const valid = !errors.name && !errors.phone && !errors.type
 
-  function submit(e: FormEvent) {
+  async function submit(e: FormEvent) {
     e.preventDefault()
     setTried(true)
     if (!valid || !phone || !type) return
     if (trap) {
       // בוט: מציגים תודה בלי לפתוח ליד
-      setDone({ number: '—', portal: { token: '', enabled: false } } as Case)
+      setDone({ number: '' })
+      return
+    }
+    if (server) {
+      setBusy(true)
+      setSendError('')
+      try {
+        const res = await fetch(`${server}/api/public/leads`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: name.trim(), phone, city: city.trim(), type, text: text.trim(), photos, source, website: trap }),
+        })
+        const body = (await res.json().catch(() => ({}))) as { number?: string; portalToken?: string; error?: { message?: string } }
+        if (!res.ok) throw new Error(body.error?.message ?? 'השליחה נכשלה')
+        setDone({ number: body.number ?? '', portalToken: body.portalToken ?? undefined })
+        window.scrollTo({ top: 0 })
+      } catch (err) {
+        setSendError((err as Error).message === 'Failed to fetch' ? 'אין חיבור. נסו שוב, או כתבו לנו בוואטסאפ.' : (err as Error).message)
+      } finally {
+        setBusy(false)
+      }
       return
     }
     const s = app()
@@ -133,11 +159,11 @@ export default function RequestForm() {
     s.db.users
       .filter((u) => u.role === 'office' || (u.id === me?.id && u.role === 'admin'))
       .forEach((u) => s.notify(u.id, `ליד חדש מהאתר: ${customer.name}${city.trim() ? `, ${city.trim()}` : ''}`, `/cases/${k.id}`))
-    setDone(k)
+    setDone({ number: k.number, portalToken: k.portal.enabled ? k.portal.token : undefined })
     window.scrollTo({ top: 0 })
   }
 
-  if (done) return <ThankYou k={done} name={name.trim()} />
+  if (done) return <ThankYou done={done} name={name.trim()} serverParam={serverParam} />
 
   return (
     <div className="pt-page" dir="rtl">
@@ -226,7 +252,8 @@ export default function RequestForm() {
             <input tabIndex={-1} autoComplete="off" value={trap} onChange={(e) => setTrap(e.target.value)} />
           </label>
 
-          <button className="btn primary block rq-submit" type="submit"><Send size={18} /> שליחה</button>
+          {sendError && <span className="rq-err" role="alert">{sendError}</span>}
+          <button className="btn primary block rq-submit" type="submit" disabled={busy}><Send size={18} /> {busy ? 'שולחים...' : 'שליחה'}</button>
           <p className="rq-privacy">הפרטים משמשים רק כדי לחזור אליכם בנוגע לפנייה. {brand.hours}.</p>
         </form>
 
@@ -249,8 +276,14 @@ export default function RequestForm() {
   )
 }
 
-function ThankYou({ k, name }: { k: Case; name: string }) {
+interface Done {
+  number: string
+  portalToken?: string
+}
+
+function ThankYou({ done, name, serverParam }: { done: Done; name: string; serverParam: string | null }) {
   const first = firstName(name)
+  const k = { number: done.number || '—' }
   return (
     <div className="pt-page" dir="rtl">
       <header className="pt-hero rq-hero">
@@ -289,8 +322,8 @@ function ThankYou({ k, name }: { k: Case; name: string }) {
             </a>
             <a className="btn block" href={telLink(brand.phone)}><Phone size={18} /> <span className="ltr">{brand.phone}</span></a>
           </div>
-          {k.portal.enabled && k.portal.token && (
-            <Link to={`/portal/${k.portal.token}`} className="row mt16" style={{ justifyContent: 'center', fontWeight: 600 }}>
+          {done.portalToken && (
+            <Link to={`/portal/${done.portalToken}${serverParam ? `?server=${encodeURIComponent(serverParam)}` : ''}`} className="row mt16" style={{ justifyContent: 'center', fontWeight: 600 }}>
               מעקב אחרי הפנייה באזור האישי <ArrowLeft size={16} />
             </Link>
           )}

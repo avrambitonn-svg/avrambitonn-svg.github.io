@@ -282,9 +282,10 @@ function Composer({ threadId, members, editing, onEndEdit }: { threadId: string;
               pick(sugg[hi] ?? sugg[0])
               return
             }
-            if (e.key === 'Escape') {
+            if (e.key === 'Escape' && (mq !== null || editing)) {
+              e.preventDefault()
               if (mq !== null) setMq(null)
-              else if (editing) { onEndEdit(); setText('') }
+              else { onEndEdit(); setText('') }
               return
             }
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {

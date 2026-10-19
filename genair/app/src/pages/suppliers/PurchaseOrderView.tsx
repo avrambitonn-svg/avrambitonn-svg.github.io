@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom'
 import { Ban, Check, CheckCircle2, Copy, Mail, MessageCircle, PackageCheck, Pencil, Phone, Printer, Truck } from 'lucide-react'
 import { useApp } from '../../lib/store'
 import { Badge, Callout, Confirm, Field, Modal, toast } from '../../components/ui'
-import { date, dateTime, money } from '../../lib/format'
+import { date, dateTime, money, phone as fmtPhone } from '../../lib/format'
 import { telLink } from '../../lib/integrations/links'
 import { choices } from '../../lib/config'
 import { brand } from '../../brand'
@@ -85,7 +85,7 @@ export function PurchaseOrderView({ poId, onClose }: { poId: ID; onClose: () => 
               {sup ? <Link className="strong" to={`/suppliers?id=${sup.id}`} onClick={onClose}>{sup.name}</Link> : <span className="muted">ספק שנמחק</span>}
               {sup?.contactName && <div className="small">{sup.contactName}</div>}
               <div className="row wrap mt8" style={{ gap: 6 }}>
-                {sup?.phone && <a className="btn sm" href={telLink(sup.phone)}><Phone size={14} /> <span className="ltr">{sup.phone}</span></a>}
+                {sup?.phone && <a className="btn sm" href={telLink(sup.phone)}><Phone size={14} /> <span className="ltr">{fmtPhone(sup.phone)}</span></a>}
                 {sup?.paymentTerms && <Badge tone="muted">{sup.paymentTerms}</Badge>}
               </div>
             </div>
@@ -104,7 +104,7 @@ export function PurchaseOrderView({ poId, onClose }: { poId: ID; onClose: () => 
               <tbody>
                 {po.lines.map((l, i) => (
                   <tr key={i}>
-                    <td className="small">{sku(l.itemId) && <span className="tiny muted ltr">{sku(l.itemId)} </span>}{l.description}</td>
+                    <td className="small">{l.description}{sku(l.itemId) && <span className="tiny muted"> · <span className="ltr">{sku(l.itemId)}</span></span>}</td>
                     <td className="end num small">{l.qty} <span className="tiny muted">{l.unit ?? ''}</span></td>
                     <td className="end num small">{money(l.unitCost)}</td>
                     <td className="end num small strong">{money(l.qty * l.unitCost)}</td>

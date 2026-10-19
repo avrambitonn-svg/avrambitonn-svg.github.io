@@ -1,15 +1,19 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { FolderPlus, MessageCircle, Pencil, RefreshCw, ShieldCheck, Wrench } from 'lucide-react'
+import { BadgeCheck, FolderPlus, MessageCircle, Pencil, RefreshCw, ShieldCheck, Wrench } from 'lucide-react'
 import { useApp } from '../../lib/store'
 import { Badge, Card, Empty, Field, Modal, toast } from '../../components/ui'
+import { AlertTriangle } from 'lucide-react'
 import { QuickContact } from '../../components/extras'
 import { contractTypeLabel, customerTypeLabel, serviceStatusLabel, serviceStatusTone, stageLabel, stageTone, syncLabel, syncTone } from '../../lib/labels'
-import { date, daysBetween, money, phone, relative } from '../../lib/format'
+import { date, daysBetween, money, phone, relative, uid } from '../../lib/format'
 import { totals } from '../../lib/quote'
 import { addressText } from '../../lib/integrations/links'
 import { pushCustomer } from '../../lib/integrations/priority'
 import { sendMessage } from '../../lib/messaging'
+import type { CustomerType } from '../../lib/types'
+import { convertToPermanent, missingDetails } from './customerUtil'
+import './customers.css'
 
 export default function CustomerPage() {
   const { id } = useParams()
@@ -28,6 +32,7 @@ export default function CustomerPage() {
 
   if (!c) return <Card><Empty title="הלקוח לא נמצא"><Link to="/customers">לרשימת הלקוחות</Link></Empty></Card>
   const contacts = db.contacts.filter((x) => x.customerId === c.id)
+  const missing = missingDetails(c)
   const revenue = db.quotes.filter((q) => q.status === 'approved' && cases.some((k) => k.id === q.caseId)).reduce((s, q) => s + totals(q).net, 0)
 
   return (
@@ -46,12 +51,14 @@ export default function CustomerPage() {
               <span className="ltr">{phone(c.phone)}</span>{c.email ? ` · ${c.email}` : ''}{c.idNumber ? ` · ת״ז/ח״פ ${c.idNumber}` : ''} · לקוח מ-{date(c.createdAt)}
             </div>
             {c.sync.error && <div className="small mt8" style={{ color: 'var(--danger)' }}>{c.sync.error}</div>}
+            {missing.length > 0 && <div className="small mt8 txt-warning row" style={{ gap: 6 }}><AlertTriangle size={15} /> חסרים פרטים: {missing.join(', ')} <button className="btn sm ghost" onClick={() => setEdit(true)}>השלמה</button></div>}
           </div>
           <div className="col" style={{ alignItems: 'flex-end' }}>
             <div className="row wrap">
               <button className="btn sm" onClick={() => setEdit(true)}><Pencil size={15} /> עריכה</button>
               <button className="btn sm" onClick={async () => { const s = await pushCustomer(c); toast[s.status === 'synced' ? 'success' : 'info'](s.status === 'synced' ? 'הלקוח סונכרן ל-Priority' : s.status === 'error' ? `שגיאה: ${s.error}` : 'נכנס לתור הסנכרון') }}><RefreshCw size={15} /> סנכרון</button>
-              <button className="btn sm primary" onClick={() => nav('/cases/new')}><FolderPlus size={15} /> תיק חדש</button>
+              {c.temp && <button className="btn sm" onClick={() => void convertToPermanent(c)}><BadgeCheck size={15} /> המרה ללקוח קבוע</button>}
+              <button className="btn sm primary" onClick={() => nav(`/cases/new?customer=${c.id}`)}><FolderPlus size={15} /> תיק חדש</button>
             </div>
             <QuickContact phone={c.phone} address={c.addresses[0]} whatsapp={() => setMsg(`שלום ${c.name.replace(/^משפחת /, '')}, `)} />
           </div>
@@ -134,7 +141,11 @@ export default function CustomerPage() {
           <Card title="אנשי קשר" pad>
             <div className="col" style={{ gap: 8 }}>
               {contacts.map((x) => (
-                <div key={x.id} className="small">{x.name}{x.role ? ` · ${x.role}` : ''} · <span className="ltr">{phone(x.phone)}</span> {x.primary && <Badge tone="brand">ראשי</Badge>}</div>
+                <div key={x.id} className="small">
+                  {x.name}{x.role ? ` · ${x.role}` : ''} · <span className="ltr">{phone(x.phone)}</span> {x.primary && <Badge tone="brand">ראשי</Badge>}
+                  {x.fromCaseId && <> <Link to={`/cases/${x.fromCaseId}`} className="badge info">נוצר מתיק</Link></>}
+                  <span className="tiny muted"> · {db.cases.filter((k) => k.contactIds.includes(x.id)).length} תיקים</span>
+                </div>
               ))}
             </div>
           </Card>
@@ -178,6 +189,24 @@ export default function CustomerPage() {
             <Field label="טלפון"><input className="input ltr" value={c.phone} onChange={(e) => patch('customers', c.id, { phone: e.target.value })} /></Field>
             <Field label="אימייל"><input className="input ltr" value={c.email ?? ''} onChange={(e) => patch('customers', c.id, { email: e.target.value })} /></Field>
             <Field label="ת״ז / ח״פ" hint="חסר? Priority לא יפתח את הלקוח"><input className="input" value={c.idNumber ?? ''} onChange={(e) => patch('customers', c.id, { idNumber: e.target.value })} /></Field>
+            <Field label="סוג לקוח">
+              <select className="select" value={c.type} onChange={(e) => patch('customers', c.id, { type: e.target.value as CustomerType })}>
+                {(Object.keys(customerTypeLabel) as CustomerType[]).map((t) => <option key={t} value={t}>{customerTypeLabel[t]}</option>)}
+              </select>
+            </Field>
+            {c.addresses[0] ? (
+              <Field label="כתובת ראשית">
+                <span className="row" style={{ gap: 6 }}>
+                  <input className="input" placeholder="עיר" value={c.addresses[0].city} onChange={(e) => patch('customers', c.id, { addresses: c.addresses.map((a, i) => (i === 0 ? { ...a, city: e.target.value } : a)) })} />
+                  <input className="input" placeholder="רחוב" value={c.addresses[0].street} onChange={(e) => patch('customers', c.id, { addresses: c.addresses.map((a, i) => (i === 0 ? { ...a, street: e.target.value } : a)) })} />
+                  <input className="input" style={{ width: 64 }} placeholder="מס׳" value={c.addresses[0].number ?? ''} onChange={(e) => patch('customers', c.id, { addresses: c.addresses.map((a, i) => (i === 0 ? { ...a, number: e.target.value } : a)) })} />
+                </span>
+              </Field>
+            ) : (
+              <Field label="כתובת">
+                <button className="btn sm" onClick={() => patch('customers', c.id, { addresses: [{ id: uid('ad'), city: 'ירושלים', street: '' }] })}>+ הוספת כתובת</button>
+              </Field>
+            )}
           </div>
           <Field label="הערות" className="mt12"><textarea className="textarea" value={c.notes ?? ''} onChange={(e) => patch('customers', c.id, { notes: e.target.value })} /></Field>
         </Modal>

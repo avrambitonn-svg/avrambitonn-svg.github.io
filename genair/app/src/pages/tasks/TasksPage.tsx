@@ -91,7 +91,11 @@ export default function Page() {
     <div className="col" style={{ gap: 16 }}>
       <PageHead
         title="משימות"
-        sub={`${openCount('mine')} פתוחות אצלי${late ? ` · ${late} באיחור` : ''}${openCount('shared') ? ` · ${openCount('shared')} ששותפו איתי` : ''}`}
+        sub={[
+          openCount('mine') === 0 ? 'אין משימות פתוחות אצלי' : openCount('mine') === 1 ? 'משימה פתוחה אחת אצלי' : `${openCount('mine')} משימות פתוחות אצלי`,
+          late ? `${late} באיחור` : '',
+          openCount('shared') ? `${openCount('shared')} ששותפו איתי` : '',
+        ].filter(Boolean).join(' · ')}
         actions={<button className="btn primary" onClick={() => setOpen('new')}><Plus size={16} /> משימה חדשה</button>}
       />
       <Card>

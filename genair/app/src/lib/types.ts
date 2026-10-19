@@ -169,6 +169,9 @@ export interface Case {
   flow?: CaseFlow // [collab]
   driveFolderId?: string // [platform]
   driveFolders?: Record<string, string> // [platform] מפתח תיקייה -> מזהה תיקייה ב-Drive
+  createdVia?: 'lead' // [platform] נפתח בשרת מטופס הפנייה הציבורי; מכשיר של המשרד משלים פלואו, Drive ו-Priority
+  leadFollowupsAt?: ISO // [platform] מתי ההשלמות האלה רצו (פעם אחת)
+  followupsBy?: ID // [platform]
 }
 
 export type ItemCategory = 'unit' | 'labor' | 'material' | 'accessory' | 'service' | 'heating' | 'ventilation'
@@ -239,6 +242,10 @@ export interface Quote {
   createdBy?: ID
   createdAt: ISO
   sync: SyncState
+  approvedVia?: 'portal' // [platform] אושרה באזור האישי מול השרת; מכשיר של המשרד משלים עמלה, פלואו ו-Priority
+  approvedFromStage?: CaseStage // [platform] שלב התיק לפני האישור
+  portalFollowupsAt?: ISO // [platform] מתי ההשלמות רצו (פעם אחת)
+  followupsBy?: ID // [platform]
 }
 
 export type AppointmentType = 'survey' | 'installation' | 'service' | 'maintenance' | 'inspection' | 'meeting'
@@ -455,6 +462,8 @@ export interface Doc {
   fileId?: string // [platform] הקובץ בשרת
   driveFileId?: string // [platform]
   webViewLink?: string // [platform]
+  customerVisible?: boolean // [platform] מוצג ללקוח באזור האישי (ברירת מחדל: תיקיית "לקוח")
+  source?: 'portal' // [platform] הלקוח העלה מהאזור האישי
 }
 
 export interface MoneyLine {
@@ -603,6 +612,7 @@ export interface Config {
   flowStages: FlowStage[]
   caseNumbering: { mode: 'global' | 'agent'; prefix: string; pad: number }
   theme: 'genair' | 'navy' | 'green' | 'orange'
+  installerDayCost?: number // [admin] עלות יום עבודה של מתקין (לדוח תפוקת מתקינים)
 }
 
 export interface Supplier {

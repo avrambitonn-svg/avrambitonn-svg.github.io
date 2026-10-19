@@ -63,7 +63,9 @@ export function assigneesFor(db: Pick<DB, 'users'>, k: Case, role: FlowRole): ID
   const ok = (id?: ID) => !!id && db.users.some((u) => u.id === id)
   const out = [...new Set(pick[role].filter(ok))] as ID[]
   if (out.length) return out
-  const fallback = ok(k.managerId) ? k.managerId : admins[0] ?? active[0]?.id
+  // אין אף אחד בתפקיד: משימות הסוכן עוברות למנהל הפרויקט; כל השאר למנהל התיק; ואם אין, להנהלה
+  const chain = [...(role === 'agent' ? [k.projectManagerId] : []), k.managerId, admins[0], active[0]?.id]
+  const fallback = chain.find(ok)
   return fallback ? [fallback] : []
 }
 

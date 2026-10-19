@@ -7,7 +7,7 @@ import { useApp, useMe } from '../../lib/store'
 import { Badge, Callout, Card, Empty, Field, Modal, PhotoInput, Tabs, toast } from '../../components/ui'
 import { Dictate, QR } from '../../components/extras'
 import {
-  appointmentStatusLabel, appointmentTypeColor, appointmentTypeLabel, pipeline, projectTypeLabel, quoteStatusLabel, quoteStatusTone, sourceLabel, stageLabel, stageTone, syncLabel, syncTone,
+  appointmentStatusLabel, appointmentTypeColor, appointmentTypeLabel, pipeline, projectTypeLabel, quoteStatusLabel, quoteStatusTone, sourceLabel, stageLabel, stageTone, syncLabel, syncTone, tagLabel,
 } from '../../lib/labels'
 import { date, dateTime, money, nowIso, phone, relative, time, uid } from '../../lib/format'
 import { totals } from '../../lib/quote'
@@ -105,11 +105,11 @@ export default function CasePage() {
                 <Badge tone={stageTone[k.stage]} dot>{stageLabel[k.stage]}</Badge>
                 <Badge>{projectTypeLabel[k.projectType]}</Badge>
                 {k.priority !== 'normal' && <Badge tone="danger">{k.priority === 'urgent' ? 'דחוף' : 'עדיפות גבוהה'}</Badge>}
-                {k.tags.map((t) => <Badge key={t} tone="brand">{t}</Badge>)}
+                {k.tags.map((t) => <Badge key={t} tone="brand">{tagLabel(t)}</Badge>)}
               </div>
               <h1 className="mt8" style={{ fontSize: 24 }}>{k.title}</h1>
               <div className="small muted mt8">
-                <Link to={`/customers/${c?.id}`}>{c?.name}</Link> · {addressText(addr)}{addr?.floor ? `, קומה ${addr.floor}` : ''} · נפתח {date(k.createdAt)} · {sourceLabel[k.source]}
+                {c ? <><Link to={`/customers/${c.id}`}>{c.name}</Link> · {addressText(addr)}{addr?.floor ? `, קומה ${addr.floor}` : ''}</> : <span style={{ color: 'var(--warning)', fontWeight: 600 }}>ללא לקוח</span>} · נפתח {date(k.createdAt)} · {sourceLabel[k.source]}
               </div>
             </div>
             <div className="row wrap">

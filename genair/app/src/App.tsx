@@ -4,6 +4,7 @@ import { Layout } from './components/Layout'
 import { Toaster } from './components/ui'
 import { useApp } from './lib/store'
 import { AuthGate } from './features/auth/AuthGate'
+import { DemoPlayer } from './features/demo/DemoPlayer'
 
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const CasesPage = lazy(() => import('./pages/cases/CasesPage'))
@@ -30,6 +31,7 @@ const PrioritySync = lazy(() => import('./pages/settings/PrioritySync'))
 const TasksPage = lazy(() => import('./pages/tasks/TasksPage'))
 const LeavePage = lazy(() => import('./pages/leave/LeavePage'))
 const SuppliersPage = lazy(() => import('./pages/suppliers/SuppliersPage'))
+const SupplierPage = lazy(() => import('./pages/suppliers/SupplierPage'))
 const UsersPage = lazy(() => import('./pages/users/UsersPage'))
 
 const Loading = () => <div className="empty">טוען...</div>
@@ -69,11 +71,13 @@ export default function App() {
           <Route path="tasks" element={<S><TasksPage /></S>} />
           <Route path="leave" element={<S><LeavePage /></S>} />
           <Route path="suppliers" element={<S><SuppliersPage /></S>} />
+          <Route path="suppliers/:id" element={<S><SupplierPage /></S>} />
           <Route path="users" element={<S><UsersPage /></S>} />
           <Route path="*" element={<div className="empty">העמוד לא נמצא</div>} />
         </Route>
       </Routes>
       <Toaster />
+      <DemoPlayer />
     </HashRouter>
   )
 }

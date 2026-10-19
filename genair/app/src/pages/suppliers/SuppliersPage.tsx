@@ -5,7 +5,7 @@ import { ClipboardList, MessageCircle, Phone, Plus, Search, Truck, Users } from 
 import { useApp } from '../../lib/store'
 import { Badge, Card, Empty, PageHead, Stat, Tabs } from '../../components/ui'
 import { Dot, Stars } from '../../features/case/controls'
-import { date, money } from '../../lib/format'
+import { date, money, phone as fmtPhone } from '../../lib/format'
 import { telLink, whatsappLink } from '../../lib/integrations/links'
 import { isOpenPo, poStatusLabel, poStatusTone, poTotal, type PoStatus } from './po'
 import { SupplierDialog } from './SupplierDialog'
@@ -141,7 +141,7 @@ export default function SuppliersPage() {
                         <td><div className="small strong">{s.name}</div><div className="tiny muted">{[s.contactName, s.paymentTerms].filter(Boolean).join(' · ')}</div></td>
                         <td className="small nowrap"><Dot color={c?.color} /> {c?.label ?? s.category}{!s.active && <> <Badge tone="muted">לא פעיל</Badge></>}</td>
                         <td className="small nowrap" onClick={(e) => e.stopPropagation()}>
-                          {s.phone ? <span className="row" style={{ gap: 4 }}><a href={telLink(s.phone)} className="ltr">{s.phone}</a><a className="icon-btn sm sp-wa" href={whatsappLink(s.phone, '')} target="_blank" rel="noreferrer" aria-label="וואטסאפ"><MessageCircle size={15} /></a></span> : '—'}
+                          {s.phone ? <span className="row" style={{ gap: 4 }}><a href={telLink(s.phone)} className="ltr">{fmtPhone(s.phone)}</a><a className="icon-btn sm sp-wa" href={whatsappLink(s.phone, '')} target="_blank" rel="noreferrer" aria-label="וואטסאפ"><MessageCircle size={15} /></a></span> : '—'}
                         </td>
                         <td className="small num">{st.open || '—'}</td>
                         <td className="end small num">{st.total ? money(st.total) : '—'}</td>

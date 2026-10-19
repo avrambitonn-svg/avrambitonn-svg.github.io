@@ -50,5 +50,7 @@
   .ls-head { padding: 12px 14px; }
   .ls-body { padding: 10px 12px; }
   .ls-label { flex-basis: 140px; }
-  .ls-meta { width: 100%; justify-content: flex-end; }
+  .ls-meta { width: 100%; justify-content: flex-end; gap: 6px; }
+  .ls-sys { display: none; }
+  .ls-seg button { padding: 0 8px; }
 }

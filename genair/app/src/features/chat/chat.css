@@ -10,7 +10,7 @@
   background: var(--danger); color: #fff; font-size: 11.5px; font-weight: 700; display: grid; place-items: center;
 }
 .cw-panel {
-  position: fixed; z-index: 60; bottom: 90px; inset-inline-end: 24px; width: 400px; height: min(660px, calc(100vh - 120px));
+  position: fixed; z-index: 60; bottom: 90px; inset-inline-end: 24px; width: 400px; height: min(660px, calc(100vh - 160px));
   background: #fff; border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-lg); display: flex; flex-direction: column; overflow: hidden; animation: pop 0.18s;
 }
 @media (max-width: 960px) {
@@ -22,6 +22,9 @@
   .cw-fab.on { display: none; }
 }
 @media print { .cw-fab, .cw-panel { display: none !important; } }
+/* מקום בתחתית העמוד, כדי שהכפתור הצף לא יסתיר את התוכן האחרון */
+.shell .content { padding-bottom: 96px; }
+@media (max-width: 960px) { .shell .content { padding-bottom: calc(140px + env(safe-area-inset-bottom)); } }
 
 .cw-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px 8px 12px; border-bottom: 1px solid var(--line-2); min-height: 58px; flex: none; }
 .cw-head h2 { font-size: 16px; }
@@ -116,5 +119,5 @@
 .cc-reply .seg button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* בתוך התיק */
-.case-chat-box { display: flex; flex-direction: column; height: min(600px, calc(100vh - 220px)); min-height: 380px; border-radius: 0 0 14px 14px; overflow: hidden; }
+.case-chat-box { display: flex; flex-direction: column; height: clamp(360px, calc(100vh - 400px), 620px); border-radius: 0 0 14px 14px; overflow: hidden; }
 @media (max-width: 700px) { .case-chat-box { height: calc(100vh - 230px); } }

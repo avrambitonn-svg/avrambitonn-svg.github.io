@@ -1,9 +1,9 @@
 // שלבי הפלואו של התיק (תבנית ← שלבים ← משימות אוטומטיות)
-import { useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Check, FastForward, Play, Replace, Workflow } from 'lucide-react'
 import { useApp } from '../../lib/store'
 import { Avatar, Callout, Card, Confirm, Field, Modal, Progress, toast } from '../../components/ui'
-import { date, relative } from '../../lib/format'
+import { date, dateShortDay, relative, ymd } from '../../lib/format'
 import { stageLabel } from '../../lib/labels'
 import type { ID } from '../../lib/types'
 import { finishStage, flowView, restartFlow, skipStage, startFlow } from './engine'
@@ -20,6 +20,17 @@ export function FlowPanel({ caseId }: { caseId: ID }) {
   const [ask, setAsk] = useState<'finish' | 'skip' | null>(null)
   const [switching, setSwitching] = useState(false)
   const view = useMemo(() => (k ? flowView({ config: cfg, tasks: allTasks }, k) : null), [k, cfg, allTasks])
+  const steps = useRef<HTMLDivElement>(null)
+  const curStage = k?.flow && !k.flow.doneAt ? k.flow.stageIdx : -1
+  // בנייד הסרגל נגלל: מביאים את השלב הנוכחי למרכז
+  useEffect(() => {
+    const box = steps.current
+    const el = box?.querySelector<HTMLElement>('.fl-step.cur')
+    if (!box || !el) return
+    const b = box.getBoundingClientRect()
+    const r = el.getBoundingClientRect()
+    box.scrollBy({ left: r.left + r.width / 2 - (b.left + b.width / 2) })
+  }, [curStage, caseId])
   if (!k || !view || !view.tpl || !view.stages.length) return null
   const { tpl, stages, flow, tasks } = view
 
@@ -60,7 +71,7 @@ export function FlowPanel({ caseId }: { caseId: ID }) {
         <Progress value={(doneCount / stages.length) * 100} />
         <span className="tiny muted nowrap">{doneCount}/{stages.length} שלבים</span>
       </div>
-      <div className="fl-steps" role="list">
+      <div className="fl-steps" role="list" ref={steps}>
         {stages.map((s, i) => {
           const done = flow.doneAt ? true : i < flow.stageIdx || !!flow.log.find((e) => e.stageId === s.id && e.doneAt && i <= flow.stageIdx)
           return (
@@ -101,7 +112,7 @@ export function FlowPanel({ caseId }: { caseId: ID }) {
                     <input type="checkbox" checked={t.done} onChange={() => toggleDone(t)} />
                     <span className="grow">
                       <span className="small strong" style={{ display: 'block' }}>{t.title}</span>
-                      <span className="tiny muted">{u?.name}{t.due && !t.done ? ` · ${dueText(t.due)}` : ''}</span>
+                      <span className="tiny muted">{u?.name}{t.due && !t.done ? (t.due < ymd() ? <span className="txt-danger"> · באיחור, {dateShortDay(t.due)}</span> : ` · ${dueText(t.due)}`) : ''}</span>
                     </span>
                     <Avatar user={u} />
                   </label>

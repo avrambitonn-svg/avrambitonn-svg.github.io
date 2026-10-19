@@ -53,13 +53,28 @@ export function ChatWidget() {
     nav({ pathname: loc.pathname, search: rest ? `?${rest}` : '' }, { replace: true })
   }, [loc.search])
 
-  // החלפת משתמש (בורר "צפייה בתור"): חוזרים לרשימה
-  useEffect(() => setView((v) => ({ tab: v.tab, id: null })), [me.id])
+  // החלפת משתמש (בורר "צפייה בתור"): סוגרים וחוזרים לרשימה עוד לפני שהשיחה הפתוחה מסומנת כנקראה בשם המשתמש החדש
+  const [who, setWho] = useState(me.id)
+  if (who !== me.id) {
+    setWho(me.id)
+    setOpen(false)
+    setView((v) => ({ tab: v.tab, id: null }))
+  }
+
+  // עבודה בסרגל העליון (חיפוש, התראות) סוגרת את החלון, כדי שלא יסתיר את מה שנפתח שם
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: PointerEvent) => {
+      if ((e.target as Element | null)?.closest?.('.topbar')) setOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown)
+    return () => document.removeEventListener('pointerdown', onDown)
+  }, [open])
 
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || document.querySelector('.modal-scrim')) return
+      if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('.modal-scrim')) return
       if (view.id || view.picking) setView({ tab: view.tab, id: null })
       else setOpen(false)
     }

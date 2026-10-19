@@ -1,0 +1,14 @@
+/* כרטיסי הלקוח והצוות בתיק */
+.cc-menu { position: relative; }
+.cc-pop { position: absolute; z-index: 30; top: 34px; inset-inline-end: 0; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lg); padding: 6px; min-width: 170px; display: flex; flex-direction: column; }
+.cc-pop button { display: flex; align-items: center; gap: 8px; border: 0; background: none; padding: 8px 10px; border-radius: 8px; cursor: pointer; text-align: start; font-size: 14px; color: var(--ink); }
+.cc-pop button:hover { background: var(--surface-2); }
+.cc-pop button.danger { color: var(--danger); }
+.cc-contact { display: flex; align-items: center; gap: 6px; padding: 4px 0; min-width: 0; }
+.cc-star { border: 0; background: none; padding: 3px; color: #c5cdd5; cursor: pointer; display: inline-grid; flex: none; }
+.cc-star.on { color: #f5b301; cursor: default; }
+.cc-star:not(.on):hover { color: #f5b301; }
+.cc-phone { color: var(--text-2); font-size: 12.5px; }
+.cc-result { display: flex; align-items: center; gap: 10px; width: 100%; border: 1.5px solid var(--line); background: #fff; border-radius: 10px; padding: 8px 12px; cursor: pointer; }
+.cc-result:hover { border-color: var(--brand-100); }
+.cc-result.on { border-color: var(--brand); background: var(--brand-50); }

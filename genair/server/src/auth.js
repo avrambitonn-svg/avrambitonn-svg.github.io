@@ -244,6 +244,16 @@ export function cleanSettings(s) {
   return out;
 }
 
+// Demo data has short, guessable portal links (pt-k1); real ones are 18 random characters.
+const PORTAL_ABC = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+export function strongPortal(portal) {
+  const p = portal && typeof portal === 'object' ? { ...portal } : { enabled: true };
+  if (typeof p.token !== 'string' || !/^[A-Za-z0-9]{12,64}$/.test(p.token)) {
+    p.token = Array.from(randomBytes(18), (b) => PORTAL_ABC[b % PORTAL_ABC.length]).join('');
+  }
+  return p;
+}
+
 function validSnapshot(snap) {
   const bad = (message) => new HttpError(400, 'validation_error', message);
   if (!snap || typeof snap !== 'object' || Array.isArray(snap)) throw bad('חסר snapshot');
@@ -261,6 +271,7 @@ function validSnapshot(snap) {
     }).map((x) => {
       const o = {};
       for (const [k, v] of Object.entries(x)) if (!BAD_KEYS.has(k)) o[k] = v;
+      if (c === 'cases') o.portal = strongPortal(o.portal);
       return c === 'users' ? cleanUser(o) : o;
     });
   }

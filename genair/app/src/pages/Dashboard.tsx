@@ -1,9 +1,10 @@
 import { useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
-  AlertTriangle, ArrowLeft, BadgeCheck, CalendarClock, CheckCircle2, CircleDollarSign, Eye, FileText, HardHat, Inbox, Plus, RefreshCw, ShieldAlert, Wrench, Boxes, PhoneCall,
+  AlertTriangle, ArrowLeft, BadgeCheck, CalendarClock, CheckCircle2, CircleDollarSign, Eye, FileText, HardHat, Inbox, Plus, RefreshCw, ShieldAlert, Wrench, Boxes, PhoneCall, PlayCircle,
 } from 'lucide-react'
 import { TasksCard } from '../features/tasks/TasksCard'
+import { startDemo } from '../features/demo/DemoPlayer'
 import { useApp, useMe } from '../lib/store'
 import { Avatars, Badge, Card, Empty, Stat } from '../components/ui'
 import { appointmentStatusLabel, appointmentTypeColor, appointmentTypeLabel, pipeline, stageLabel, stageTone } from '../lib/labels'
@@ -135,6 +136,7 @@ export default function Dashboard() {
         <div className="row wrap">
           {me.role === 'installer' && <Link className="btn primary" to="/field"><HardHat size={17} /> היום שלי</Link>}
           {me.role !== 'installer' && <Link className="btn primary" to="/cases/new"><Plus size={17} /> תיק חדש</Link>}
+          <button className="btn" onClick={() => startDemo()}><PlayCircle size={17} /> הדגמה מודרכת</button>
           <Link className="btn" to="/service"><Wrench size={17} /> קריאת שירות</Link>
         </div>
       </div>

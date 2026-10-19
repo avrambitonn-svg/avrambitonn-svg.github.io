@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, RefreshCw } from 'lucide-react'
+import { BadgeCheck, Plus, RefreshCw } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { useApp } from '../../lib/store'
 import { Badge, Card, Empty, Field, Modal, PageHead, Tabs, toast } from '../../components/ui'
 import { customerTypeLabel, syncLabel, syncTone } from '../../lib/labels'
@@ -8,6 +9,8 @@ import { phone, uid } from '../../lib/format'
 import { createCustomer } from '../../lib/actions'
 import { pushCustomer, priorityEnabled } from '../../lib/integrations/priority'
 import type { CustomerType } from '../../lib/types'
+import { convertToPermanent, MissingIcon, missingDetails } from './customerUtil'
+import './customers.css'
 
 export default function CustomersPage() {
   const db = useApp((s) => s.db)
@@ -33,12 +36,18 @@ export default function CustomersPage() {
   }, [db.contacts, q])
 
   const unsynced = db.customers.filter((c) => c.sync.status !== 'synced').length
+  const incomplete = db.customers.filter((c) => missingDetails(c).length > 0).length
+  const caseCount = useMemo(() => {
+    const m = new Map<string, number>()
+    db.cases.forEach((k) => k.contactIds.forEach((id) => m.set(id, (m.get(id) ?? 0) + 1)))
+    return m
+  }, [db.cases])
 
   return (
     <div>
       <PageHead
         title="לקוחות"
-        sub={`${db.customers.length} לקוחות · ${unsynced} לא מסונכרנים ל-Priority`}
+        sub={`${db.customers.length} לקוחות · ${unsynced} לא מסונכרנים ל-Priority${incomplete ? ` · ${incomplete} עם פרטים חסרים` : ''}`}
         actions={
           <>
             <button
@@ -85,10 +94,15 @@ export default function CustomersPage() {
                 {list.map((c) => (
                   <tr key={c.id} className="click" onClick={() => nav(`/customers/${c.id}`)}>
                     <td>
-                      <div className="strong small">{c.name}</div>
-                      {c.temp && <Badge tone="warning">לקוח זמני</Badge>}
+                      <div className="strong small cu-name">{c.name}<MissingIcon c={c} /></div>
+                      {c.temp && (
+                        <span className="row wrap" style={{ gap: 6 }}>
+                          <Badge tone="warning">לקוח זמני</Badge>
+                          <button className="btn sm ghost" style={{ height: 26, padding: '0 8px' }} onClick={(e) => { e.stopPropagation(); void convertToPermanent(c) }}><BadgeCheck size={14} /> המרה ללקוח קבוע</button>
+                        </span>
+                      )}
                     </td>
-                    <td className="small"><span className="ltr">{phone(c.phone)}</span></td>
+                    <td className="small nowrap"><span className="ltr">{phone(c.phone)}</span></td>
                     <td className="small hide-mobile">{c.addresses[0]?.city}</td>
                     <td className="small hide-mobile">{customerTypeLabel[c.type]}</td>
                     <td className="small hide-mobile">{db.cases.filter((k) => k.customerId === c.id).length}</td>
@@ -106,16 +120,26 @@ export default function CustomersPage() {
         {tab === 'contacts' && (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>שם</th><th>תפקיד</th><th>טלפון</th><th>לקוח</th></tr></thead>
+              <thead><tr><th>שם</th><th>תפקיד</th><th>טלפון</th><th>לקוח</th><th>תיקים</th></tr></thead>
               <tbody>
                 {contacts.map((ct) => {
                   const c = db.customers.find((x) => x.id === ct.customerId)
                   return (
                     <tr key={ct.id} className="click" onClick={() => c && nav(`/customers/${c.id}`)}>
-                      <td className="small strong">{ct.name} {ct.primary && <Badge tone="brand">ראשי</Badge>}</td>
+                      <td className="small strong">
+                        <span className="row wrap" style={{ gap: 6 }}>
+                          {ct.name}
+                          {ct.primary && <Badge tone="brand">ראשי</Badge>}
+                          {ct.fromCaseId && (() => {
+                            const k = db.cases.find((x) => x.id === ct.fromCaseId)
+                            return <Link to={`/cases/${ct.fromCaseId}`} onClick={(e) => e.stopPropagation()} className="badge info" title={k ? `נוצר בתיק ${k.number} · ${k.title}` : 'נוצר מתוך תיק'}>נוצר מתיק{k ? <span className="ltr">&nbsp;{k.number}</span> : null}</Link>
+                          })()}
+                        </span>
+                      </td>
                       <td className="small">{ct.role ?? '—'}</td>
-                      <td className="small"><span className="ltr">{phone(ct.phone)}</span></td>
+                      <td className="small nowrap"><span className="ltr">{phone(ct.phone)}</span></td>
                       <td className="small">{c?.name}</td>
+                      <td className="small num">{caseCount.get(ct.id) ?? 0}</td>
                     </tr>
                   )
                 })}

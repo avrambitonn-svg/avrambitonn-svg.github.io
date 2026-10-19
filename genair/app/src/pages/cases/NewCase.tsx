@@ -489,9 +489,9 @@ export default function NewCase() {
                   })}
                 </div>
               </div>
-              <Field label="תבנית תיק" hint={template ? `${template.stageIds.length} שלבים בתהליך העבודה, המשימות נפתחות לצוות אוטומטית` : 'בלי תבנית: התיק נפתח בלי תהליך עבודה מוגדר'}>
+              <Field label="תבנית תיק" hint={template ? `${template.stageIds.length} שלבים בתהליך העבודה, המשימות נפתחות לצוות אוטומטית` : 'התבנית הראשונה שמתאימה לסוג הפרויקט'}>
                 <select className="select" value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
-                  <option value="">בלי תבנית</option>
+                  <option value="">אוטומטית לפי סוג הפרויקט</option>
                   {tplOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </select>
               </Field>
@@ -566,7 +566,7 @@ export default function NewCase() {
               <div><span className="muted">סוג: </span>{typeName}</div>
               <div><span className="muted">שם התיק: </span>{title.trim() || suggestedTitle}</div>
               <div><span className="muted">מספר: </span><b className="ltr">{manualNumber.trim() || nextNumber}</b>{manualNumber.trim() ? ' (ידני)' : ''}</div>
-              <div><span className="muted">תבנית: </span>{template?.name ?? '—'}</div>
+              <div><span className="muted">תבנית: </span>{template?.name ?? 'לפי סוג הפרויקט'}</div>
               <div><span className="muted">סוכן: </span>{agentId ? name(agentId) : 'ללא סוכן'}</div>
               <div><span className="muted">מהנדס: </span>{name(engineerId) ?? '—'}</div>
               <div><span className="muted">מנהלי מחלקה: </span>{deptIds.length ? deptIds.map(name).join(', ') : '—'}</div>

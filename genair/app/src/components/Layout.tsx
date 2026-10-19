@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   Bell, Boxes, Building2, CalendarDays, ClipboardList, FileSignature, FolderKanban, HardHat, LayoutDashboard, Menu, RefreshCw, Search, Settings, Users, Wrench, BarChart3, Eye,
-  ListChecks, Palmtree, Truck, UserCog,
+  ListChecks, Palmtree, Truck, UserCog, ChevronsLeft, ChevronsRight, PlayCircle,
 } from 'lucide-react'
 import { brand } from '../brand'
 import { useApp, useMe } from '../lib/store'
@@ -12,8 +12,12 @@ import { relative } from '../lib/format'
 import { ChatWidget } from '../features/chat/ChatWidget'
 import { UserMenu } from '../features/auth/UserMenu'
 import { useReminders } from '../features/tasks/reminders'
+import { useThemeSync } from '../lib/config'
+import { startDemo } from '../features/demo/DemoPlayer'
 import { forecast, weatherIcon, type DayForecast } from '../lib/integrations/weather'
 import { useInboxPolling } from '../lib/integrations/inbox'
+import { bridge } from '../lib/sync/bridge'
+import { useNotificationAlerts } from '../lib/sync/notify'
 
 interface NavItem { to: string; label: string; icon: ReactNode; roles?: Role[]; count?: (s: ReturnType<typeof useApp.getState>) => number }
 
@@ -134,11 +138,13 @@ function GlobalSearch() {
 function Notifications() {
   const me = useMe()
   const all = useApp((s) => s.db.notifications)
-  const list = useMemo(() => all.filter((n) => n.userId === me.id), [all, me.id])
+  const list = useMemo(() => all.filter((n) => n.userId === me.id).sort((a, b) => b.at.localeCompare(a.at)), [all, me.id])
   const patch = useApp((s) => s.patch)
   const [open, setOpen] = useState(false)
   const nav = useNavigate()
   const unread = list.filter((n) => !n.read).length
+  // התראה חדשה (גם ממשתמש אחר, דרך הסנכרון): התראת דפדפן כשהלשונית ברקע, ומספר על סמל האפליקציה
+  useNotificationAlerts(list, (link) => link && nav(link))
   return (
     <div style={{ position: 'relative' }}>
       <button className="icon-btn" onClick={() => setOpen((v) => !v)} aria-label="התראות">
@@ -177,6 +183,8 @@ function RoleSwitcher() {
   const me = useMe()
   const setUser = useApp((s) => s.setUser)
   const nav = useNavigate()
+  // במסד המשותף התפקיד נקבע לפי המשתמש המחובר
+  if (bridge.mode === 'server') return null
   return (
     <label className="row hide-mobile" title="תצוגה לפי משתמש ותפקיד (הדגמה)" style={{ gap: 6 }}>
       <Eye size={16} className="muted" />
@@ -217,12 +225,19 @@ export function Layout() {
   useEffect(() => setOpen(false), [loc.pathname])
   useInboxPolling()
   useReminders()
+  useThemeSync()
+  // תפריט מכווץ במחשב: נשמר בדפדפן
+  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('genair-nav') === 'min' } catch { return false } })
+  const toggleNav = () => setCollapsed((c) => { try { localStorage.setItem('genair-nav', c ? 'full' : 'min') } catch { /* פרטי */ } return !c })
   const title = titles.find(([re]) => re.test(loc.pathname))?.[1] ?? ''
 
   return (
-    <div className="shell">
+    <div className={`shell ${collapsed ? 'collapsed' : ''}`}>
       <aside className={`sidebar ${open ? 'open' : ''}`}>
         <div className="logo"><Wordmark /></div>
+        <button className="collapse-btn" onClick={toggleNav} aria-label={collapsed ? 'הרחבת התפריט' : 'כיווץ התפריט'} title={collapsed ? 'הרחבת התפריט' : 'כיווץ התפריט'}>
+          {collapsed ? <ChevronsLeft size={16} /> : <ChevronsRight size={16} />}
+        </button>
         {nav.map((g) => {
           const items = g.items.filter((i) => !i.roles || i.roles.includes(me.role))
           if (!items.length) return null
@@ -232,7 +247,7 @@ export function Layout() {
               {items.map((i) => {
                 const n = i.count?.(state) ?? 0
                 return (
-                  <NavLink key={i.to} to={i.to} end={i.to === '/' || i.to === '/settings'} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+                  <NavLink key={i.to} to={i.to} end={i.to === '/' || i.to === '/settings'} title={collapsed ? i.label : undefined} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
                     {i.icon}
                     <span>{i.label}</span>
                     {n > 0 && <span className="count">{n}</span>}
@@ -253,6 +268,7 @@ export function Layout() {
           <button className="icon-btn show-mobile" onClick={() => setOpen(true)} aria-label="תפריט"><Menu size={20} /></button>
           <div className="title">{title}</div>
           <GlobalSearch />
+          <button className="btn sm ghost hide-mobile demo-launch" onClick={() => startDemo()} title="הדגמה מודרכת של כל המערכת"><PlayCircle size={16} /> הדגמה</button>
           <WeatherChip />
           <RoleSwitcher />
           <Notifications />
