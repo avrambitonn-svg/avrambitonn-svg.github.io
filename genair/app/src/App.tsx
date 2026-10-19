@@ -3,6 +3,7 @@ import { HashRouter, Route, Routes } from 'react-router-dom'
 import { Layout } from './components/Layout'
 import { Toaster } from './components/ui'
 import { useApp } from './lib/store'
+import { AuthGate } from './features/auth/AuthGate'
 
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const CasesPage = lazy(() => import('./pages/cases/CasesPage'))
@@ -26,6 +27,10 @@ const InventoryPage = lazy(() => import('./pages/inventory/InventoryPage'))
 const ReportsPage = lazy(() => import('./pages/reports/ReportsPage'))
 const SettingsPage = lazy(() => import('./pages/settings/SettingsPage'))
 const PrioritySync = lazy(() => import('./pages/settings/PrioritySync'))
+const TasksPage = lazy(() => import('./pages/tasks/TasksPage'))
+const LeavePage = lazy(() => import('./pages/leave/LeavePage'))
+const SuppliersPage = lazy(() => import('./pages/suppliers/SuppliersPage'))
+const UsersPage = lazy(() => import('./pages/users/UsersPage'))
 
 const Loading = () => <div className="empty">טוען...</div>
 const S = ({ children }: { children: ReactNode }) => <Suspense fallback={<Loading />}>{children}</Suspense>
@@ -41,7 +46,7 @@ export default function App() {
         <Route path="/request" element={<S><RequestForm /></S>} />
         <Route path="/quotes/:id/print" element={<S><QuotePrint /></S>} />
 
-        <Route element={<Layout />}>
+        <Route element={<AuthGate><Layout /></AuthGate>}>
           <Route index element={<S><Dashboard /></S>} />
           <Route path="cases" element={<S><CasesPage /></S>} />
           <Route path="cases/new" element={<S><NewCase /></S>} />
@@ -61,6 +66,10 @@ export default function App() {
           <Route path="reports" element={<S><ReportsPage /></S>} />
           <Route path="settings" element={<S><SettingsPage /></S>} />
           <Route path="settings/priority" element={<S><PrioritySync /></S>} />
+          <Route path="tasks" element={<S><TasksPage /></S>} />
+          <Route path="leave" element={<S><LeavePage /></S>} />
+          <Route path="suppliers" element={<S><SuppliersPage /></S>} />
+          <Route path="users" element={<S><UsersPage /></S>} />
           <Route path="*" element={<div className="empty">העמוד לא נמצא</div>} />
         </Route>
       </Routes>

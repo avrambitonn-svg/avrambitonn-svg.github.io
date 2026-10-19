@@ -1,29 +1,35 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
-  CalendarPlus, ClipboardList, Copy, ExternalLink, FileText, FolderOpen, History, Link2, MessageCircle, MessagesSquare, Pencil, Plus, Send, Sparkles, Trash2, Wallet, Ruler, Upload, Eye,
+  CalendarPlus, ClipboardList, Copy, ExternalLink, FileText, FolderOpen, History, Link2, MessageCircle, MessagesSquare, Pencil, Plus, Send, Sparkles, Trash2, Wallet, Ruler, Eye, ListChecks,
 } from 'lucide-react'
 import { useApp, useMe } from '../../lib/store'
-import { Avatar, Badge, Callout, Card, Empty, Field, Modal, PhotoInput, Tabs, toast } from '../../components/ui'
-import { Dictate, QR, QuickContact } from '../../components/extras'
+import { Badge, Callout, Card, Empty, Field, Modal, PhotoInput, Tabs, toast } from '../../components/ui'
+import { Dictate, QR } from '../../components/extras'
 import {
-  appointmentStatusLabel, appointmentTypeColor, appointmentTypeLabel, customerTypeLabel, pipeline, projectTypeLabel, quoteStatusLabel, quoteStatusTone, roleLabel, sourceLabel, stageLabel, stageTone, syncLabel, syncTone,
+  appointmentStatusLabel, appointmentTypeColor, appointmentTypeLabel, pipeline, projectTypeLabel, quoteStatusLabel, quoteStatusTone, sourceLabel, stageLabel, stageTone, syncLabel, syncTone,
 } from '../../lib/labels'
-import { date, dateTime, money, nowIso, phone, relative, time, uid, ymd } from '../../lib/format'
+import { date, dateTime, money, nowIso, phone, relative, time, uid } from '../../lib/format'
 import { totals } from '../../lib/quote'
 import { createQuote, setStage, touchCase } from '../../lib/actions'
 import { addressText, mapsEmbed, portalUrl, shareOrCopy } from '../../lib/integrations/links'
 import { fill, sendMessage, templates, type TemplateKey } from '../../lib/messaging'
 import { AIQuoteDialog } from '../../features/quotes/AIQuoteDialog'
 import { ScheduleDialog } from '../../features/schedule/ScheduleDialog'
-import type { AppointmentType, CaseStage, Doc, MoneyLine, Photo, Survey, SurveyRoom } from '../../lib/types'
+import { DocsPanel } from '../../features/docs/DocsPanel'
+import { MoneyTab } from '../../features/money/MoneyTab'
+import { CaseCustomerCard } from '../../features/case/CaseCustomerCard'
+import { CaseTeamCard } from '../../features/case/CaseTeamCard'
+import { CaseChat } from '../../features/chat/CaseChat'
+import { TasksPanel } from '../../features/tasks/TasksPanel'
+import { FlowPanel } from '../../features/flow/FlowPanel'
+import type { AppointmentType, CaseStage, Photo, Survey, SurveyRoom } from '../../lib/types'
 
-type Tab = 'overview' | 'survey' | 'quotes' | 'schedule' | 'docs' | 'money' | 'messages' | 'history' | 'portal'
+type Tab = 'overview' | 'survey' | 'quotes' | 'schedule' | 'tasks' | 'docs' | 'money' | 'chat' | 'history' | 'portal'
 
 const photoTags: Record<NonNullable<Photo['tag']>, string> = {
   existing_unit: 'מזגן קיים', nameplate: 'לוחית יצרן', wall: 'קיר / מיקום', electric_panel: 'לוח חשמל', outdoor: 'מיקום חיצוני', room: 'חדר', before: 'לפני', after: 'אחרי', other: 'אחר',
 }
-const folderLabel: Record<Doc['folder'], string> = { office: 'משרד', customer: 'מהלקוח', installer: 'מתקינים', engineering: 'הנדסה', suppliers: 'ספקים', archive: 'ארכיון' }
 const nextStepText: Partial<Record<CaseStage, string>> = {
   lead: 'לחזור ללקוח ולקבוע סקר בשטח',
   survey: 'להשלים את הסקר (חדרים, מידות ותמונות) ולבנות טיוטת הצעה',
@@ -41,9 +47,6 @@ export default function CasePage() {
   const me = useMe()
   const db = useApp((s) => s.db)
   const patch = useApp((s) => s.patch)
-  const upsert = useApp((s) => s.upsert)
-  const remove = useApp((s) => s.remove)
-  const log = useApp((s) => s.log)
   const k = db.cases.find((x) => x.id === id)
   const [tab, setTab] = useState<Tab>('overview')
   const [aiOpen, setAiOpen] = useState(false)
@@ -64,13 +67,11 @@ export default function CasePage() {
   const msgs = useMemo(() => db.messages.filter((m) => m.caseId === id).sort((a, b) => a.at.localeCompare(b.at)), [db.messages, id])
   const acts = useMemo(() => db.activities.filter((a) => a.caseId === id), [db.activities, id])
   const docs = useMemo(() => db.docs.filter((d) => d.caseId === id), [db.docs, id])
-  const money_ = useMemo(() => db.money.filter((m) => m.caseId === id), [db.money, id])
   const tasks = useMemo(() => db.tasks.filter((t) => t.caseId === id), [db.tasks, id])
 
   if (!k) return <Card><Empty title="התיק לא נמצא"><Link to="/cases">חזרה לתיקים</Link></Empty></Card>
 
   const c = db.customers.find((x) => x.id === k.customerId)
-  const payer = db.customers.find((x) => x.id === k.payerCustomerId)
   const addr = c?.addresses.find((a) => a.id === k.addressId) ?? c?.addresses[0]
   const contacts = db.contacts.filter((x) => k.contactIds.includes(x.id))
   const primary = contacts.find((x) => x.primary) ?? contacts[0]
@@ -153,9 +154,10 @@ export default function CasePage() {
           { id: 'survey', label: 'סקר בשטח', icon: <Ruler size={15} />, count: k.survey.photos.length },
           { id: 'quotes', label: 'הצעות מחיר', icon: <FileText size={15} />, count: quotes.length },
           { id: 'schedule', label: 'תיאום', icon: <CalendarPlus size={15} />, count: appts.length },
+          { id: 'tasks', label: 'משימות', icon: <ListChecks size={15} />, count: tasks.filter((t) => !t.done).length },
           { id: 'docs', label: 'מסמכים', icon: <FolderOpen size={15} />, count: docs.length },
           ...(canSeeMoney ? [{ id: 'money' as Tab, label: 'כספים', icon: <Wallet size={15} /> }] : []),
-          { id: 'messages', label: 'הודעות', icon: <MessagesSquare size={15} />, count: msgs.length },
+          { id: 'chat', label: 'צ׳אט והודעות', icon: <MessagesSquare size={15} />, count: msgs.length },
           { id: 'history', label: 'היסטוריה', icon: <History size={15} /> },
           { id: 'portal', label: 'אזור אישי ללקוח', icon: <Link2 size={15} /> },
         ]}
@@ -164,6 +166,7 @@ export default function CasePage() {
       {tab === 'overview' && (
         <div className="grid g-side">
           <div className="col" style={{ gap: 16 }}>
+            <FlowPanel caseId={k.id} />
             {nextStepText[k.stage] && (
               <Callout>
                 <b>הצעד הבא: </b>{nextStepText[k.stage]}
@@ -215,56 +218,12 @@ export default function CasePage() {
               )}
             </Card>
             {k.notes && <Card title="מה הלקוח ביקש" pad><p className="small" style={{ whiteSpace: 'pre-wrap' }}>{k.notes}</p></Card>}
-            {tasks.length > 0 && (
-              <Card title="משימות בתיק">
-                <div className="list">
-                  {tasks.map((t) => (
-                    <label key={t.id} className="list-item check">
-                      <input type="checkbox" checked={t.done} onChange={() => patch('tasks', t.id, { done: !t.done })} />
-                      <span className="grow small" style={{ textDecoration: t.done ? 'line-through' : undefined }}>{t.title}</span>
-                      <Avatar user={db.users.find((u) => u.id === t.assigneeId)} />
-                    </label>
-                  ))}
-                </div>
-              </Card>
-            )}
+            <TasksPanel caseId={k.id} compact />
           </div>
 
           <div className="col" style={{ gap: 16 }}>
-            <Card title="לקוח" pad>
-              <div className="strong">{c?.name}</div>
-              <div className="small muted">{c && customerTypeLabel[c.type]} · <span className="ltr">{phone(c?.phone)}</span></div>
-              {c && (
-                <div className="row mt8" style={{ gap: 6 }}>
-                  <Badge tone={syncTone[c.sync.status]}>{syncLabel[c.sync.status]} ב-Priority</Badge>
-                  {c.temp && <Badge tone="warning">לקוח זמני</Badge>}
-                </div>
-              )}
-              {payer && <div className="small mt8">משלם: <Link to={`/customers/${payer.id}`}>{payer.name}</Link></div>}
-              <div className="mt12"><QuickContact phone={primary?.phone ?? c?.phone} address={addr} whatsapp={() => openWhatsapp('free')} /></div>
-              {contacts.length > 0 && (
-                <div className="mt12 col" style={{ gap: 6 }}>
-                  {contacts.map((x) => (
-                    <div key={x.id} className="small">{x.name}{x.role ? ` · ${x.role}` : ''} · <span className="ltr">{phone(x.phone)}</span></div>
-                  ))}
-                </div>
-              )}
-              {addr?.entryNotes && <div className="small muted mt8">כניסה: {addr.entryNotes}</div>}
-            </Card>
-            <Card title="צוות" pad>
-              <div className="col" style={{ gap: 8 }}>
-                {team.length === 0 && <div className="small muted">לא שובץ צוות</div>}
-                {team.map((u) => u && (
-                  <div key={u.id} className="row">
-                    <Avatar user={u} />
-                    <div className="grow">
-                      <div className="small strong">{u.name}</div>
-                      <div className="tiny muted">{roleLabel[u.role]}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
+            <CaseCustomerCard caseId={k.id} onWhatsapp={() => openWhatsapp('free')} />
+            <CaseTeamCard caseId={k.id} />
             {addr && (
               <Card>
                 <iframe title="מפה" src={mapsEmbed(addr)} style={{ width: '100%', height: 200, border: 0, borderRadius: 14, display: 'block' }} loading="lazy" />
@@ -343,32 +302,13 @@ export default function CasePage() {
         </Card>
       )}
 
-      {tab === 'docs' && (
-        <DocsTab
-          docs={docs}
-          onAdd={(d) => { upsert('docs', { ...d, caseId: k.id, uploadedBy: me.id }); log({ kind: 'document', caseId: k.id, text: `הועלה מסמך: ${d.name}` }) }}
-          onRemove={(docId) => remove('docs', docId)}
-        />
-      )}
+      {tab === 'tasks' && <TasksPanel caseId={k.id} />}
 
-      {tab === 'money' && canSeeMoney && <MoneyTab caseId={k.id} lines={money_} quoteTotal={activeQuote?.status === 'approved' ? totals(activeQuote, db.catalog) : undefined} />}
+      {tab === 'docs' && <DocsPanel caseId={k.id} />}
 
-      {tab === 'messages' && (
-        <Card title="הודעות עם הלקוח" actions={<button className="btn sm wa" onClick={() => openWhatsapp('free')}><MessageCircle size={15} /> הודעה חדשה</button>}>
-          {msgs.length === 0 ? (
-            <Empty title="אין הודעות עדיין" />
-          ) : (
-            <div className="card-body col" style={{ gap: 10, background: '#efeae2', borderRadius: '0 0 14px 14px' }}>
-              {msgs.map((m) => (
-                <div key={m.id} style={{ alignSelf: m.direction === 'out' ? 'flex-start' : 'flex-end', maxWidth: '78%', background: m.direction === 'out' ? '#d9fdd3' : '#fff', borderRadius: 10, padding: '8px 12px', boxShadow: '0 1px 1px rgba(0,0,0,.06)' }}>
-                  <div className="small" style={{ whiteSpace: 'pre-wrap' }}>{m.body.replace('{portal}', '🔗 קישור לאזור האישי').replace('{date}', date(k.installWindow?.from ?? m.at))}</div>
-                  <div className="tiny muted" style={{ textAlign: 'end' }}>{dateTime(m.at)}{m.direction === 'out' && m.by ? ` · ${db.users.find((u) => u.id === m.by)?.name ?? ''}` : ''}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      )}
+      {tab === 'money' && canSeeMoney && <MoneyTab caseId={k.id} />}
+
+      {tab === 'chat' && <CaseChat caseId={k.id} onCompose={() => openWhatsapp('free')} />}
 
       {tab === 'history' && (
         <Card title="ציר זמן" pad>
@@ -517,115 +457,6 @@ function SurveyTab({ survey, onSave, onAI }: { survey: Survey; onSave: (s: Surve
       <div className="row" style={{ justifyContent: 'flex-end', position: 'sticky', bottom: 76, zIndex: 5 }}>
         <button className="btn primary lg" disabled={!dirty} onClick={() => onSave({ ...s, doneAt: s.doneAt ?? nowIso(), doneBy: s.doneBy ?? me.id })}>שמירת הסקר</button>
       </div>
-    </div>
-  )
-}
-
-function DocsTab({ docs, onAdd, onRemove }: { docs: Doc[]; onAdd: (d: Doc) => void; onRemove: (id: string) => void }) {
-  const [folder, setFolder] = useState<Doc['folder']>('office')
-  return (
-    <div className="col" style={{ gap: 16 }}>
-      <Callout>מסמכים נשמרים בתיק. כשהשרת מחובר ל-Google Drive, לכל תיק נפתחת תיקייה עם אותן תיקיות משנה.</Callout>
-      <div className="grid g3">
-        {(Object.keys(folderLabel) as Doc['folder'][]).map((f) => {
-          const list = docs.filter((d) => d.folder === f)
-          return (
-            <Card key={f} title={<div className="row"><FolderOpen size={16} color="var(--brand)" /><h2>{folderLabel[f]}</h2><span className="badge muted">{list.length}</span></div>}
-              actions={<label className="btn sm ghost" onClick={() => setFolder(f)}><Upload size={15} /><input type="file" hidden onChange={async (e) => {
-                const file = e.target.files?.[0]
-                if (!file) return
-                const small = file.size < 1_500_000
-                const dataUrl = small ? await new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.readAsDataURL(file) }) : undefined
-                onAdd({ id: uid('d'), folder, name: file.name, mime: file.type || 'application/octet-stream', size: file.size, dataUrl, uploadedAt: nowIso() })
-                if (!small) toast.info('קובץ גדול: נשמר שם הקובץ. בייצור הקובץ עצמו עולה ל-Drive.')
-                e.target.value = ''
-              }} /></label>}>
-              {list.length === 0 ? <div className="empty small" style={{ padding: 18 }}>ריק</div> : (
-                <div className="list">
-                  {list.map((d) => (
-                    <div key={d.id} className="list-item">
-                      <FileText size={16} className="muted" />
-                      <div className="grow">
-                        {d.dataUrl ? <a className="small strong" href={d.dataUrl} download={d.name}>{d.name}</a> : <span className="small strong">{d.name}</span>}
-                        <div className="tiny muted">{date(d.uploadedAt)}{d.size ? ` · ${Math.round(d.size / 1024)}KB` : ''}</div>
-                      </div>
-                      <button className="icon-btn" onClick={() => onRemove(d.id)} aria-label="מחיקה"><Trash2 size={15} /></button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-function MoneyTab({ caseId, lines, quoteTotal }: { caseId: string; lines: MoneyLine[]; quoteTotal?: ReturnType<typeof totals> }) {
-  const upsert = useApp((s) => s.upsert)
-  const remove = useApp((s) => s.remove)
-  const [draft, setDraft] = useState<{ kind: MoneyLine['kind']; category: string; description: string; amount: string }>({ kind: 'expense', category: 'ציוד', description: '', amount: '' })
-  const sumOf = (k: MoneyLine['kind']) => lines.filter((l) => l.kind === k).reduce((s, l) => s + l.amount, 0)
-  const paid = sumOf('payment')
-  const expenses = sumOf('expense')
-  const commission = sumOf('commission')
-  const budget = sumOf('budget')
-  const kindLabel: Record<MoneyLine['kind'], string> = { budget: 'תקציב', expense: 'הוצאה', commission: 'עמלה', payment: 'תשלום מהלקוח' }
-  return (
-    <div className="grid g-side">
-      <Card title="תנועות">
-        <form className="row wrap" style={{ padding: '12px 18px', borderBottom: '1px solid var(--line-2)' }} onSubmit={(e) => {
-          e.preventDefault()
-          if (!draft.amount || !draft.description) return
-          upsert('money', { id: uid('mn'), caseId, kind: draft.kind, category: draft.category, description: draft.description, amount: Number(draft.amount), at: ymd() })
-          setDraft({ ...draft, description: '', amount: '' })
-        }}>
-          <select className="select sm" style={{ width: 'auto' }} value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as MoneyLine['kind'] })}>
-            {Object.entries(kindLabel).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </select>
-          <input className="input sm" style={{ width: 110 }} placeholder="קטגוריה" value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })} />
-          <input className="input sm grow" placeholder="תיאור" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
-          <input className="input sm" style={{ width: 110 }} type="number" placeholder="₪" value={draft.amount} onChange={(e) => setDraft({ ...draft, amount: e.target.value })} />
-          <button className="btn sm primary" type="submit"><Plus size={15} /></button>
-        </form>
-        {lines.length === 0 ? <Empty title="אין תנועות" /> : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead><tr><th>תאריך</th><th>סוג</th><th>תיאור</th><th className="end">סכום</th><th /></tr></thead>
-              <tbody>
-                {lines.sort((a, b) => b.at.localeCompare(a.at)).map((l) => (
-                  <tr key={l.id}>
-                    <td className="small nowrap">{date(l.at)}</td>
-                    <td><Badge tone={l.kind === 'payment' ? 'success' : l.kind === 'expense' ? 'warning' : l.kind === 'commission' ? 'brand' : 'muted'}>{kindLabel[l.kind]}</Badge></td>
-                    <td className="small">{l.category} · {l.description}</td>
-                    <td className="end num small strong">{money(l.amount)}</td>
-                    <td><button className="icon-btn" onClick={() => remove('money', l.id)} aria-label="מחיקה"><Trash2 size={15} /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-      <Card title="מאזן התיק" pad>
-        {quoteTotal ? (
-          <>
-            <div className="money-line"><span>הצעה מאושרת (לפני מע״מ)</span><b className="num">{money(quoteTotal.net)}</b></div>
-            <div className="money-line"><span>כולל מע״מ</span><span className="num">{money(quoteTotal.total)}</span></div>
-            <div className="money-line"><span>שולם עד כה</span><span className="num" style={{ color: 'var(--success)' }}>{money(paid)}</span></div>
-            <div className="money-line total"><span>יתרה לגבייה</span><span className="num">{money(Math.max(0, quoteTotal.total - paid))}</span></div>
-            <hr className="hr" />
-            <div className="money-line"><span>תקציב</span><span className="num">{money(budget)}</span></div>
-            <div className="money-line"><span>הוצאות בפועל</span><span className="num">{money(expenses)}</span></div>
-            <div className="money-line"><span>עמלות</span><span className="num">{money(commission)}</span></div>
-            <div className="money-line total"><span>רווח משוער</span><span className="num" style={{ color: quoteTotal.net - expenses - commission > 0 ? 'var(--success)' : 'var(--danger)' }}>{money(quoteTotal.net - (expenses || quoteTotal.cost) - commission)}</span></div>
-            {!expenses && <div className="tiny muted">אין עדיין הוצאות בפועל: הרווח חושב לפי עלות הקטלוג</div>}
-          </>
-        ) : (
-          <Empty title="אין הצעה מאושרת">המאזן יחושב אחרי אישור הלקוח</Empty>
-        )}
-      </Card>
     </div>
   )
 }

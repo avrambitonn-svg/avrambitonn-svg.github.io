@@ -22,6 +22,8 @@ export interface User {
   color: string
   certifications?: Certification[]
   active: boolean
+  functions?: UserFunction[] // [platform] מנהל מחלקה / מנהל פרויקט, בנוסף לתפקיד
+  googleCalendarId?: string // [platform] היומן האישי שאליו נכנסים האירועים שלו
 }
 
 export type SyncStatus = 'synced' | 'pending' | 'error' | 'not_synced' | 'disabled'
@@ -92,6 +94,7 @@ export type ProjectType =
   | 'smoke_ventilation'
   | 'replacement'
   | 'other'
+  | (string & {}) // סוגים שהוגדרו בהגדרות
 
 export type LeadSource = 'phone' | 'whatsapp' | 'website' | 'referral' | 'facebook' | 'returning' | 'portal' | 'other'
 
@@ -156,6 +159,13 @@ export interface Case {
   createdAt: ISO
   updatedAt: ISO
   closedAt?: ISO
+  departmentManagerIds?: ID[] // [admin] מנהלי מחלקה: כולם מקבלים את משימות התיק
+  projectManagerId?: ID // [admin]
+  contactMethod?: string // [admin] אופן הפנייה (מפתח מ-config.contactMethods)
+  templateId?: ID // [collab] תבנית התיק שממנה נבנה הפלואו
+  flow?: CaseFlow // [collab]
+  driveFolderId?: string // [platform]
+  driveFolders?: Record<string, string> // [platform] מפתח תיקייה -> מזהה תיקייה ב-Drive
 }
 
 export type ItemCategory = 'unit' | 'labor' | 'material' | 'accessory' | 'service' | 'heating' | 'ventilation'
@@ -260,6 +270,10 @@ export interface Appointment {
   googleEventId?: string
   partsUsed?: { itemId: ID; qty: number; location?: string }[] // חלקים שנצרכו בשטח (ירדו מהמלאי ברכב)
   completedAt?: ISO
+  reminderMin?: number // [collab] תזכורת לצוות X דקות לפני
+  remindedAt?: ISO // [collab]
+  location?: string // [collab] מיקום חופשי לפגישה שאינה אצל לקוח
+  googleEventIds?: Record<ID, string> // [platform] מזהה אירוע ביומן של כל משתתף
 }
 
 export type ServiceStatus = 'new' | 'assigned' | 'scheduled' | 'in_progress' | 'waiting_parts' | 'done' | 'cancelled'
@@ -371,6 +385,14 @@ export interface Task {
   done: boolean
   priority: 'low' | 'normal' | 'high'
   createdAt: ISO
+  sharedWith?: ID[] // [collab] משתמשים נוספים שרואים ומקבלים עדכונים
+  status?: string // [collab] מפתח מ-config.taskStatuses (ברירת מחדל: new / done לפי done)
+  remindAt?: ISO // [collab]
+  remindedAt?: ISO // [collab]
+  notes?: string
+  flowStageId?: ID // [collab] נוצרה אוטומטית משלב בפלואו
+  doneAt?: ISO
+  doneBy?: ID
 }
 
 export type Channel = 'whatsapp' | 'sms' | 'email' | 'internal' | 'portal'
@@ -415,7 +437,7 @@ export interface Doc {
   id: ID
   caseId?: ID
   customerId?: ID
-  folder: 'office' | 'customer' | 'installer' | 'engineering' | 'suppliers' | 'archive'
+  folder: DocFolder
   name: string
   mime: string
   dataUrl?: string
@@ -423,6 +445,11 @@ export interface Doc {
   size?: number
   uploadedBy?: ID
   uploadedAt: ISO
+  supplierId?: ID // [admin]
+  blobKey?: string // [platform] הקובץ עצמו ב-IndexedDB (כשאין שרת)
+  fileId?: string // [platform] הקובץ בשרת
+  driveFileId?: string // [platform]
+  webViewLink?: string // [platform]
 }
 
 export interface MoneyLine {
@@ -434,6 +461,11 @@ export interface MoneyLine {
   amount: number
   at: string
   userId?: ID
+  method?: string // [admin] אמצעי תשלום (config.paymentMethods)
+  budgetType?: string // [admin] סוג סעיף תקציב (config.budgetItemTypes)
+  supplierId?: ID // [admin]
+  agentId?: ID // [admin] למי העמלה
+  status?: 'planned' | 'pending' | 'paid' // [admin]
 }
 
 export interface Notification {
@@ -464,6 +496,142 @@ export interface Settings {
   commissionPct: number
 }
 
+
+export type DocFolder = 'office' | 'customer' | 'installer' | 'engineering' | 'suppliers' | 'archive' | (string & {})
+export type UserFunction = 'department_manager' | 'project_manager'
+
+// ===================== [collab] צ'אט, משימות, פלואו, חופשות =====================
+
+export interface ChatMessage {
+  id: ID
+  threadId: string // 'case:<caseId>' לצ'אט צוות בתיק, 'dm:<userA>:<userB>' (ממוין) לשיחה אישית
+  caseId?: ID
+  fromId: ID
+  body: string
+  at: ISO
+  readBy: ID[]
+  mentions?: ID[]
+  attachments?: { name: string; mime?: string; docId?: ID; dataUrl?: string }[]
+  editedAt?: ISO
+  deleted?: boolean
+}
+
+// מי מקבל את משימות השלב
+export type FlowRole = 'agent' | 'engineer' | 'manager' | 'department_managers' | 'project_manager' | 'installers' | 'office' | 'admin'
+
+export interface FlowStage {
+  id: ID
+  name: string
+  color?: string
+  tasks: { title: string; role: FlowRole; dueDays?: number }[]
+  caseStage?: CaseStage // כשהתיק מגיע לשלב הזה בצנרת, שלב הפלואו מסתיים אוטומטית
+}
+
+export interface CaseTemplate {
+  id: ID
+  name: string
+  projectTypes: string[] // ריק = כל הסוגים
+  stageIds: ID[]
+  defaultTags?: string[]
+  active: boolean
+}
+
+export interface CaseFlow {
+  templateId: ID
+  stageIdx: number
+  startedAt: ISO
+  doneAt?: ISO
+  log: { stageId: ID; startedAt: ISO; doneAt?: ISO; doneBy?: ID }[]
+}
+
+export interface LeaveRequest {
+  id: ID
+  userId: ID
+  type: string // config.leaveTypes
+  from: string // YYYY-MM-DD
+  to: string // YYYY-MM-DD (כולל)
+  hours?: { start: string; end: string } // חופשה חלקית ביום אחד
+  reason?: string
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled'
+  decidedBy?: ID
+  decidedAt?: ISO
+  decisionNote?: string
+  createdAt: ISO
+}
+
+// ===================== [admin] הגדרות, ספקים, רכש =====================
+
+export interface ListOption {
+  key: string
+  label: string
+  color?: string
+  active: boolean
+  system?: boolean // ערכי מערכת: אפשר לשנות שם וצבע, לא למחוק
+}
+
+export interface CommissionRule {
+  id: ID
+  name: string
+  agentId?: ID // ריק = כל הסוכנים
+  projectType?: string // ריק = כל הסוגים
+  pct: number
+  base: 'net' | 'profit' // מהמחיר לפני מע"מ או מהרווח
+  active: boolean
+}
+
+export interface Config {
+  projectTypes: (ListOption & { autoName: boolean })[]
+  caseStages: ListOption[] // רק שם וצבע; המפתחות קבועים (CaseStage)
+  tags: ListOption[]
+  expenseCategories: ListOption[]
+  budgetItemTypes: ListOption[]
+  paymentMethods: ListOption[]
+  contactMethods: ListOption[]
+  driveFolders: ListOption[] // מפתחות = DocFolder
+  taskStatuses: ListOption[]
+  taskPriorities: ListOption[]
+  leaveTypes: ListOption[]
+  supplierCategories: ListOption[]
+  commissionRules: CommissionRule[]
+  caseTemplates: CaseTemplate[]
+  flowStages: FlowStage[]
+  caseNumbering: { mode: 'global' | 'agent'; prefix: string; pad: number }
+  theme: 'genair' | 'navy' | 'green' | 'orange'
+}
+
+export interface Supplier {
+  id: ID
+  name: string
+  category: string // config.supplierCategories
+  contactName?: string
+  phone?: string
+  email?: string
+  website?: string
+  address?: string
+  vatNum?: string
+  paymentTerms?: string // שוטף + 30 וכו'
+  notes?: string
+  rating?: number // 1-5
+  active: boolean
+  priorityId?: string // מספר ספק ב-Priority (SUPPLIERS)
+  createdAt: ISO
+}
+
+export interface PurchaseOrder {
+  id: ID
+  number: string
+  supplierId: ID
+  caseId?: ID
+  lines: { itemId?: ID; description: string; qty: number; unitCost: number }[]
+  status: 'draft' | 'sent' | 'confirmed' | 'received' | 'cancelled'
+  toLocation?: string // מחסן / רכב
+  expectedAt?: string
+  notes?: string
+  createdAt: ISO
+  sentAt?: ISO
+  receivedAt?: ISO
+}
+
 export interface DB {
   users: User[]
   customers: Customer[]
@@ -483,8 +651,13 @@ export interface DB {
   docs: Doc[]
   money: MoneyLine[]
   notifications: Notification[]
+  chat: ChatMessage[] // [collab]
+  leaves: LeaveRequest[] // [collab]
+  suppliers: Supplier[] // [admin]
+  purchaseOrders: PurchaseOrder[] // [admin]
+  config: Config // [admin]
   counters: Record<string, number>
 }
 
-export type Collection = Exclude<keyof DB, 'counters'>
+export type Collection = Exclude<keyof DB, 'counters' | 'config'>
 export type Entity<C extends Collection> = DB[C][number]

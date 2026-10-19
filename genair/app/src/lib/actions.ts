@@ -6,6 +6,9 @@ import { stageLabel } from './labels'
 import { defaultTerms, totals } from './quote'
 import { pushCustomer, pushOrder } from './integrations/priority'
 import { createDriveFolder, pushAppointment } from './integrations/google'
+import { nextCaseNumber } from './numbering'
+import { commissionFor } from './commission'
+import { onCaseCreated, onStageChanged } from '../features/flow/engine'
 
 const yy = () => String(new Date().getFullYear()).slice(2)
 
@@ -19,7 +22,7 @@ export function createCustomer(c: Omit<Customer, 'id' | 'createdAt' | 'sync' | '
 export function createCase(input: Omit<Case, 'id' | 'number' | 'createdAt' | 'updatedAt' | 'portal' | 'survey' | 'stage' | 'tags' | 'installerIds'> &
   Partial<Pick<Case, 'stage' | 'tags' | 'installerIds'>>): Case {
   const s = app()
-  const number = s.nextNumber('case', `GN-${yy()}`, 4)
+  const number = nextCaseNumber(input.agentId)
   const k: Case = {
     stage: 'lead',
     tags: [],
@@ -38,6 +41,7 @@ export function createCase(input: Omit<Case, 'id' | 'number' | 'createdAt' | 'up
   notifyIds.delete(s.currentUserId)
   notifyIds.forEach((uidTo) => s.notify(uidTo, `תיק חדש: ${k.title}`, `/cases/${k.id}`))
   void createDriveFolder(k)
+  onCaseCreated(k)
   return k
 }
 
@@ -48,6 +52,7 @@ export function setStage(caseId: ID, stage: CaseStage, note?: string) {
   s.patch('cases', caseId, { stage, updatedAt: nowIso(), ...(stage === 'closed' ? { closedAt: nowIso() } : {}), ...(stage === 'lost' && note ? { lostReason: note } : {}) })
   s.log({ kind: 'stage', caseId, text: `שלב: ${stageLabel[k.stage]} ← ${stageLabel[stage]}${note ? ` (${note})` : ''}` })
   if (k.agentId && k.agentId !== s.currentUserId) s.notify(k.agentId, `${k.title}: ${stageLabel[stage]}`, `/cases/${caseId}`)
+  onStageChanged({ ...k, stage }, k.stage, stage)
 }
 
 export function touchCase(caseId: ID, changes: Partial<Case> = {}) {
@@ -116,10 +121,11 @@ export function approveQuote(quoteId: ID, signature: Signature, deposit?: Quote[
   const office = s.db.users.filter((u) => u.role === 'office' || u.role === 'admin')
   office.forEach((u) => s.notify(u.id, `הצעה אושרה: ${k?.title ?? q.number} — לתאם התקנה`, `/cases/${q.caseId}`))
   const t = totals(approved, s.db.catalog)
-  if (k?.agentId) {
+  const com = k && commissionFor(k, t)
+  if (k?.agentId && com) {
     s.upsert('money', {
       id: uid('mn'), caseId: q.caseId, kind: 'commission', category: 'עמלת סוכן',
-      description: `${s.db.users.find((u) => u.id === k.agentId)?.name ?? ''} — ${s.settings.commissionPct}%`, amount: Math.round((t.net * s.settings.commissionPct) / 100), at: ymd(), userId: k.agentId,
+      description: `${s.db.users.find((u) => u.id === k.agentId)?.name ?? ''} — ${com.label}`, amount: com.amount, at: ymd(), userId: k.agentId, agentId: k.agentId, status: 'pending',
     })
   }
   const cust = s.db.customers.find((c) => c.id === k?.customerId)

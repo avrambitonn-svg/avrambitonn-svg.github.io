@@ -2,13 +2,16 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   Bell, Boxes, Building2, CalendarDays, ClipboardList, FileSignature, FolderKanban, HardHat, LayoutDashboard, Menu, RefreshCw, Search, Settings, Users, Wrench, BarChart3, Eye,
+  ListChecks, Palmtree, Truck, UserCog,
 } from 'lucide-react'
 import { brand } from '../brand'
 import { useApp, useMe } from '../lib/store'
 import { roleLabel, stageLabel } from '../lib/labels'
 import type { Role } from '../lib/types'
 import { relative } from '../lib/format'
-import { Avatar } from './ui'
+import { ChatWidget } from '../features/chat/ChatWidget'
+import { UserMenu } from '../features/auth/UserMenu'
+import { useReminders } from '../features/tasks/reminders'
 import { forecast, weatherIcon, type DayForecast } from '../lib/integrations/weather'
 import { useInboxPolling } from '../lib/integrations/inbox'
 
@@ -21,7 +24,9 @@ const nav: { group: string; items: NavItem[] }[] = [
       { to: '/', label: 'דשבורד', icon: <LayoutDashboard size={18} /> },
       { to: '/cases', label: 'תיקים ופרויקטים', icon: <FolderKanban size={18} />, roles: ['admin', 'office', 'agent', 'engineer'] },
       { to: '/calendar', label: 'לוח זמנים', icon: <CalendarDays size={18} /> },
+      { to: '/tasks', label: 'משימות', icon: <ListChecks size={18} />, count: (s) => s.db.tasks.filter((t) => !t.done && (t.assigneeId === s.currentUserId || t.sharedWith?.includes(s.currentUserId)) && !!t.due && t.due <= new Date().toISOString().slice(0, 10)).length },
       { to: '/field', label: 'אפליקציית שטח', icon: <HardHat size={18} /> },
+      { to: '/leave', label: 'אישורי חופשה', icon: <Palmtree size={18} />, count: (s) => (['admin', 'office'].includes(s.db.users.find((u) => u.id === s.currentUserId)?.role ?? '') ? s.db.leaves.filter((l) => l.status === 'pending').length : 0) },
     ],
   },
   {
@@ -37,6 +42,8 @@ const nav: { group: string; items: NavItem[] }[] = [
     group: 'תפעול וניהול',
     items: [
       { to: '/inventory', label: 'מלאי', icon: <Boxes size={18} />, roles: ['admin', 'office', 'installer'] },
+      { to: '/suppliers', label: 'ספקים', icon: <Truck size={18} />, roles: ['admin', 'office', 'engineer'] },
+      { to: '/users', label: 'משתמשים', icon: <UserCog size={18} />, roles: ['admin', 'office'] },
       { to: '/reports', label: 'דוחות', icon: <BarChart3 size={18} />, roles: ['admin', 'office'] },
       { to: '/settings', label: 'הגדרות וחיבורים', icon: <Settings size={18} />, roles: ['admin', 'office'] },
       { to: '/settings/priority', label: 'סנכרון Priority', icon: <RefreshCw size={18} />, roles: ['admin', 'office'] },
@@ -57,6 +64,10 @@ const titles: [RegExp, string][] = [
   [/^\/projects/, 'בנייה רוויה'],
   [/^\/inventory/, 'מלאי'],
   [/^\/reports/, 'דוחות'],
+  [/^\/tasks/, 'משימות'],
+  [/^\/leave/, 'אישורי חופשה'],
+  [/^\/suppliers/, 'ספקים'],
+  [/^\/users/, 'משתמשים'],
   [/^\/settings\/priority/, 'סנכרון Priority'],
   [/^\/settings/, 'הגדרות וחיבורים'],
 ]
@@ -205,6 +216,7 @@ export function Layout() {
   const [open, setOpen] = useState(false)
   useEffect(() => setOpen(false), [loc.pathname])
   useInboxPolling()
+  useReminders()
   const title = titles.find(([re]) => re.test(loc.pathname))?.[1] ?? ''
 
   return (
@@ -231,14 +243,7 @@ export function Layout() {
           )
         })}
         <div className="sidebar-foot">
-          <div className="row" style={{ marginBottom: 10 }}>
-            <Avatar user={me} />
-            <div className="grow">
-              <div style={{ color: '#fff', fontWeight: 600 }}>{me.name}</div>
-              <div className="tiny">{me.title}</div>
-            </div>
-          </div>
-          <span className="demo-badge">גרסת הדגמה</span>
+          <UserMenu />
         </div>
       </aside>
       {open && <div className="scrim" onClick={() => setOpen(false)} />}
@@ -256,6 +261,8 @@ export function Layout() {
           <Outlet />
         </main>
       </div>
+
+      <ChatWidget />
 
       <nav className="mobile-nav no-print">
         <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}><LayoutDashboard size={20} />ראשי</NavLink>

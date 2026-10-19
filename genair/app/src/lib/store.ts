@@ -1,9 +1,10 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage, type StateStorage } from 'zustand/middleware'
 import { get as idbGet, set as idbSet, del as idbDel } from 'idb-keyval'
-import type { Activity, Collection, DB, Entity, ID, Notification, Settings } from './types'
+import type { Activity, Collection, Config, DB, Entity, ID, Notification, Settings } from './types'
 import { nowIso, uid } from './format'
 import { seedDB } from './seed'
+import { defaultConfig } from './configDefaults'
 
 // הנתונים נשמרים ב-IndexedDB של הדפדפן (מקום לתמונות). בייצור השכבה הזו מוחלפת ב-API של השרת.
 const idbStorage: StateStorage = {
@@ -43,6 +44,7 @@ interface AppState {
   log: (a: Omit<Activity, 'id' | 'at'>) => void
   notify: (userId: ID, text: string, link?: string) => void
   setSettings: (p: Partial<Settings>) => void
+  setConfig: (p: Partial<Config>) => void
   setUser: (id: ID) => void
   resetDemo: () => void
 }
@@ -94,6 +96,7 @@ export const useApp = create<AppState>()(
       },
 
       setSettings: (p) => set((s) => ({ settings: { ...s.settings, ...p } })),
+      setConfig: (p) => set((s) => ({ db: { ...s.db, config: { ...s.db.config, ...p } } })),
       setUser: (id) => set({ currentUserId: id }),
       resetDemo: () => set({ db: seedDB(), currentUserId: 'u-admin' }),
     }),
@@ -104,7 +107,10 @@ export const useApp = create<AppState>()(
       partialize: (s) => ({ db: s.db, settings: s.settings, currentUserId: s.currentUserId }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<AppState>
-        return { ...current, ...p, settings: { ...defaultSettings, ...(p.settings ?? {}) } }
+        // נתונים מגרסה קודמת: אוספים חדשים מקבלים את ערכי ההתחלה, וההגדרות משלימות שדות חסרים
+        const db = p.db ? ({ ...current.db, ...p.db } as DB) : current.db
+        db.config = { ...defaultConfig(), ...(p.db?.config ?? {}) }
+        return { ...current, ...p, db, settings: { ...defaultSettings, ...(p.settings ?? {}) } }
       },
       onRehydrateStorage: () => () => useApp.setState({ hydrated: true }),
     },

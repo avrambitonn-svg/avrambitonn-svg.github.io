@@ -1,4 +1,8 @@
 // נתוני הדגמה. הלקוחות, האנשים והמחירים בדויים; הם בנויים סביב תחומי הפעילות של החברה.
+import { defaultConfig } from './configDefaults'
+import { applyPlatformSeed } from './seedPlatform'
+import { applyCollabSeed } from './seedCollab'
+import { applyAdminSeed } from './seedAdmin'
 import type {
   Activity,
   Apartment,
@@ -425,7 +429,7 @@ const notifications: Notification[] = [
 
 export function seedDB(): DB {
   // עותק עמוק, כדי ש"איפוס הדגמה" יתחיל תמיד מאותה נקודה
-  return structuredClone({
+  const db: DB = structuredClone({
     users,
     customers,
     contacts,
@@ -444,6 +448,16 @@ export function seedDB(): DB {
     docs,
     money,
     notifications,
-    counters: { case: 142, quote: 93, service: 313, contract: 21, apt: 0 },
+    chat: [],
+    leaves: [],
+    suppliers: [],
+    purchaseOrders: [],
+    config: defaultConfig(),
+    counters: { case: 142, quote: 93, service: 313, contract: 21, apt: 0, po: 0 },
   })
+  // נתוני הדגמה של כל מודול נמצאים בקובץ משלו
+  applyPlatformSeed(db)
+  applyCollabSeed(db)
+  applyAdminSeed(db)
+  return db
 }

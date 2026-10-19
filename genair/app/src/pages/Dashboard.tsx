@@ -1,12 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   AlertTriangle, ArrowLeft, BadgeCheck, CalendarClock, CheckCircle2, CircleDollarSign, Eye, FileText, HardHat, Inbox, Plus, RefreshCw, ShieldAlert, Wrench, Boxes, PhoneCall,
 } from 'lucide-react'
+import { TasksCard } from '../features/tasks/TasksCard'
 import { useApp, useMe } from '../lib/store'
 import { Avatars, Badge, Card, Empty, Stat } from '../components/ui'
 import { appointmentStatusLabel, appointmentTypeColor, appointmentTypeLabel, pipeline, stageLabel } from '../lib/labels'
-import { daysBetween, money, nowIso, relative, sameDay, time, uid, ymd } from '../lib/format'
+import { daysBetween, money, relative, sameDay, time, ymd } from '../lib/format'
 import { totals } from '../lib/quote'
 import type { Case, Quote } from '../lib/types'
 
@@ -27,10 +28,7 @@ interface Alert { key: string; icon: React.ReactNode; text: string; sub?: string
 export default function Dashboard() {
   const me = useMe()
   const db = useApp((s) => s.db)
-  const upsert = useApp((s) => s.upsert)
-  const patch = useApp((s) => s.patch)
   const nav = useNavigate()
-  const [newTask, setNewTask] = useState('')
 
   const latestQuote = useMemo(() => {
     const m = new Map<string, Quote>()
@@ -112,7 +110,6 @@ export default function Dashboard() {
     [db.appointments],
   )
 
-  const myTasks = useMemo(() => db.tasks.filter((t) => t.assigneeId === me.id).sort((a, b) => Number(a.done) - Number(b.done) || (a.due ?? '').localeCompare(b.due ?? '')), [db.tasks, me.id])
 
   const funnel = useMemo(() => {
     const stages = pipeline.slice(0, 7)
@@ -212,42 +209,7 @@ export default function Dashboard() {
         </div>
 
         <div className="col" style={{ gap: 16 }}>
-          <Card title="המשימות שלי">
-            <form
-              className="row"
-              style={{ padding: '12px 18px', borderBottom: '1px solid var(--line-2)' }}
-              onSubmit={(e) => {
-                e.preventDefault()
-                if (!newTask.trim()) return
-                upsert('tasks', { id: uid('t'), title: newTask.trim(), assigneeId: me.id, createdBy: me.id, done: false, priority: 'normal', due: ymd(), createdAt: nowIso() })
-                setNewTask('')
-              }}
-            >
-              <input className="input sm" placeholder="משימה חדשה..." value={newTask} onChange={(e) => setNewTask(e.target.value)} />
-              <button className="btn sm primary" type="submit"><Plus size={15} /></button>
-            </form>
-            {myTasks.length === 0 ? (
-              <Empty title="אין משימות" />
-            ) : (
-              <div className="list">
-                {myTasks.slice(0, 7).map((t) => {
-                  const k = db.cases.find((x) => x.id === t.caseId)
-                  return (
-                    <div key={t.id} className="list-item" style={{ opacity: t.done ? 0.55 : 1 }}>
-                      <label className="check">
-                        <input type="checkbox" checked={t.done} onChange={() => patch('tasks', t.id, { done: !t.done })} />
-                      </label>
-                      <div className="grow">
-                        <div className="small" style={{ textDecoration: t.done ? 'line-through' : undefined, fontWeight: t.priority === 'high' ? 700 : 500 }}>{t.title}</div>
-                        {k && <Link className="tiny" to={`/cases/${k.id}`}>{k.number}</Link>}
-                      </div>
-                      {t.priority === 'high' && !t.done && <Badge tone="danger">דחוף</Badge>}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </Card>
+          <TasksCard />
 
           <Card title="פעילות אחרונה">
             <div className="card-body">

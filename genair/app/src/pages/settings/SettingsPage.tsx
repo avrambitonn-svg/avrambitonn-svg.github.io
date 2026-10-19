@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  Building, CalendarDays, CheckCircle2, CircleOff, Cloud, Copy, Download, FileText, Mic, Navigation, Package, Plug, QrCode, RefreshCw, Share2, ShieldCheck, Sparkles, Star, Sun, Upload, UserPlus, Users, WifiOff, MessageCircle, Database,
+  Building, CalendarDays, CheckCircle2, CircleOff, Cloud, Copy, Download, FileText, Mic, Navigation, Package, Plug, QrCode, RefreshCw, Share2, ShieldCheck, Sparkles, Star, Sun, Upload, UserPlus, Users, WifiOff, MessageCircle, Database, ListTree, Workflow,
 } from 'lucide-react'
 import { brand } from '../../brand'
 import { useApp, useSettings } from '../../lib/store'
@@ -14,9 +14,12 @@ import { aiMode } from '../../lib/integrations/ai'
 import { pullPrices, priorityEnabled } from '../../lib/integrations/priority'
 import { download } from '../../lib/integrations/links'
 import { templates } from '../../lib/messaging'
+import { ListsSettings } from './ListsSettings'
+import { FlowSettings } from '../../features/flow/FlowSettings'
+import { SyncSettingsCard } from '../../features/auth/SyncSettingsCard'
 import type { CatalogItem, ItemCategory, Role, Settings, User } from '../../lib/types'
 
-type Tab = 'company' | 'users' | 'catalog' | 'integrations' | 'templates' | 'data'
+type Tab = 'company' | 'lists' | 'flows' | 'users' | 'catalog' | 'integrations' | 'templates' | 'data'
 const days = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳']
 
 export default function SettingsPage() {
@@ -30,6 +33,8 @@ export default function SettingsPage() {
         items={[
           { id: 'integrations', label: 'חיבורים', icon: <Plug size={15} /> },
           { id: 'company', label: 'חברה ותהליכים', icon: <Building size={15} /> },
+          { id: 'lists', label: 'רשימות', icon: <ListTree size={15} /> },
+          { id: 'flows', label: 'תהליכי עבודה', icon: <Workflow size={15} /> },
           { id: 'users', label: 'משתמשים והרשאות', icon: <Users size={15} /> },
           { id: 'catalog', label: 'קטלוג ומחירון', icon: <Package size={15} /> },
           { id: 'templates', label: 'תבניות הודעות', icon: <MessageCircle size={15} /> },
@@ -38,6 +43,8 @@ export default function SettingsPage() {
       />
       <div className="mt16">
         {tab === 'company' && <CompanyTab />}
+        {tab === 'lists' && <ListsSettings />}
+        {tab === 'flows' && <FlowSettings />}
         {tab === 'users' && <UsersTab />}
         {tab === 'catalog' && <CatalogTab />}
         {tab === 'integrations' && <IntegrationsTab />}
@@ -278,6 +285,7 @@ function IntegrationsTab() {
         </div>
       </Card>
 
+      <SyncSettingsCard />
       <Card title={<div className="row"><Cloud size={17} /><h2>שרת האינטגרציות</h2></div>} actions={<Status on={!!h?.ok} label={h?.ok ? 'מחובר' : s.serverUrl ? 'לא נבדק' : 'לא הוגדר'} />} pad>
         <p className="small muted">חיבורים שדורשים מפתח (Priority, AI, וואטסאפ עסקי, Google) עוברים דרך שרת קטן שמחזיק את המפתחות בצורה מאובטחת. הקוד שלו נמצא בתיקייה genair/server. בלי שרת, המערכת עובדת במצב הדגמה.</p>
         <div className="grid g2 mt12">
