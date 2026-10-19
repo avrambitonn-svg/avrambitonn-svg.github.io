@@ -1,18 +1,18 @@
 // הדגמה מודרכת: סמן גדול שזז על המסכים האמיתיים, מאיר כל כפתור ומסביר מה הוא עושה.
 // ההדגמה רצה על עותק של הנתונים: ביציאה הכל חוזר בדיוק למה שהיה.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { ChevronLeft, ChevronRight, Gauge, ListOrdered, Pause, Play, PlayCircle, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Gauge, ListOrdered, Pause, Play, PlayCircle, Sparkles, X } from 'lucide-react'
 import { useApp } from '../../lib/store'
 import { brand } from '../../brand'
 import { Cancelled, Run, go, typeInto, type Step } from './engine'
-import { chapters, steps } from './script'
+import { chapters, shortSteps, steps as fullSteps } from './script'
 import './demo.css'
 
 type Rect = { x: number; y: number; w: number; h: number }
 const speeds = [1, 1.5, 2] as const
 const DEMO_EVENT = 'genair:demo'
 
-// פתיחה מכל מקום במערכת: startDemo() או startDemo('quotes')
+// פתיחה מכל מקום במערכת: startDemo(), startDemo('quotes'), או startDemo('short') לסיור הקצר
 export function startDemo(chapter?: string) {
   window.dispatchEvent(new CustomEvent(DEMO_EVENT, { detail: { chapter } }))
 }
@@ -32,6 +32,8 @@ export function DemoPlayer() {
   const [cardOn, setCardOn] = useState(false)
   const [cardPos, setCardPos] = useState<CSSProperties>({})
   const [chOpen, setChOpen] = useState(false)
+  const [track, setTrack] = useState<'full' | 'short'>('full')
+  const steps = track === 'short' ? shortSteps : fullSteps
   const playingRef = useRef(playing)
   const speedRef = useRef(speed)
   const targetRef = useRef<HTMLElement | null>(null)
@@ -48,7 +50,9 @@ export function DemoPlayer() {
     // עותק של הנתונים, כדי שכל מה שקורה בהדגמה יימחק ביציאה
     const s = useApp.getState()
     snapRef.current = structuredClone({ db: s.db, settings: s.settings, currentUserId: s.currentUserId })
-    const first = chapter ? steps.findIndex((x) => x.chapter === chapter) : 0
+    const isShort = chapter === 'short'
+    setTrack(isShort ? 'short' : 'full')
+    const first = chapter && !isShort ? fullSteps.findIndex((x) => x.chapter === chapter) : 0
     setIdx(Math.max(0, first))
     setPlaying(true)
     setCardOn(false)
@@ -103,7 +107,7 @@ export function DemoPlayer() {
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [mode, idx])
+  }, [mode, idx, steps])
 
   const next = useCallback(() => {
     // מעבר ידני לפני שהלחיצה של השלב קרתה: מבצעים אותה, כדי שהשלב הבא ימצא את המסך הנכון
@@ -111,7 +115,7 @@ export function DemoPlayer() {
     if (s?.action === 'click' && !doneRef.current && targetRef.current?.isConnected) targetRef.current.click()
     if (idx >= steps.length - 1) { exit(); return }
     setIdx((i) => i + 1)
-  }, [idx, exit])
+  }, [idx, exit, steps])
   const prev = useCallback(() => setIdx((i) => Math.max(0, i - 1)), [])
 
   // הריצה של שלב אחד
@@ -146,7 +150,7 @@ export function DemoPlayer() {
           if (step.action === 'scroll') el.scrollIntoView({ block: 'start', behavior: 'smooth' })
         } else {
           setSpot(null)
-          setCursor({ x: window.innerWidth / 2, y: window.innerHeight * 0.72 })
+          setCursor({ x: window.innerWidth / 2, y: step.slide ? window.innerHeight + 90 : window.innerHeight * 0.72 })
         }
         setCardOn(true)
         await run.read(readTime(step) / sp())
@@ -170,7 +174,7 @@ export function DemoPlayer() {
     })()
     return () => { run.cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, idx, nonce])
+  }, [mode, idx, nonce, track])
 
   // מיקום הכרטיס ליד האלמנט, בלי לצאת מהמסך
   useLayoutEffect(() => {
@@ -214,7 +218,8 @@ export function DemoPlayer() {
     return () => window.removeEventListener('keydown', on)
   }, [mode, next, prev, exit])
 
-  const totalTime = useMemo(() => Math.round(steps.reduce((n, s) => n + readTime(s) + 1600, 0) / 60000), [])
+  const totalTime = useMemo(() => Math.round(fullSteps.reduce((n, s) => n + readTime(s) + 1600, 0) / 60000), [])
+  const shortTime = useMemo(() => Math.round(shortSteps.reduce((n, s) => n + readTime(s) + 1600, 0) / 6000) / 10, [])
 
   if (mode === 'off') return null
 
@@ -230,10 +235,13 @@ export function DemoPlayer() {
             </div>
             <button className="icon-btn" onClick={() => setMode('off')} aria-label="סגירה"><X size={18} /></button>
           </div>
-          <button className="btn primary lg demo-full" onClick={() => begin()}><Play size={18} /> הדגמה מלאה · כ-{totalTime} דקות</button>
+          <div className="demo-tracks">
+            <button className="btn primary lg" onClick={() => begin('short')}><Sparkles size={18} /> סיור קצר: העיקר · כ-{Math.ceil(shortTime)} דקות</button>
+            <button className="btn lg demo-full" onClick={() => begin()}><Play size={18} /> הדגמה מלאה · כ-{totalTime} דקות</button>
+          </div>
           <div className="demo-ch-list">
             {chapters.map((c, i) => {
-              const n = steps.filter((s) => s.chapter === c.id).length
+              const n = fullSteps.filter((s) => s.chapter === c.id).length
               return (
                 <button key={c.id} className="demo-ch" onClick={() => begin(c.id)}>
                   <span className="n">{i + 1}</span>
@@ -275,11 +283,27 @@ export function DemoPlayer() {
       {!clean && (
         <div className="demo-top">
           <div className="demo-bar"><span style={{ width: `${progress}%` }} /></div>
-          <span className="demo-pill">פרק {chapterIdx + 1} מתוך {chapters.length} · {chapters[chapterIdx]?.title}</span>
+          <span className="demo-pill">{track === 'short' ? 'סיור קצר' : `פרק ${chapterIdx + 1} מתוך ${chapters.length}`} · {chapters[chapterIdx]?.title}</span>
         </div>
       )}
 
-      {cardOn && step && (
+      {cardOn && step?.slide && (
+        <div className="demo-slide" key={step.id}>
+          <div className="demo-slide-in">
+            {step.slide.kicker && <div className="demo-slide-k">{step.slide.kicker}</div>}
+            <h2>{step.slide.title}</h2>
+            {step.slide.sub && <p>{step.slide.sub}</p>}
+            {step.slide.items && (
+              <div className="demo-slide-items">
+                {step.slide.items.map((t, i) => <span key={t} style={{ animationDelay: `${0.5 + i * 0.07}s` }}>{t}</span>)}
+              </div>
+            )}
+            <div className="demo-slide-brand"><b><span>{brand.nameEn.slice(0, 1)}</span>{brand.nameEn.slice(1)}</b><small>{brand.tagline}</small></div>
+          </div>
+        </div>
+      )}
+
+      {cardOn && step && !step.slide && (
         <div ref={cardRef} className="demo-card" style={cardPos}>
           <div className="demo-card-ch">{chapters[chapterIdx]?.title}</div>
           <h3>{step.title}</h3>
@@ -301,7 +325,7 @@ export function DemoPlayer() {
           <span className="demo-sep" />
           <button className="btn sm ghost" onClick={() => setSpeed((s) => speeds[(speeds.indexOf(s) + 1) % speeds.length])} title="מהירות"><Gauge size={15} /> <span className="ltr">{speed}x</span></button>
           <div className="demo-chs">
-            <button className="btn sm ghost" onClick={() => setChOpen((o) => !o)}><ListOrdered size={15} /> פרקים</button>
+            {track === 'full' && <button className="btn sm ghost" onClick={() => setChOpen((o) => !o)}><ListOrdered size={15} /> פרקים</button>}
             {chOpen && (
               <div className="demo-chs-pop">
                 {chapters.map((c, i) => (
@@ -328,7 +352,8 @@ function aim(r: DOMRect) {
 
 // בדיקה מהירה בפיתוח: עוברת על כל השלבים בלי אנימציות ומחזירה אילו יעדים לא נמצאו
 if (import.meta.env.DEV) {
-  ;(window as unknown as { __demoCheck: () => Promise<unknown[]> }).__demoCheck = async () => {
+  ;(window as unknown as { __demoCheck: (track?: 'short') => Promise<unknown[]> }).__demoCheck = async (track) => {
+    const steps = track === 'short' ? shortSteps : fullSteps
     const s = useApp.getState()
     const snap = structuredClone({ db: s.db, settings: s.settings, currentUserId: s.currentUserId })
     const run = new Run(() => true)

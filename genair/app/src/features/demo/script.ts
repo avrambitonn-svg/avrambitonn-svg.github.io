@@ -43,7 +43,9 @@ const raw: S[] = [
   { chapter: 'intro', route: '/', before: asUser('u-admin'), title: `מערכת התפעול של ${brand.name}`, text: 'בכמה דקות נעבור על כל המערכת: מהליד הראשון, דרך הסקר בשטח והצעת המחיר, ועד ההתקנה, השירות והדוחות. הכל על נתוני הדגמה.', read: 6500 },
 
   // ---------- דשבורד ----------
-  { chapter: 'dashboard', route: '/', target: '.content .grid.g4', title: 'המספרים שחשובים עכשיו', text: 'לידים חדשים, הצעות שמחכות ללקוח, מה נסגר החודש וקריאות שירות פתוחות. כל מספר מוביל לרשימה המלאה.' },
+  { chapter: 'dashboard', route: '/', target: '.content .grid.g4', title: 'המספרים שחשובים עכשיו', text: 'הכנסות החודש, פניות חדשות, הצעות שמחכות ללקוח וקריאות שירות פתוחות. לכל מספר יש קו מגמה של שנה אחורה, ולחיצה פותחת את הרשימה.' },
+  { chapter: 'dashboard', target: card('הכנסות ורווח גולמי'), title: 'הכנסות ורווח', text: 'הכנסות ורווח גולמי לכל חודש, והשוואה לתקופה המקבילה בשנה שעברה. מעבר עם העכבר מראה את המספרים של כל חודש.' },
+  { chapter: 'dashboard', target: card('צנרת מכירות'), title: 'צנרת המכירות', text: 'כמה תיקים פתוחים יש בכל שלב, כמה הם שווים, ומה יחס הסגירה ב-90 הימים האחרונים.' },
   { chapter: 'dashboard', target: card('דורש טיפול עכשיו'), title: 'דורש טיפול עכשיו', text: 'המערכת מוצאת לבד מה תקוע: הצעה שנצפתה ולא אושרה, ליד שלא חזרו אליו, חוזה שמסתיים, שגיאת סנכרון. כל שורה מובילה ישר למקום.' },
   { chapter: 'dashboard', target: card('היום בשטח'), title: 'מי בשטח היום', text: 'כל הצוותים, הכתובות והשעות. הסטטוס מתעדכן מהנייד של המתקין: בדרך, בעבודה, הסתיים.' },
   { chapter: 'dashboard', target: card('תיקים אחרונים'), title: 'תיקים אחרונים', text: 'התיקים שנפתחו לאחרונה והשלב של כל אחד.' },
@@ -138,8 +140,10 @@ const raw: S[] = [
   { chapter: 'team', target: { text: 'פניות לקוחות', sel: '.cw-tabs [role=tab]' }, action: 'press', title: 'פניות לקוחות', text: 'כל ההודעות מלקוחות, מוואטסאפ ומהאזור האישי, במקום אחד. מה שלא נענה מסומן.', after: () => (document.querySelector('.cw-panel [aria-label="סגירה"]') as HTMLElement | null)?.click() },
 
   // ---------- ניהול ----------
-  { chapter: 'manage', route: '/reports', target: '.content .page-head', title: 'דוחות', text: 'הכנסות, תיקים שנפתחו ונסגרו, ביצועי סוכנים, תפוקת מתקינים, לקוחות מובילים וסיבות הפסד. השוואה לתקופה הקודמת, וייצוא ל-PDF ול-Excel.' },
-  { chapter: 'manage', target: card('לקוחות מובילים'), optional: true, title: 'לקוחות מובילים', text: 'מי מביא הכי הרבה עבודה.' },
+  { chapter: 'manage', route: '/reports', target: '.content .rp-kpis', title: 'דוחות', text: 'תיקים שנפתחו ונסגרו, תקציב, הוצאות, יתרה ומשימות. כל מספר מול התקופה הקודמת, עם בחירת טווח וייצוא ל-PDF ול-Excel.' },
+  { chapter: 'manage', target: card('הכנסות ורווח גולמי לפי חודש'), title: 'הכנסות ורווח', text: 'הכנסות ורווח גולמי לפי חודש, יחס סגירה, שיעור רווח, מהירות העסקה והכנסה חוזרת מחוזים.' },
+  { chapter: 'manage', target: card('תיקים שנפתחו לפי חודש וסוג פרויקט'), title: 'מה נכנס', text: 'תיקים לפי חודש וסוג פרויקט, ותיקים לפי סטטוס.' },
+  { chapter: 'manage', target: card('מכירות לפי סוכן'), optional: true, title: 'סוכנים ולקוחות', text: 'מי מוכר כמה, יחס הסגירה של כל סוכן, והלקוחות שמביאים הכי הרבה עבודה.' },
   { chapter: 'manage', route: '/users', target: '.content .page-head', title: 'משתמשים והרשאות', text: 'כל עובד עם תפקיד והרשאות. מתקין רואה את העבודות שלו, סוכן את הלקוחות שלו, הנהלה הכל.' },
   { chapter: 'manage', route: '/settings', target: tab('רשימות'), action: 'press', title: 'הגדרות בלי מתכנת', text: 'סוגי פרויקטים, סטטוסים, תגיות, אמצעי תשלום, כללי עמלות ומספור תיקים. המנהל משנה לבד.' },
   { chapter: 'manage', target: tab('תהליכי עבודה'), action: 'press', title: 'תהליכי עבודה', text: 'תבניות תיקים ושלבי פלואו: מה קורה בכל שלב ומי מקבל איזו משימה.' },
@@ -153,3 +157,37 @@ const raw: S[] = [
 ]
 
 export const steps: Step[] = raw.map((s, i) => ({ ...s, id: `s${i + 1}` }))
+
+// סיור קצר: רק מה שהכי חשוב, בערך דקה וחצי. נפתח מהתפריט או מקישור עם ?demo=short
+const short: S[] = [
+  { chapter: 'intro', route: '/', before: asUser('u-admin'), title: 'פתיחה', text: '', read: 3800, slide: { kicker: brand.name, title: 'מערכת התפעול לחברת מיזוג', sub: 'בדקה וחצי: מה שהכי חשוב לניהול העסק' } },
+  { chapter: 'dashboard', route: '/', target: '.content .grid.g4', title: 'העסק במבט אחד', text: 'הכנסות החודש, פניות חדשות, הצעות פתוחות וקריאות שירות. לכל מספר יש מגמה של שנה אחורה.', read: 3600 },
+  { chapter: 'dashboard', target: card('הכנסות ורווח גולמי'), title: 'לאן העסק הולך', text: 'הכנסות ורווח גולמי לכל חודש, מול התקופה המקבילה בשנה שעברה.', read: 3400 },
+  { chapter: 'dashboard', target: card('צנרת מכירות'), title: 'צנרת המכירות', text: 'כמה תיקים בכל שלב, כמה הם שווים, ומה יחס הסגירה בפועל.', read: 3200 },
+  { chapter: 'dashboard', target: card('דורש טיפול עכשיו'), title: 'שום דבר לא נופל בין הכיסאות', text: 'המערכת מוצאת לבד מה תקוע: הצעה שנצפתה ולא אושרה, ליד שלא חזרו אליו, חוזה שמסתיים.', read: 3800 },
+  { chapter: 'case', route: '/cases/k1', target: { text: 'גולדברג', sel: 'h1', closest: '.card' }, title: 'כל התיק בעמוד אחד', text: 'לקוח, צוות, סקר, משימות, מסמכים, כספים וצ׳אט. מהליד ועד המסירה.', read: 3400 },
+  { chapter: 'quote', target: tab('סקר בשטח'), action: 'press', title: 'מהסקר בשטח', text: 'חדרים, מידות ותמונות שנאספו בשטח.', read: 1800 },
+  { chapter: 'quote', target: btn('בניית טיוטה מהסקר'), action: 'click', title: 'הצעת מחיר עם AI', text: 'ה-AI בונה טיוטה מתוך המחירון שלכם, בשניות.', read: 2400 },
+  { chapter: 'quote', target: btn('בניית טיוטה', '.modal-foot, .modal'), action: 'click', title: 'בונים', text: 'המחירים תמיד מהמחירון. ה-AI רק בוחר פריטים וכמויות.', read: 2200 },
+  { chapter: 'quote', target: { text: 'יצירת הצעה', within: '.modal', sel: 'button' }, title: 'בודקים ושולחים', text: 'כל שורה עם הסבר, וההצעה מוכנה לשליחה בוואטסאפ.', read: 3000, after: closeModal },
+  { chapter: 'portal', route: '/portal/pt-k1', target: btn('אישור ההצעה וחתימה'), action: 'click', title: 'הלקוח מאשר מהנייד', text: 'קישור אישי: הלקוח רואה את ההצעה, מאשר וחותם באצבע.', read: 3200 },
+  { chapter: 'portal', target: { text: 'חתימה', within: '.modal', sel: 'label, span, div' }, title: 'חתימה ומקדמה', text: 'ההצעה הופכת להזמנה, והצוות מקבל התראה.', read: 2800, after: closeModal },
+  { chapter: 'schedule', route: '/calendar', before: asUser('u-admin'), target: btn('שבוע'), action: 'press', title: 'שיבוץ חכם', text: 'כל הצוותים ביומן אחד. שבתות וחגים חסומים, והמערכת מציעה מועדים פנויים.', read: 3400 },
+  { chapter: 'field', route: '/field', before: asUser('u-inst1'), target: { text: 'היום', sel: '.content h2', closest: '.card', exact: true }, optional: true, title: 'אפליקציה למתקין', text: 'כתובת וניווט, צ׳קליסט, תמונות וחתימת הלקוח, מהנייד.', read: 3200 },
+  { chapter: 'service', route: '/service', before: asUser('u-admin'), target: '.content .stat-row, .content .page-head', title: 'שירות ואחריות', text: 'קריאות שירות, אחריות שמחושבת לבד וחוזי תחזוקה.', read: 3000 },
+  { chapter: 'manage', route: '/reports', target: '.content .rp-kpis', title: 'דוחות ניהול', text: 'תיקים, תקציב, הוצאות ויתרה, כל אחד מול התקופה הקודמת.', read: 3600 },
+  { chapter: 'manage', target: card('הכנסות ורווח גולמי לפי חודש'), title: 'הכנסות ורווח', text: 'לכל חודש, עם יחס סגירה, שיעור רווח ומהירות העסקה.', read: 3400 },
+  { chapter: 'manage', target: card('תיקים שנפתחו לפי חודש וסוג פרויקט'), title: 'מה נכנס', text: 'תיקים לפי חודש וסוג פרויקט, ותיקים לפי סטטוס.', read: 3000 },
+  { chapter: 'manage', target: card('מכירות לפי סוכן'), optional: true, title: 'סוכנים ולקוחות', text: 'מי מוכר כמה, ומי הלקוחות הכי חשובים. ייצוא ל-PDF ול-Excel בלחיצה.', read: 3200 },
+  { chapter: 'integrations', route: '/settings/priority', target: '.content .page-head', title: 'מחובר ל-Priority', text: 'לקוחות, מחירים והזמנות עוברים בלי הקלדה כפולה.', read: 3000 },
+  {
+    chapter: 'end', route: '/', title: 'סיכום', text: '', read: 9000,
+    slide: {
+      kicker: 'וזה רק חלק קטן',
+      title: 'יש עוד המון פיצ׳רים מתקדמים',
+      sub: 'שעוזרים לנהל את העסק, כל יום',
+      items: ['צ׳אט צוות ופניות לקוחות', 'משימות ותזכורות', 'אישורי חופשה', 'מלאי במחסן וברכבים', 'ספקים והזמנות רכש', 'חוזי תחזוקה', 'בנייה רוויה ושדרוגי דיירים', 'עמלות סוכנים', 'תיקייה ומסמכים לכל תיק', 'הכתבה קולית', 'וואטסאפ, Waze ויומן גוגל', 'שבתות וחגים ביומן', 'הרשאות לפי תפקיד', 'התראות בזמן אמת', 'ייצוא ל-PDF ול-Excel', 'עובד מכל נייד'],
+    },
+  },
+]
+export const shortSteps: Step[] = short.map((s, i) => ({ ...s, id: `q${i + 1}` }))

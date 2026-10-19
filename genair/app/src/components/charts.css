@@ -1,0 +1,117 @@
+/* גרפים: קווים דקים, רשת שקטה, והנתונים הם הדבר היחיד שבולט. התנועה רצה פעם אחת כשהגרף נכנס למסך */
+.viz { position: relative; }
+.viz svg { display: block; overflow: visible; direction: ltr; }
+.viz svg:focus { outline: none; }
+.viz svg:focus-visible { outline: 2px solid var(--brand); outline-offset: 4px; border-radius: 6px; }
+.viz-grid { stroke: var(--line-2); stroke-width: 1; shape-rendering: crispEdges; }
+.viz-axis { font-size: 11px; fill: var(--text-3); font-family: var(--font); font-variant-numeric: tabular-nums; }
+.viz-axis.on { fill: var(--ink); font-weight: 700; }
+.viz-cross { stroke: var(--text-3); stroke-width: 1; }
+.viz-endlbl, .viz-cap { font-size: 12px; font-weight: 700; fill: var(--ink); font-family: var(--font); }
+.viz-cap { font-size: 11px; fill: var(--text-2); }
+
+/* מצב התחלה (רק במסך, כדי שהדפסה תמיד תראה את הגרף המלא) */
+@media screen {
+  .viz-line { stroke-dasharray: 1; stroke-dashoffset: 0; transition: stroke-dashoffset 1.5s cubic-bezier(.45,.05,.2,1); }
+  .viz:not(.in) .viz-line { stroke-dashoffset: 1; }
+  .viz-area { transition: opacity 0.9s ease 0.5s; }
+  .viz:not(.in) .viz-area { opacity: 0; }
+  .viz-dot { transition: opacity 0.4s ease 1.3s, transform 0.5s cubic-bezier(.2,1.6,.4,1) 1.3s; transform-box: fill-box; transform-origin: center; }
+  .viz:not(.in) .viz-dot { opacity: 0; transform: scale(0.2); }
+  .viz-grow { transform-box: fill-box; transform-origin: 50% 100%; transition: transform 0.8s cubic-bezier(.2,.85,.25,1); }
+  .viz:not(.in) .viz-grow { transform: scaleY(0); }
+  .viz-cap { transition: opacity 0.4s ease 1s; }
+  .viz:not(.in) .viz-cap { opacity: 0; }
+  .viz-seg { stroke-dasharray: var(--len) 100; transition: stroke-dasharray 1.1s cubic-bezier(.45,.05,.2,1), stroke-width 0.2s, opacity 0.2s; }
+  .viz:not(.in) .viz-seg { stroke-dasharray: 0 100; }
+  .viz-br-f { transition: transform 0.9s cubic-bezier(.2,.85,.25,1); transform-origin: right center; }
+  .viz:not(.in) .viz-br-f { transform: scaleX(0); }
+}
+@media print { .viz-seg { stroke-dasharray: var(--len) 100; } }
+@media (prefers-reduced-motion: reduce) {
+  .viz *, .enter > *, .enter > .stagger > * { transition: none !important; animation: none !important; }
+}
+
+/* קו מגמה קטן */
+.viz-spark { flex: none; }
+
+/* גרף שטח ועמודות */
+.viz-area-chart, .viz-columns { width: 100%; }
+.viz-col { transition: opacity 0.2s; }
+.viz-col.dim { opacity: 0.35; }
+.viz-col.fade { opacity: 0.45; }
+.viz-col rect[tabindex]:focus { outline: none; }
+
+/* טולטיפ: הערך בולט, שם הסדרה משני */
+.viz-tip {
+  position: absolute; z-index: 5; pointer-events: none;
+  background: var(--ink); color: #fff; border-radius: 10px; padding: 8px 11px; font-size: 12.5px; line-height: 1.45;
+  box-shadow: 0 10px 28px rgba(16, 24, 32, 0.28); white-space: nowrap; min-width: 120px;
+}
+.viz-tip-t { color: #aab6c2; font-size: 11.5px; margin-bottom: 2px; }
+.viz-tip-r { display: flex; align-items: center; gap: 7px; }
+.viz-tip-r i { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+.viz-tip-r i.ln { height: 3px; width: 12px; border-radius: 2px; }
+.viz-tip-r b { font-variant-numeric: tabular-nums; }
+.viz-tip-r span { color: #c9d3dc; }
+
+.viz-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; font-size: 12.5px; color: var(--text-2); }
+.viz-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.viz-legend i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.viz-legend i.ln { height: 3px; width: 14px; border-radius: 2px; }
+
+/* עוגה */
+.viz-donut { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+.viz-donut-svg { position: relative; flex: none; }
+.viz-seg { cursor: pointer; }
+.viz-seg.fade { opacity: 0.35; }
+.viz-donut-c { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; pointer-events: none; }
+.viz-donut-c b { font-size: 26px; font-weight: 700; color: var(--ink); line-height: 1.1; }
+.viz-donut-c small { font-size: 12px; color: var(--text-3); max-width: 96px; line-height: 1.3; }
+.viz-donut-legend { flex: 1; min-width: 190px; display: flex; flex-direction: column; gap: 2px; }
+.viz-dl { display: flex; align-items: center; gap: 8px; font-size: 13.5px; padding: 4px 8px; border-radius: 8px; cursor: default; transition: background 0.15s; }
+.viz-dl.on { background: var(--surface-2); }
+.viz-dl i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.viz-pct { width: 38px; text-align: end; font-size: 12px; color: var(--text-3); }
+
+/* שורות אופקיות */
+.viz-bars { display: flex; flex-direction: column; gap: 9px; }
+.viz-br { display: grid; grid-template-columns: var(--lw, 128px) minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.viz-br-l { font-size: 13.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viz-br-s { font-size: 11.5px; color: var(--text-3); }
+.viz-br-t { height: 14px; background: var(--line-2); border-radius: 4px; overflow: hidden; }
+.viz-br-f { height: 100%; border-radius: 4px; min-width: 3px; }
+.viz-br-v { font-size: 13px; font-weight: 700; color: var(--ink); text-align: end; min-width: 52px; }
+@media (max-width: 700px) { .viz-br { grid-template-columns: 96px minmax(0, 1fr) auto; gap: 8px; } }
+
+/* מד עגול */
+.viz-ring { display: flex; align-items: center; gap: 12px; }
+.viz-ring-svg { position: relative; flex: none; }
+.viz-ring-svg b { position: absolute; inset: 0; display: grid; place-items: center; font-size: 16px; color: var(--ink); }
+
+/* כרטיס מדד */
+.kpi { padding: 14px 16px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.kpi-top { display: flex; align-items: center; gap: 10px; }
+.kpi-ico { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; flex: none; }
+.kpi-lbl { color: var(--text-2); font-size: 13.5px; font-weight: 600; }
+.kpi-val { font-size: 30px; font-weight: 700; color: var(--ink); line-height: 1.1; letter-spacing: -0.01em; white-space: nowrap; }
+.kpi-foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; min-height: 30px; }
+.kpi-meta { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.kpi-sub { font-size: 12px; color: var(--text-3); }
+.viz-trend { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 600; flex-wrap: wrap; }
+.viz-trend.good { color: var(--success); }
+.viz-trend.bad { color: var(--danger); }
+.viz-trend.flat { color: var(--text-3); }
+.viz-trend-s { font-weight: 400; color: var(--text-3); }
+@media (max-width: 700px) { .kpi-val { font-size: 23px; } .kpi .viz-spark { width: 70px; } }
+
+/* כניסה לעמוד: השורות עולות אחת אחרי השנייה, והכרטיסים בתוך שורה בדירוג קל */
+@keyframes viz-rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@media screen {
+  .enter > :not(.stagger), .enter > .stagger > * { animation: viz-rise 0.6s cubic-bezier(.2,.8,.2,1) both; animation-delay: calc(var(--r, 0) * 90ms + var(--c, 0) * 70ms); }
+  .enter > .stagger > :nth-child(2) { --c: 1; }
+  .enter > .stagger > :nth-child(3) { --c: 2; }
+  .enter > .stagger > :nth-child(4) { --c: 3; }
+  .enter > .stagger > :nth-child(5) { --c: 4; }
+  .enter > .stagger > :nth-child(6) { --c: 5; }
+}

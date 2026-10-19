@@ -24,6 +24,7 @@ export interface Step {
   read?: number // זמן קריאה במילישניות (ברירת מחדל: לפי אורך הטקסט)
   pad?: number
   optional?: boolean // אם האלמנט לא נמצא, מדלגים בשקט
+  slide?: { kicker?: string; title: string; sub?: string; items?: string[] } // שקופית על כל המסך במקום כרטיס
 }
 
 const DEFAULT_SEL = 'button, a, [role=tab], .chip, .nav-link, h1, h2, h3, label, .stat, .badge, th, input, select, textarea'

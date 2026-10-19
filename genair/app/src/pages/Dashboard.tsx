@@ -3,12 +3,15 @@ import { Link, useNavigate } from 'react-router-dom'
 import {
   AlertTriangle, ArrowLeft, BadgeCheck, CalendarClock, CheckCircle2, CircleDollarSign, Eye, FileText, HardHat, Inbox, Plus, RefreshCw, ShieldAlert, Wrench, Boxes, PhoneCall, PlayCircle,
 } from 'lucide-react'
+import { AreaChart, BarList, CountUp, Donut, KpiTile, Legend, Ring, Trend, compactMoney } from '../components/charts'
+import { countByMonth, lastMonths, revenueByMonth } from '../lib/metrics'
+import './dashboard.css'
 import { TasksCard } from '../features/tasks/TasksCard'
 import { startDemo } from '../features/demo/DemoPlayer'
 import { useApp, useMe } from '../lib/store'
-import { Avatars, Badge, Card, Empty, Stat } from '../components/ui'
-import { appointmentStatusLabel, appointmentTypeColor, appointmentTypeLabel, pipeline, stageLabel, stageTone } from '../lib/labels'
-import { daysBetween, money, relative, sameDay, time, ymd } from '../lib/format'
+import { Avatars, Badge, Card, Empty } from '../components/ui'
+import { appointmentStatusLabel, appointmentTypeColor, appointmentTypeLabel, pipeline, projectTypeColor, projectTypeLabel, stageLabel, stageTone } from '../lib/labels'
+import { addDays, daysBetween, money, relative, sameDay, time, ymd } from '../lib/format'
 import { totals } from '../lib/quote'
 import type { Case, Quote } from '../lib/types'
 
@@ -51,6 +54,43 @@ export default function Dashboard() {
   const open = cases.filter((k) => !['closed', 'lost'].includes(k.stage))
   const today = new Date()
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString()
+
+  // מגמות: 12 חודשים אחורה, ומספרים להשוואה מול התקופה הקודמת
+  const months = useMemo(() => lastMonths(12), [])
+  const trends = useMemo(() => {
+    const ids = new Set(cases.map((k) => k.id))
+    const mine = (caseId: string) => ids.has(caseId)
+    const rev = revenueByMonth(db, months, (q) => mine(q.caseId))
+    const inRange = (iso: string | undefined, from: Date, to: Date) => !!iso && iso >= from.toISOString() && iso <= to.toISOString()
+    const approvedIn = (from: Date, to: Date) => db.quotes.filter((q) => q.status === 'approved' && mine(q.caseId) && inRange(q.decidedAt, from, to))
+    const sumNet = (qs: Quote[]) => qs.reduce((s, q) => s + totals(q).net, 0)
+    const y = today.getFullYear()
+    const ytd = sumNet(approvedIn(new Date(y, 0, 1), today))
+    const ytdPrev = sumNet(approvedIn(new Date(y - 1, 0, 1), new Date(y - 1, today.getMonth(), today.getDate(), 23, 59)))
+    // החודש עד היום, מול אותם ימים בחודש הקודם
+    const monthNow = approvedIn(new Date(y, today.getMonth(), 1), today)
+    const monthPrev = sumNet(approvedIn(new Date(y, today.getMonth() - 1, 1), new Date(y, today.getMonth() - 1, today.getDate(), 23, 59)))
+    const d30 = addDays(today, -30)
+    const d60 = addDays(today, -60)
+    const created30 = cases.filter((k) => inRange(k.createdAt, d30, today)).length
+    const createdPrev30 = cases.filter((k) => inRange(k.createdAt, d60, d30)).length
+    const decided90 = db.quotes.filter((q) => mine(q.caseId) && (q.status === 'approved' || q.status === 'rejected') && inRange(q.decidedAt, addDays(today, -90), today))
+    const won90 = decided90.filter((q) => q.status === 'approved').length
+    const byType = new Map<string, number>()
+    for (const k of cases) if (inRange(k.createdAt, addDays(today, -365), today)) byType.set(k.projectType, (byType.get(k.projectType) ?? 0) + 1)
+    return {
+      revenue: rev.revenue,
+      profit: rev.profit,
+      ytd, ytdPrev,
+      monthNow: sumNet(monthNow), monthCount: monthNow.length, monthPrev,
+      created30, createdPrev30,
+      createdByMonth: countByMonth(cases, (k) => k.createdAt, months),
+      sentByMonth: countByMonth(db.quotes.filter((q) => mine(q.caseId)), (q) => q.sentAt, months),
+      serviceByMonth: countByMonth(db.serviceCalls, (c) => c.createdAt, months),
+      close90: decided90.length ? (won90 / decided90.length) * 100 : 0, won90, decided90: decided90.length,
+      byType: [...byType.entries()].sort((a, b) => b[1] - a[1]).map(([key, value]) => ({ key, label: projectTypeLabel[key as Case['projectType']] ?? key, value, color: projectTypeColor(key) })),
+    }
+  }, [db, cases, months])
 
   const stats = useMemo(() => {
     const leads = open.filter((k) => k.stage === 'lead')
@@ -120,14 +160,14 @@ export default function Dashboard() {
       return { st, n: ks.length, v: ks.reduce((s, k) => s + value(k), 0) }
     })
   }, [open, latestQuote])
-  const maxN = Math.max(1, ...funnel.map((f) => f.n))
+  const pipeValue = funnel.reduce((s, f) => s + f.v, 0)
 
   const feed = useMemo(() => db.activities.filter((a) => !mineOnly || cases.some((k) => k.id === a.caseId)).slice(0, 9), [db.activities, mineOnly, cases])
 
   const toneColor = { danger: 'var(--danger)', warning: 'var(--warning)', info: 'var(--info)' }
 
   return (
-    <div className="col" style={{ gap: 18 }}>
+    <div className="col enter dash" style={{ gap: 18 }}>
       <div className="page-head" style={{ marginBottom: 0 }}>
         <div>
           <h1>{greeting()}, {me.name.split(' ')[0]}</h1>
@@ -141,14 +181,44 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="grid g4">
-        <Stat icon={<Inbox size={20} />} label="לידים חדשים" value={stats.leads} delta="ממתינים לשיחה ראשונה" onClick={() => nav('/cases?stage=lead')} />
-        <Stat icon={<FileText size={20} />} tone="violet" label="הצעות פתוחות" value={stats.openQuotes} delta={`${money(stats.openQuotesValue)} לפני מע״מ`} onClick={() => nav('/cases?stage=quote')} />
-        <Stat icon={<BadgeCheck size={20} />} tone="success" label="נסגר החודש" value={money(stats.approvedMonth)} delta={`${stats.approvedCount} הצעות אושרו`} />
-        <Stat icon={<Wrench size={20} />} tone={stats.urgent ? 'danger' : 'warning'} label="קריאות שירות פתוחות" value={stats.service} delta={stats.urgent ? `${stats.urgent} דחופות` : 'אין דחופות'} onClick={() => nav('/service')} />
+      <div className="grid g4 stagger" style={{ '--r': 1 } as React.CSSProperties}>
+        <KpiTile icon={<BadgeCheck size={18} />} tone="success" label="הכנסות החודש" value={trends.monthNow} format={money}
+          trend={<Trend cur={trends.monthNow} prev={trends.monthPrev} suffix="מול אותם ימים בחודש שעבר" />} sub={`${trends.monthCount} עסקאות אושרו`} spark={trends.revenue} />
+        <KpiTile icon={<Inbox size={18} />} label="פניות חדשות ב-30 יום" value={trends.created30}
+          trend={<Trend cur={trends.created30} prev={trends.createdPrev30} suffix="מול 30 הימים שלפני" />} sub={`${stats.leads} ממתינים לשיחה ראשונה`} spark={trends.createdByMonth} onClick={() => nav('/cases?stage=lead')} />
+        <KpiTile icon={<FileText size={18} />} tone="violet" label="הצעות פתוחות" value={stats.openQuotes} sub={`${money(stats.openQuotesValue)} לפני מע״מ`} spark={trends.sentByMonth} onClick={() => nav('/cases?stage=quote')} />
+        <KpiTile icon={<Wrench size={18} />} tone={stats.urgent ? 'danger' : 'warning'} label="קריאות שירות פתוחות" value={stats.service} sub={stats.urgent ? `${stats.urgent} דחופות` : 'אין דחופות'} spark={trends.serviceByMonth} onClick={() => nav('/service')} />
       </div>
 
-      <div className="grid g-side">
+      {me.role !== 'installer' && (
+        <div className="grid dash-hero stagger" style={{ '--r': 2 } as React.CSSProperties}>
+          <Card title={<div><h2>הכנסות ורווח גולמי</h2><div className="tiny muted">12 החודשים האחרונים · לפי תאריך אישור ההצעה · לפני מע״מ</div></div>} actions={<Link className="btn sm ghost" to="/reports">לכל הדוחות</Link>} pad>
+            <div className="dash-hero-fig">
+              <div>
+                <div className="tiny muted">מתחילת השנה</div>
+                <div className="dash-big"><CountUp value={trends.ytd} format={money} /></div>
+                <Trend cur={trends.ytd} prev={trends.ytdPrev} suffix="לעומת התקופה המקבילה אשתקד" />
+              </div>
+              <Legend line series={[{ key: 'rev', label: 'הכנסות', color: 'var(--brand)' }, { key: 'profit', label: 'רווח גולמי', color: 'var(--violet)' }]} />
+            </div>
+            <AreaChart labels={months.map((m) => m.label)} format={money} axisFormat={compactMoney} height={230}
+              series={[{ key: 'rev', label: 'הכנסות', color: 'var(--brand)' }, { key: 'profit', label: 'רווח גולמי', color: 'var(--violet)' }]}
+              data={[trends.revenue, trends.profit]} />
+          </Card>
+          <Card title={<div><h2>צנרת מכירות</h2><div className="tiny muted">תיקים פתוחים לפי שלב</div></div>} actions={<Link className="btn sm ghost" to="/cases">לתיקים</Link>} pad>
+            <BarList ramp labelWidth={104} rows={funnel.map((f) => ({ key: f.st, label: stageLabel[f.st], value: f.n, display: <span>{f.n}{f.v > 0 && <span className="tiny muted"> · {compactMoney(f.v)}</span>}</span> }))} />
+            <div className="dash-pipe-foot">
+              <Ring value={trends.close90} label="יחס סגירה" sub={`${trends.won90} מתוך ${trends.decided90} הצעות · 90 יום`} />
+              <div>
+                <div className="tiny muted">שווי הצנרת</div>
+                <div className="strong" style={{ fontSize: 20 }}><CountUp value={pipeValue} format={money} /></div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      <div className="grid g-side stagger" style={{ '--r': 3 } as React.CSSProperties}>
         <div className="col" style={{ gap: 16 }}>
           <Card title={<div className="row"><AlertTriangle size={17} color="var(--warning)" /><h2>דורש טיפול עכשיו</h2></div>} actions={<span className="badge muted">{alerts.length}</span>}>
             {alerts.length === 0 ? (
@@ -213,24 +283,16 @@ export default function Dashboard() {
             </div>
           </Card>
 
-          <Card title="צנרת מכירות" actions={<Link className="btn sm ghost" to="/cases">לכל התיקים</Link>} pad>
-            {funnel.map((f) => (
-              <div key={f.st} className="funnel-row">
-                <span className="small">{stageLabel[f.st]}</span>
-                <div style={{ background: 'var(--line-2)', borderRadius: 8 }}>
-                  <div className="fill" style={{ width: `${(f.n / maxN) * 100}%`, minWidth: f.n ? 26 : 0 }} />
-                </div>
-                <span className="small num" style={{ textAlign: 'end' }}>
-                  <b>{f.n}</b>
-                  {f.v > 0 && <div className="tiny muted">{money(f.v)}</div>}
-                </span>
-              </div>
-            ))}
-          </Card>
         </div>
 
         <div className="col" style={{ gap: 16 }}>
           <TasksCard />
+
+          {me.role !== 'installer' && trends.byType.length > 0 && (
+            <Card title={<div><h2>פניות לפי סוג פרויקט</h2><div className="tiny muted">12 החודשים האחרונים</div></div>} pad>
+              <Donut parts={trends.byType} centerLabel="פניות" size={150} />
+            </Card>
+          )}
 
           <Card title="פעילות אחרונה">
             <div className="card-body">

@@ -1,0 +1,8 @@
+/* דשבורד: מדדים, גרף הכנסות וצנרת, ואז העבודה של היום */
+.dash-hero { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+.dash-hero-fig { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.dash-hero-fig .viz-legend { margin: 0 0 4px; }
+.dash-big { font-size: 34px; font-weight: 700; color: var(--ink); line-height: 1.15; letter-spacing: -0.01em; }
+.dash-pipe-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line-2); }
+@media (max-width: 1100px) { .dash-hero { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 700px) { .dash-big { font-size: 27px; } }
