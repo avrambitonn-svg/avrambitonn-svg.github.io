@@ -29,6 +29,8 @@ export default function Page() {
   const [showDone, setShowDone] = useState(false)
   const [open, setOpen] = useState<Task | 'new' | null>(null)
 
+  useEffect(() => { if (tab0 && ['mine', 'shared', 'created', 'team'].includes(tab0) && (tab0 !== 'team' || canTeam)) setTab(tab0) }, [tab0])
+
   // קישור ישיר למשימה (מהתראה): /tasks?task=<id>
   const linked = params.get('task')
   useEffect(() => {

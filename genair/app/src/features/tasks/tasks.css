@@ -38,7 +38,7 @@
 }
 
 .tk-case { position: relative; min-width: 160px; }
-.tk-case .input { height: 32px; font-size: 13.5px; }
+.tk-case .input, .tk-opts .tk-case .input { height: 32px; font-size: 13.5px; width: 100%; }
 .tk-drop { position: absolute; top: calc(100% + 4px); inset-inline: 0; z-index: 66; min-width: 240px; max-height: 260px; overflow-y: auto; box-shadow: var(--shadow-lg); }
 .tk-drop .list-item { width: 100%; border: 0; border-bottom: 1px solid var(--line-2); background: #fff; font: inherit; padding: 8px 12px; text-align: start; cursor: pointer; }
 .tk-drop .list-item:hover { background: #f7fbfd; }

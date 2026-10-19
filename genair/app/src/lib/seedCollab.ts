@@ -5,9 +5,11 @@ import { assigneesFor, dueIn, stagesOf, templateFor } from '../features/flow/eng
 
 const MIN = 60_000
 const minsAgo = (m: number) => new Date(Date.now() - m * MIN).toISOString()
-// לפני n ימים בשעה מסוימת (ולא בעתיד, גם אם השעה עוד לא הגיעה היום)
+// לפני n ימים בשעה מסוימת, בלי שישי ושבת (ולא בעתיד, גם אם השעה עוד לא הגיעה היום)
 function daysAgo(n: number, hhmm: string) {
-  const t = atTime(addDays(new Date(), -n), hhmm)
+  let d = addDays(new Date(), -n)
+  while (n > 0 && (d.getDay() === 5 || d.getDay() === 6)) d = addDays(d, -1)
+  const t = atTime(d, hhmm)
   return (t.getTime() > Date.now() - 5 * MIN ? new Date(Date.now() - (n + 1) * 7 * MIN) : t).toISOString()
 }
 const dayFmt = new Intl.DateTimeFormat('he-IL', { weekday: 'long', day: 'numeric', month: 'long' })

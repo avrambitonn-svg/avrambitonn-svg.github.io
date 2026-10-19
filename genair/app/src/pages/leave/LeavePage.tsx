@@ -41,6 +41,8 @@ export default function Page() {
   const [newOpen, setNewOpen] = useState(false)
   const [decide, setDecide] = useState<{ l: LeaveRequest; approve: boolean } | null>(null)
   useEffect(() => { if (tab === 'pending' && !canApprove) setTab('mine') }, [canApprove, tab])
+  // קישור מהתראה כשכבר נמצאים בעמוד: ?tab=pending / board
+  useEffect(() => { if (t0 && ['mine', 'pending', 'board', 'history'].includes(t0)) setTab(t0) }, [t0])
 
   const mine = useMemo(() => leaves.filter((l) => l.userId === me.id).sort((a, b) => b.from.localeCompare(a.from)), [leaves, me.id])
   const history = useMemo(() => leaves.filter((l) => l.status !== 'pending' && (canApprove || l.userId === me.id)).sort((a, b) => (b.decidedAt ?? b.createdAt).localeCompare(a.decidedAt ?? a.createdAt)), [leaves, canApprove, me.id])

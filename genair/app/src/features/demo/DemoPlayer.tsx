@@ -153,6 +153,9 @@ export function DemoPlayer() {
           await run.sleep(260)
           el.click()
           doneRef.current = true
+          // הלחיצה פתחה מסך או חלון: מורידים את ההדגשה מהכפתור הישן עד השלב הבא
+          setCardOn(false)
+          targetRef.current = null
           await run.sleep(600 / sp())
         }
         if (step.after) await step.after()
