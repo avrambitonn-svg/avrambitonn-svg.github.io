@@ -8,6 +8,7 @@ import { bootstrapServer, bridge, readSyncConfig, serverHealth, signOut, switchM
 import type { ServerHealth } from '../../lib/sync/session'
 import { docBlob, uploadToServer } from '../../lib/files'
 import './auth.css'
+import { brand } from '../../brand'
 
 export function SyncSettingsCard() {
   return bridge.mode === 'server' ? <Connected /> : <LocalMode />
@@ -130,8 +131,8 @@ function LocalMode() {
       {shared && (
         <div className="col mt16" style={{ gap: 12 }}>
           <div className="row wrap" style={{ alignItems: 'flex-end' }}>
-            <Field label="כתובת השרת" className="grow" hint="אותו שרת של האינטגרציות (genair/server), על אחסון קבוע">
-              <input className="input ltr" placeholder="https://api.genair.co.il" value={settings.serverUrl} onChange={(e) => { setSettings({ serverUrl: e.target.value.trim() }); setH(null) }} />
+            <Field label="כתובת השרת" className="grow" hint="אותו שרת של האינטגרציות (תיקיית server), על אחסון קבוע">
+              <input className="input ltr" placeholder={`https://api.${brand.domain}`} value={settings.serverUrl} onChange={(e) => { setSettings({ serverUrl: e.target.value.trim() }); setH(null) }} />
             </Field>
             <button className="btn" disabled={!url || checking} onClick={() => void check()}><Server size={15} /> {checking ? 'בודק...' : 'בדיקה'}</button>
           </div>

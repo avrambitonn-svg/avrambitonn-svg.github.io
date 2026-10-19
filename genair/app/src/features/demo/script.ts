@@ -1,6 +1,7 @@
 // התסריט של ההדגמה: פרקים ושלבים. כל שלב מצביע על אלמנט אמיתי במסך (לפי טקסט, כדי לשרוד שינויים בעיצוב)
 import { app } from '../../lib/store'
 import type { Step, Target } from './engine'
+import { brand } from '../../brand'
 
 export const chapters = [
   { id: 'intro', title: 'פתיחה', sub: 'מה נראה בהדגמה' },
@@ -39,7 +40,7 @@ const clearSearch = () => {
 type S = Omit<Step, 'id'>
 const raw: S[] = [
   // ---------- פתיחה ----------
-  { chapter: 'intro', route: '/', before: asUser('u-admin'), title: "מערכת התפעול של ג'נאייר", text: 'בכמה דקות נעבור על כל המערכת: מהליד הראשון, דרך הסקר בשטח והצעת המחיר, ועד ההתקנה, השירות והדוחות. הכל על נתוני הדגמה.', read: 6500 },
+  { chapter: 'intro', route: '/', before: asUser('u-admin'), title: `מערכת התפעול של ${brand.name}`, text: 'בכמה דקות נעבור על כל המערכת: מהליד הראשון, דרך הסקר בשטח והצעת המחיר, ועד ההתקנה, השירות והדוחות. הכל על נתוני הדגמה.', read: 6500 },
 
   // ---------- דשבורד ----------
   { chapter: 'dashboard', route: '/', target: '.content .grid.g4', title: 'המספרים שחשובים עכשיו', text: 'לידים חדשים, הצעות שמחכות ללקוח, מה נסגר החודש וקריאות שירות פתוחות. כל מספר מוביל לרשימה המלאה.' },
@@ -88,7 +89,7 @@ const raw: S[] = [
   { chapter: 'quote', target: btn('מהקטלוג'), title: 'מהמחירון', text: 'בחירה לפי שם, מק״ט או קטגוריה. המחירים מגיעים מ-Priority.' },
   { chapter: 'quote', target: { text: 'רווחיות', sel: '.hd', closest: 'div' }, optional: true, pad: 12, title: 'רווחיות', text: 'עלות, רווח ומרווח לכל הצעה. רק הנהלה ומשרד רואים את זה, ויש אזהרה כשהמרווח נמוך.' },
   { chapter: 'quote', target: btn('שליחה'), title: 'שליחה ללקוח', text: 'בוואטסאפ עם קישור לאזור האישי, או במייל. ההצעה מסומנת כנשלחה, ורואים מתי הלקוח צפה בה.' },
-  { chapter: 'quote', target: btn('הדפסה'), title: 'PDF ממותג', text: "הצעה מודפסת בעיצוב של ג'נאייר, עם קוד QR לאזור האישי." },
+  { chapter: 'quote', target: btn('הדפסה'), title: 'PDF ממותג', text: `הצעה מודפסת בעיצוב של ${brand.name}, עם קוד QR לאזור האישי.` },
 
   // ---------- האזור האישי ----------
   { chapter: 'portal', route: '/portal/pt-k1', target: { text: 'שלום', sel: 'h1' }, title: 'מה הלקוח רואה', text: 'דף אישי בעיצוב החברה: איפה הפרויקט עומד, ההצעה, מועדים, מסמכים ואחריות.' },

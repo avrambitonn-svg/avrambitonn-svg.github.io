@@ -29,6 +29,7 @@ import type {
 } from './types'
 import { addDays, atTime, ymd } from './format'
 import { defaultTerms } from './quote'
+import { brand } from '../brand'
 
 const synced = (priorityId: string, hoursAgo = 3) => ({
   status: 'synced' as const,
@@ -74,11 +75,11 @@ const signatureSvg = (seed: number) =>
   )
 
 const users: User[] = [
-  { id: 'u-admin', name: 'דוד מזרחי', role: 'admin', title: 'מנכ״ל', phone: '0502201100', email: 'david@genair.co.il', color: '#0f766e', active: true },
-  { id: 'u-office', name: 'משה כהן', role: 'office', title: 'מנהל תפעול ותיאום', phone: '0502201101', email: 'office@genair.co.il', color: '#0ea5e9', active: true },
+  { id: 'u-admin', name: 'דוד מזרחי', role: 'admin', title: 'מנכ״ל', phone: '0502201100', email: `david@${brand.domain}`, color: '#0f766e', active: true },
+  { id: 'u-office', name: 'משה כהן', role: 'office', title: 'מנהל תפעול ותיאום', phone: '0502201101', email: `office@${brand.domain}`, color: '#0ea5e9', active: true },
   { id: 'u-agent1', name: 'אבי לוי', role: 'agent', title: 'יועץ מכירות — פרטיים', phone: '0502201102', region: 'ירושלים', color: '#00aeef', active: true },
   { id: 'u-agent2', name: 'יוסי פרץ', role: 'agent', title: 'יועץ מכירות — פרויקטים ומוסדות', phone: '0502201103', region: 'ירושלים ובית שמש', color: '#6366f1', active: true },
-  { id: 'u-eng', name: 'אלי שטרן', role: 'engineer', title: 'מהנדס מיזוג ראשי', phone: '0502201104', email: 'eng@genair.co.il', color: '#8b5cf6', active: true },
+  { id: 'u-eng', name: 'אלי שטרן', role: 'engineer', title: 'מהנדס מיזוג ראשי', phone: '0502201104', email: `eng@${brand.domain}`, color: '#8b5cf6', active: true },
   {
     id: 'u-inst1', name: 'סאמר חלבי', role: 'installer', title: 'ראש צוות התקנות', phone: '0502201105', region: 'ירושלים', color: '#16a34a',
     skills: ['VRF', 'מיני מרכזי', 'עבודה בגובה'], certifications: [{ type: 'עבודה בגובה', expires: dayStr(140) }, { type: 'גזי קירור', expires: dayStr(420) }], active: true,

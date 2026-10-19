@@ -280,9 +280,9 @@ function IntegrationsTab() {
 
       <SyncSettingsCard />
       <Card title={<div className="row"><Cloud size={17} /><h2>שרת האינטגרציות</h2></div>} actions={<Status on={!!h?.ok} label={h?.ok ? 'מחובר' : s.serverUrl ? 'לא נבדק' : 'לא הוגדר'} />} pad>
-        <p className="small muted">חיבורים שדורשים מפתח (Priority, AI, וואטסאפ עסקי, Google) עוברים דרך שרת קטן שמחזיק את המפתחות בצורה מאובטחת. הקוד שלו נמצא בתיקייה genair/server. בלי שרת, המערכת עובדת במצב הדגמה.</p>
+        <p className="small muted">חיבורים שדורשים מפתח (Priority, AI, וואטסאפ עסקי, Google) עוברים דרך שרת קטן שמחזיק את המפתחות בצורה מאובטחת. הקוד שלו נמצא בתיקיית server. בלי שרת, המערכת עובדת במצב הדגמה.</p>
         <div className="grid g2 mt12">
-          <Field label="כתובת השרת"><input className="input ltr" placeholder="https://genair-ops-api.vercel.app" value={s.serverUrl} onChange={(e) => set({ serverUrl: e.target.value.trim() })} /></Field>
+          <Field label="כתובת השרת"><input className="input ltr" placeholder={`https://api.${brand.domain}`} value={s.serverUrl} onChange={(e) => set({ serverUrl: e.target.value.trim() })} /></Field>
           <Field label="אסימון גישה (APP_TOKEN)"><input className="input ltr" type="password" value={s.appToken} onChange={(e) => set({ appToken: e.target.value })} /></Field>
         </div>
         <div className="row wrap mt12">

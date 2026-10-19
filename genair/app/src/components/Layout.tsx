@@ -79,7 +79,7 @@ const titles: [RegExp, string][] = [
 export function Wordmark() {
   return (
     <div className="wordmark">
-      <b><span>G</span>ENAIR</b>
+      <b><span>{brand.nameEn.slice(0, 1)}</span>{brand.nameEn.slice(1)}</b>
       <small>{brand.tagline}</small>
     </div>
   )

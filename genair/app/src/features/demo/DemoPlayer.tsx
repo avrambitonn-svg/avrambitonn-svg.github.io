@@ -76,6 +76,8 @@ export function DemoPlayer() {
       begin(m[1] === '1' || m[1] === 'full' ? undefined : m[1])
     }
     fromLink()
+    // בקישור ההדגמה (מותג ניטרלי) תפריט הפרקים נפתח מיד
+    if (brand.demo && !/[?&]demo=/.test(window.location.hash)) setMode('menu')
     window.addEventListener('hashchange', fromLink)
     return () => { window.removeEventListener(DEMO_EVENT, on); window.removeEventListener('hashchange', fromLink) }
   }, [begin])

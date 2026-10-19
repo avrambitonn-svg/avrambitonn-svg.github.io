@@ -1,4 +1,5 @@
 import type { CatalogItem, Quote, QuoteLine } from './types'
+import { brand } from '../brand'
 
 export interface QuoteTotals {
   subtotal: number
@@ -36,7 +37,7 @@ export const round2 = (n: number) => Math.round(n * 100) / 100
 export const defaultTerms = [
   'המחירים אינם כוללים מע"מ, אלא אם צוין אחרת.',
   'תוקף ההצעה 14 יום ממועד הוצאתה.',
-  'אחריות יצרן על היחידות לפי תעודת האחריות, ואחריות ג׳נאייר על ההתקנה ל-12 חודשים.',
+  `אחריות יצרן על היחידות לפי תעודת האחריות, ואחריות ${brand.name} על ההתקנה ל-12 חודשים.`,
   'עבודות חשמל ובנייה שאינן מפורטות בהצעה יחויבו בנפרד, באישור הלקוח מראש.',
   'מקדמה בגובה 20% עם אישור ההצעה, והיתרה עם סיום ההתקנה.',
 ].join('\n')

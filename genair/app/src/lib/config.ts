@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 import type { Config, ListOption } from './types'
 import { app, useApp } from './store'
 import { defaultConfig } from './configDefaults'
+import { brand } from '../brand'
 
 export { defaultConfig }
 
@@ -39,7 +40,7 @@ export const newKey = (prefix = 'x') => `${prefix}_${Date.now().toString(36)}${M
 
 // ---------- ערכת צבע ----------
 export const themes: { key: Config['theme']; label: string; swatch: [string, string] }[] = [
-  { key: 'genair', label: 'ג׳נאייר (תכלת)', swatch: ['#00aeef', '#1c2127'] },
+  { key: 'genair', label: `${brand.name} (תכלת)`, swatch: ['#00aeef', '#1c2127'] },
   { key: 'navy', label: 'כחול כהה', swatch: ['#1d4ed8', '#14213d'] },
   { key: 'green', label: 'ירוק', swatch: ['#047857', '#1c2127'] },
   { key: 'orange', label: 'כתום', swatch: ['#c2410c', '#1c2127'] },

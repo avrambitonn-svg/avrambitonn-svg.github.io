@@ -11,6 +11,7 @@ import { portalUrl, whatsappLink } from '../../lib/integrations/links'
 import { fill, sendMessage, templates } from '../../lib/messaging'
 import { planColor, upgradesValue } from './ProjectsPage'
 import type { Apartment, ApartmentPlanStatus, BuildingProject, QuoteLine } from '../../lib/types'
+import { brand } from '../../brand'
 
 export default function ProjectPage() {
   const { id } = useParams()
@@ -118,7 +119,7 @@ export default function ProjectPage() {
           <p className="small muted mb12">וואטסאפ לא מאפשר שליחה מרוכזת בלחיצה, אז כל שורה נפתחת בנפרד. עם WhatsApp Business API השליחה אוטומטית.</p>
           <div className="list">
             {waiting.map((a) => {
-              const text = `שלום ${a.tenantName ?? ''}, כאן ${'ג׳נאייר'} — חברת המיזוג של ${p.name}. אפשר לבקש שינויים בתוכנית המיזוג של הדירה עד ${date(p.changesDeadline)}. לשאלות ולבקשות פשוט עונים להודעה הזו.`
+              const text = `שלום ${a.tenantName ?? ''}, כאן ${brand.name} — חברת המיזוג של ${p.name}. אפשר לבקש שינויים בתוכנית המיזוג של הדירה עד ${date(p.changesDeadline)}. לשאלות ולבקשות פשוט עונים להודעה הזו.`
               return (
                 <div key={a.id} className="list-item">
                   <div className="grow"><div className="small strong">דירה {a.number} · {a.tenantName}</div><div className="tiny muted"><span className="ltr">{phone(a.tenantPhone)}</span></div></div>

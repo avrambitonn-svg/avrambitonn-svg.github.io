@@ -14,6 +14,7 @@ import { setConfig } from '../../lib/config'
 import { CommitInput } from '../../features/case/controls'
 import type { CaseStage, DB, LeadSource, MoneyLine } from '../../lib/types'
 import './reports.css'
+import { brand } from '../../brand'
 
 type Preset = 'month' | 'prev' | 'quarter' | 'year' | 'custom'
 interface Range { from: string; to: string }
@@ -216,7 +217,7 @@ export default function ReportsPage() {
   // PDF: גיליון הדפסה ב-A4; שם הקובץ נלקח משם המסמך
   function exportPdf() {
     const prevTitle = document.title
-    document.title = `דוח ג׳נאייר ${range.from} עד ${range.to}`
+    document.title = `דוח ${brand.name} ${range.from} עד ${range.to}`
     document.body.classList.add('print-report')
     const done = () => {
       document.body.classList.remove('print-report')

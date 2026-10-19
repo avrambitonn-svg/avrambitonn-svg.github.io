@@ -10,6 +10,7 @@ import { bridge, listCredentials, setUserPassword } from '../../lib/sync'
 import type { CredentialInfo } from '../../lib/sync/session'
 import type { Certification, Role, User, UserFunction } from '../../lib/types'
 import './users.css'
+import { brand } from '../../brand'
 
 const roles = Object.keys(roleLabel) as Role[]
 const functionLabel: Record<UserFunction, string> = { department_manager: 'מנהל מחלקה', project_manager: 'מנהל פרויקט' }
@@ -232,7 +233,7 @@ function UserDialog({ user, onClose }: { user?: User; onClose: () => void }) {
           </Field>
           <Field label="אזור"><input className="input" value={d.region ?? ''} onChange={(e) => set({ region: e.target.value })} placeholder="ירושלים, בית שמש..." /></Field>
           <Field label="טלפון" hint="משמש גם לכניסה למערכת"><input className="input ltr" inputMode="tel" value={d.phone} onChange={(e) => set({ phone: e.target.value })} placeholder="050-0000000" /></Field>
-          <Field label="אימייל"><input className="input ltr" inputMode="email" value={d.email ?? ''} onChange={(e) => set({ email: e.target.value })} placeholder="name@genair.co.il" /></Field>
+          <Field label="אימייל"><input className="input ltr" inputMode="email" value={d.email ?? ''} onChange={(e) => set({ email: e.target.value })} placeholder={`name@${brand.domain}`} /></Field>
         </div>
 
         <div className="grid g2">
@@ -260,7 +261,7 @@ function UserDialog({ user, onClose }: { user?: User; onClose: () => void }) {
         </div>
 
         <Field label="יומן Google אישי" hint="מזהה היומן (בדרך כלל האימייל). צריך לשתף אותו עם חשבון השירות של השרת, ואז כל שיבוץ נכנס ליומן שלו.">
-          <input className="input ltr" value={d.googleCalendarId ?? ''} onChange={(e) => set({ googleCalendarId: e.target.value })} placeholder="name@genair.co.il" />
+          <input className="input ltr" value={d.googleCalendarId ?? ''} onChange={(e) => set({ googleCalendarId: e.target.value })} placeholder={`name@${brand.domain}`} />
         </Field>
 
         <div className="field">
