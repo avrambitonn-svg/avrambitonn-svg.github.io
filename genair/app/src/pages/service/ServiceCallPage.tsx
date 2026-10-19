@@ -243,7 +243,7 @@ function CallView({ call }: { call: ServiceCall }) {
                   <div className="strong">{contract.title}</div>
                   <div className="small muted">{contract.number} · {contractTypeLabel[contract.type]}</div>
                   <div className="row wrap" style={{ gap: 6 }}>
-                    <Badge tone={contract.status === 'active' ? 'success' : contract.status === 'expiring' ? 'warning' : 'muted'}>{contract.status === 'active' ? 'פעיל' : contract.status === 'expiring' ? 'מסתיים בקרוב' : contract.status === 'expired' ? 'פג' : 'בוטל'}</Badge>
+                    <Badge tone={contract.status === 'active' ? 'success' : contract.status === 'expiring' ? 'warning' : 'muted'}>{contract.status === 'active' ? 'פעיל' : contract.status === 'expiring' ? 'מסתיים בקרוב' : contract.status === 'expired' ? 'פג' : contract.status === 'proposed' ? 'הוצע ללקוח' : 'בוטל'}</Badge>
                     <span className="tiny muted">ביקור הבא {fmtDate(contract.nextVisit)} · עד {fmtDate(contract.endDate)}</span>
                   </div>
                   <Link to="/contracts" className="small">לחוזים ותחזוקה</Link>

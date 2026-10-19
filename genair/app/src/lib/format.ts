@@ -29,6 +29,15 @@ export function ymd(d: Date | string = new Date()): string {
   return `${x.getFullYear()}-${m}-${day}`
 }
 
+export function addMonths(d: Date | string, months: number): Date {
+  const x = typeof d === 'string' ? new Date(d) : new Date(d.getTime())
+  const day = x.getDate()
+  x.setDate(1)
+  x.setMonth(x.getMonth() + months)
+  x.setDate(Math.min(day, new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate()))
+  return x
+}
+
 export function addDays(d: Date | string, days: number): Date {
   const x = typeof d === 'string' ? new Date(d) : new Date(d.getTime())
   x.setDate(x.getDate() + days)

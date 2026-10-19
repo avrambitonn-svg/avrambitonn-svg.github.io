@@ -24,6 +24,7 @@ import './editor.css'
 type Dialog = null | 'send' | 'approve' | 'reject' | 'catalog' | 'version' | 'ai'
 
 const freeUnits = ['יח׳', 'מ״א', 'מ״ר', 'נק׳', 'שעה', 'פרויקט']
+const countText = (n: number, one: string, many: string) => (n === 1 ? one : `${n} ${many}`)
 
 export default function QuoteEditor() {
   const { id } = useParams()
@@ -254,7 +255,7 @@ export default function QuoteEditor() {
             </div>
             {q.lines.length > 0 && (
               <div className="qe-lines-foot">
-                <span className="small muted">{q.lines.reduce((s, l) => s + (catalog.find((c) => c.id === l.itemId)?.category === 'unit' ? l.qty : 0), 0)} יחידות מיזוג · {rooms.length} חדרים</span>
+                <span className="small muted">{countText(q.lines.reduce((s, l) => s + (catalog.find((c) => c.id === l.itemId)?.category === 'unit' ? l.qty : 0), 0), 'יחידת מיזוג אחת', 'יחידות מיזוג')} · {countText(rooms.length, 'חדר אחד', 'חדרים')}</span>
                 <span className="strong num">סה״כ שורות: {money(t.subtotal)}</span>
               </div>
             )}
@@ -305,7 +306,9 @@ export default function QuoteEditor() {
             <div className="money-line"><span className="muted">לפני מע״מ</span><span className="num">{money(t.net)}</span></div>
             <div className="money-line"><span className="muted">מע״מ {pct(q.vatPct)}</span><span className="num">{money(t.vat)}</span></div>
             <div className="money-line total"><span>סה״כ לתשלום</span><span className="num">{money(t.total)}</span></div>
-            <div className="tiny muted mt8">מקדמה באישור ({settings.depositPct}%): {money(q.deposit?.amount ?? deposit)}</div>
+            <div className="tiny muted mt8">
+              {q.deposit ? `מקדמה ${q.deposit.paidAt ? 'ששולמה' : 'שממתינה'}: ${money(q.deposit.amount)}` : `מקדמה באישור (${settings.depositPct}%): ${money(deposit)}`}
+            </div>
 
             {showCost && (
               <div className="qe-profit">

@@ -71,7 +71,8 @@
 .pt-terms summary { cursor: pointer; font-weight: 600; color: var(--text-2); }
 .pt-terms ol { margin: 8px 0 0; padding-inline-start: 18px; display: grid; gap: 3px; }
 .pt-note { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); font-size: 13.5px; color: var(--text-2); white-space: pre-line; }
-.pt-banner { display: flex; gap: 12px; align-items: center; padding: 14px; border-radius: 14px; margin-bottom: 14px; }
+.pt-banner { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 14px; border-radius: 14px; margin-bottom: 14px; }
+.pt-banner > div { flex: 1 1 200px; min-width: 0; }
 .pt-banner.ok { background: var(--success-50); color: #14532d; }
 .pt-banner.no { background: var(--surface-2); color: var(--text-2); }
 .pt-banner.warn { background: var(--warning-50); color: #7c2d12; }
@@ -79,7 +80,8 @@
 .pt-banner.ok .ico { background: var(--success); color: #fff; }
 .pt-banner.no .ico { background: var(--line); color: var(--text-2); }
 .pt-banner.warn .ico { background: var(--warning); color: #fff; }
-.pt-banner img { height: 44px; background: #fff; border-radius: 8px; padding: 2px 8px; margin-inline-start: auto; }
+.pt-banner img { height: 44px; max-width: 150px; object-fit: contain; background: #fff; border-radius: 8px; padding: 2px 8px; margin-inline-start: auto; }
+@media (max-width: 480px) { .pt-banner img { margin-inline-start: 52px; } }
 
 /* מועדים */
 .pt-appt { display: flex; gap: 14px; align-items: flex-start; padding: 12px 0; border-bottom: 1px solid var(--line-2); }

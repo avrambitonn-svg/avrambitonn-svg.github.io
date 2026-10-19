@@ -18,8 +18,8 @@ import './contracts.css'
 type Live = Contract['status']
 type Tab = 'contracts' | 'visits' | 'renewals'
 
-const statusLabel: Record<Live, string> = { active: 'פעיל', expiring: 'מסתיים בקרוב', expired: 'הסתיים', cancelled: 'בוטל' }
-const statusTone: Record<Live, Tone> = { active: 'success', expiring: 'warning', expired: 'danger', cancelled: 'muted' }
+const statusLabel: Record<Live, string> = { proposed: 'הוצע ללקוח', active: 'פעיל', expiring: 'מסתיים בקרוב', expired: 'הסתיים', cancelled: 'בוטל' }
+const statusTone: Record<Live, Tone> = { proposed: 'brand', active: 'success', expiring: 'warning', expired: 'danger', cancelled: 'muted' }
 const typeColor: Record<ContractType, string> = { maintenance: '#00aeef', smoke_annual: '#e11d48', heating: '#ea580c', vrf_service: '#7c3aed' }
 const typeIcon = (t: ContractType, size = 18): ReactNode =>
   t === 'smoke_annual' ? <Flame size={size} /> : t === 'heating' ? <Thermometer size={size} /> : t === 'vrf_service' ? <Server size={size} /> : <Snowflake size={size} />
@@ -29,6 +29,7 @@ const freqLabel = (m: number) => (m === 1 ? 'כל חודש' : m === 3 ? 'כל ר
 
 function liveStatus(c: Contract, today: string): Live {
   if (c.status === 'cancelled') return 'cancelled'
+  if (c.status === 'proposed') return 'proposed'
   if (c.endDate < today) return 'expired'
   if (daysBetween(today, c.endDate) <= 30) return 'expiring'
   return 'active'
@@ -91,7 +92,7 @@ export default function ContractsPage() {
   const monthEnd = ymd(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0))
   const visitsThisMonth = running.filter((r) => r.c.nextVisit <= monthEnd)
   const expiring = rows.filter((r) => r.live === 'expiring')
-  const renewals = rows.filter((r) => r.live !== 'cancelled' && (r.daysToEnd <= 60)).sort((a, b) => a.c.endDate.localeCompare(b.c.endDate))
+  const renewals = rows.filter((r) => r.live !== 'cancelled' && r.live !== 'proposed' && (r.daysToEnd <= 60)).sort((a, b) => a.c.endDate.localeCompare(b.c.endDate))
   const legal = rows.filter((r) => r.legalDue).sort((a, b) => a.c.nextVisit.localeCompare(b.c.nextVisit))
   const recurring = running.reduce((s, r) => s + r.c.pricePerYear, 0)
 
@@ -111,7 +112,9 @@ export default function ContractsPage() {
     const contact = contactOf(customer.id)
     const name = greetName(contact, customer)
     const body =
-      c.type === 'smoke_annual'
+      c.status === 'proposed'
+        ? fill('שלום {name}, כדי שהמזגנים החדשים ימשיכו לעבוד כמו ביום הראשון, אנחנו מציעים טיפול תקופתי ({freq}) ב-{price} לשנה, כולל ניקוי, בדיקת גז וביקור עדיפות בתקלה. להשבת "כן" ונפעיל. {brand}', { name, freq: freqLabel(c.frequencyMonths), price: money(c.pricePerYear) })
+        : c.type === 'smoke_annual'
         ? fill('שלום {name}, מתקרב מועד הבדיקה השנתית של מערכת שחרור העשן. הבדיקה והאישור נדרשים לכבאות והצלה. להשבת "כן" ונתאם מועד. {brand}', { name })
         : fill(templates.maintenance.text, { name })
     await sendMessage({ to: contact?.phone ?? customer.phone, body, customerId: customer.id, templateKey: 'maintenance' })
@@ -129,6 +132,13 @@ export default function ContractsPage() {
     toast.success('וואטסאפ נפתח עם הצעת החידוש')
   }
 
+  function activate(c: Contract) {
+    const start = ymd(new Date())
+    app().patch('contracts', c.id, { status: 'active', startDate: start, endDate: addYear(start) })
+    app().log({ kind: 'note', customerId: c.customerId, text: `הלקוח אישר את חוזה ${c.number} (${money(c.pricePerYear)} לשנה)` })
+    toast.success('החוזה הופעל')
+  }
+
   function doRenew(c: Contract) {
     let end = addYear(c.endDate)
     if (end < today) end = addYear(today)
@@ -137,13 +147,18 @@ export default function ContractsPage() {
     toast.success(`החוזה חודש עד ${date(end)}`)
   }
 
-  const actions = (r: Row, compact = false) => (
+  const actions = (r: Row, compact = false) => r.live === 'proposed' ? (
+    <>
+      <button className="btn sm primary" onClick={() => activate(r.c)}><FileSignature size={15} /> הלקוח אישר</button>
+      <button className="btn sm" onClick={() => remind(r.c)} title="הצעת החוזה ללקוח בוואטסאפ"><BellRing size={15} /> {compact ? 'הצעה' : 'הצעה ללקוח'}</button>
+    </>
+  ) : (
     <>
       <button className={`btn sm ${r.legalDue && !r.visit ? 'primary' : ''}`} onClick={() => setSchedule(r.c)}>
         <CalendarPlus size={15} /> {r.visit ? 'ביקור נוסף' : 'שיבוץ ביקור'}
       </button>
       <button className="btn sm" onClick={() => remind(r.c)} title="תזכורת ללקוח בוואטסאפ"><BellRing size={15} /> {compact ? 'תזכורת' : 'תזכורת ללקוח'}</button>
-      {(r.live === 'expiring' || r.live === 'expired' || r.daysToEnd <= 60) && r.live !== 'cancelled' && (
+      {(r.live === 'expiring' || r.live === 'expired' || r.daysToEnd <= 60) && (
         <button className="btn sm" onClick={() => setRenew(r.c)}><RefreshCw size={15} /> חידוש</button>
       )}
     </>
@@ -282,7 +297,7 @@ export default function ContractsPage() {
   )
 }
 
-const rank = (s: Live) => ({ expiring: 0, active: 1, expired: 2, cancelled: 3 })[s]
+const rank = (s: Live) => ({ proposed: 0, expiring: 1, active: 2, expired: 3, cancelled: 4 })[s]
 
 function ContractCard({ r, actions, onOpen, users }: { r: Row; actions: ReactNode; onOpen: () => void; users: { id: ID; name: string }[] }) {
   const { c } = r

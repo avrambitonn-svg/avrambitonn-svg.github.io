@@ -34,6 +34,9 @@ function setSync<C extends 'customers' | 'quotes' | 'catalog'>(c: C, id: string,
 }
 
 const errText = (e: unknown) => (e instanceof ServerError || e instanceof Error ? e.message : 'שגיאה לא ידועה')
+// כתיבה חסומה בשרת (למשל מול סביבת הדמו המשותפת): הרשומה נשארת בתור ולא מסומנת כשגיאה
+const writeBlocked = (e: unknown) => e instanceof ServerError && e.code === 'priority_write_disabled'
+const BLOCKED = 'הכתיבה ל-Priority חסומה בשרת'
 
 // לקוח חדש: נפתח ב-Priority ומקבל מספר קבוע. עד אז הוא "לקוח זמני".
 export async function pushCustomer(c: Customer): Promise<SyncState> {
@@ -54,7 +57,7 @@ export async function pushCustomer(c: Customer): Promise<SyncState> {
     app().log({ kind: 'sync', customerId: c.id, text: `הלקוח נפתח ב-Priority (${res.custname})` })
     return s
   } catch (e) {
-    const s: SyncState = { ...c.sync, status: 'error', error: errText(e), lastSync: nowIso() }
+    const s: SyncState = writeBlocked(e) ? { ...c.sync, status: 'pending', error: BLOCKED } : { ...c.sync, status: 'error', error: errText(e), lastSync: nowIso() }
     setSync('customers', c.id, s)
     return s
   }
@@ -88,19 +91,20 @@ export async function pushOrder(q: Quote, custname: string): Promise<SyncState> 
     app().log({ kind: 'sync', caseId: q.caseId, text: `נפתחה הזמנה ב-Priority: ${res.ordname}` })
     return s
   } catch (e) {
-    const s: SyncState = { ...q.sync, status: 'error', error: errText(e), lastSync: nowIso() }
+    const s: SyncState = writeBlocked(e) ? { ...q.sync, status: 'pending', error: BLOCKED } : { ...q.sync, status: 'error', error: errText(e), lastSync: nowIso() }
     setSync('quotes', q.id, s)
     return s
   }
 }
 
 // עיבוד התור: כל מה שממתין או נכשל
-export async function processQueue(): Promise<{ done: number; failed: number }> {
+export async function processQueue(): Promise<{ done: number; failed: number; writeBlocked?: boolean }> {
   let done = 0
   let failed = 0
   const { db } = app()
   for (const c of db.customers.filter((x) => x.sync.status === 'pending' || x.sync.status === 'error' || x.temp)) {
     const s = await pushCustomer(c)
+    if (s.error === BLOCKED) return { done, failed, writeBlocked: true }
     s.status === 'synced' ? done++ : failed++
   }
   for (const q of app().db.quotes.filter((x) => x.status === 'approved' && (x.sync.status === 'pending' || x.sync.status === 'error'))) {
@@ -111,6 +115,7 @@ export async function processQueue(): Promise<{ done: number; failed: number }> 
       continue
     }
     const s = await pushOrder(q, cust.sync.priorityId)
+    if (s.error === BLOCKED) return { done, failed, writeBlocked: true }
     s.status === 'synced' ? done++ : failed++
   }
   return { done, failed }

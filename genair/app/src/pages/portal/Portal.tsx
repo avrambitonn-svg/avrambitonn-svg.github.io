@@ -660,7 +660,7 @@ function ServiceSection({ k, customer, units }: { k: Case; customer: Customer; u
       urgency: symptom === 'leak' || symptom === 'no_power' ? 'high' : 'normal',
       status: 'new',
       underWarranty: unit ? unit.warrantyUntil >= ymd() : undefined,
-      source: 'website',
+      source: 'portal',
       createdAt: nowIso(),
     }
     s.upsert('serviceCalls', sc)

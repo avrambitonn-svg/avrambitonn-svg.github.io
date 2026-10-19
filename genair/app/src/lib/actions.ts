@@ -1,7 +1,7 @@
 // פעולות עסקיות מרכזיות. כל פעולה מעדכנת את הנתונים, רושמת היסטוריה ושולחת התראות למי שצריך.
 import { app } from './store'
 import type { Appointment, AppointmentType, Case, CaseStage, Contract, Customer, ID, InstalledUnit, Quote, QuoteLine, Signature } from './types'
-import { addDays, nowIso, token, uid, ymd } from './format'
+import { addDays, addMonths, nowIso, token, uid, ymd } from './format'
 import { stageLabel } from './labels'
 import { defaultTerms, totals } from './quote'
 import { pushCustomer, pushOrder } from './integrations/priority'
@@ -182,7 +182,7 @@ export function completeInstallation(appointmentId: ID, signature: Signature, se
       const u: InstalledUnit = {
         id: uid('un'), customerId: k.customerId, addressId: k.addressId, caseId: k.id, itemId: item.id, model: item.name.split('(')[0].trim(),
         serial: serials[`${l.id}-${i}`] || `${item.sku}-${Date.now().toString(36).toUpperCase().slice(-5)}${i}`, location: l.room, btu: item.btu,
-        installedAt: ymd(), warrantyUntil: ymd(addDays(new Date(), (item.warrantyMonths ?? 36) * 30)), nextServiceAt: ymd(addDays(new Date(), 180)),
+        installedAt: ymd(), warrantyUntil: ymd(addMonths(new Date(), item.warrantyMonths ?? 36)), nextServiceAt: ymd(addDays(new Date(), 180)),
       }
       created.push(u)
       s.upsert('units', u)
@@ -192,9 +192,9 @@ export function completeInstallation(appointmentId: ID, signature: Signature, se
   s.log({ kind: 'appointment', caseId: k.id, text: `ההתקנה הסתיימה. הלקוח חתם (${signature.name}), נרשמו ${created.length} יחידות עם אחריות` })
   if (created.length) {
     const contract: Contract = {
-      id: uid('kt'), number: s.nextNumber('contract', 'CT-', 4), customerId: k.customerId, title: `טיפול שנתי — ${created.length} יחידות (מוצע)`, type: 'maintenance',
-      unitIds: created.map((u) => u.id), frequencyMonths: 12, pricePerYear: created.length * 290, startDate: ymd(), endDate: ymd(addDays(new Date(), 365)),
-      nextVisit: ymd(addDays(new Date(), 180)), autoRenew: true, status: 'active', notes: 'נפתח אוטומטית בסיום ההתקנה. להציע ללקוח.',
+      id: uid('kt'), number: s.nextNumber('contract', 'CT-', 4), customerId: k.customerId, title: `טיפול שנתי — ${created.length} יחידות`, type: 'maintenance',
+      unitIds: created.map((u) => u.id), frequencyMonths: 12, pricePerYear: created.length * 290, startDate: ymd(), endDate: ymd(addMonths(new Date(), 12)),
+      nextVisit: ymd(addDays(new Date(), 180)), autoRenew: true, status: 'proposed', notes: 'נפתח אוטומטית בסיום ההתקנה. מפעילים אחרי שהלקוח מאשר.',
     }
     s.upsert('contracts', contract)
   }

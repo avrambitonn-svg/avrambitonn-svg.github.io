@@ -66,7 +66,7 @@ export function PrioritySyncBadge({ sync }: { sync: SyncState }) {
   return (
     <span title={tip || undefined}>
       <Badge tone={syncTone[sync.status]} dot>
-        Priority: {syncLabel[sync.status]}{sync.priorityId ? ` · ${sync.priorityId}` : ''}
+        {syncLabel[sync.status]} ב-Priority{sync.priorityId && <> · <span className="ltr">{sync.priorityId}</span></>}
       </Badge>
     </span>
   )

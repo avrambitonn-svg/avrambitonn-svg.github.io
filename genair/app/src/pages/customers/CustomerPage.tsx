@@ -147,7 +147,7 @@ export default function CustomerPage() {
                       <div className="small strong">{k.title}</div>
                       <div className="tiny muted">{contractTypeLabel[k.type]} · ביקור הבא {date(k.nextVisit)} · {money(k.pricePerYear)} לשנה</div>
                     </div>
-                    <Badge tone={k.status === 'active' ? 'success' : k.status === 'expiring' ? 'warning' : 'muted'}>{k.status === 'active' ? 'פעיל' : k.status === 'expiring' ? 'מסתיים' : 'לא פעיל'}</Badge>
+                    <Badge tone={k.status === 'active' ? 'success' : k.status === 'expiring' ? 'warning' : k.status === 'proposed' ? 'brand' : 'muted'}>{k.status === 'active' ? 'פעיל' : k.status === 'expiring' ? 'מסתיים' : k.status === 'proposed' ? 'הוצע ללקוח' : 'לא פעיל'}</Badge>
                   </div>
                 ))}
               </div>

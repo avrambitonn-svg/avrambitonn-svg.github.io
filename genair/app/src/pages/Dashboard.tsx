@@ -179,13 +179,15 @@ export default function Dashboard() {
                   return (
                     <Link key={a.id} to={`/field/${a.id}`} className="list-item">
                       <div style={{ width: 4, alignSelf: 'stretch', borderRadius: 4, background: appointmentTypeColor[a.type] }} />
-                      <div className="num strong" style={{ width: 92 }}><span className="ltr">{time(a.start)}–{time(a.end)}</span></div>
                       <div className="grow">
-                        <div className="small strong truncate">{a.title}</div>
+                        <div className="tiny num strong"><span className="ltr">{time(a.start)}–{time(a.end)}</span></div>
+                        <div className="small strong clamp2">{a.title}</div>
                         <div className="tiny muted">{appointmentTypeLabel[a.type]} · {c?.name}</div>
                       </div>
-                      <Avatars users={a.userIds.map((u) => db.users.find((x) => x.id === u))} />
-                      <Badge tone={a.status === 'in_progress' ? 'warning' : a.status === 'done' ? 'success' : a.status === 'on_the_way' ? 'brand' : 'muted'}>{appointmentStatusLabel[a.status]}</Badge>
+                      <div className="col-end">
+                        <Avatars users={a.userIds.map((u) => db.users.find((x) => x.id === u))} />
+                        <Badge tone={a.status === 'in_progress' ? 'warning' : a.status === 'done' ? 'success' : a.status === 'on_the_way' ? 'brand' : 'muted'}>{appointmentStatusLabel[a.status]}</Badge>
+                      </div>
                     </Link>
                   )
                 })}

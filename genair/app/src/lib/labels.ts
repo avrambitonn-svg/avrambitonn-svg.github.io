@@ -70,6 +70,7 @@ export const sourceLabel: Record<LeadSource, string> = {
   referral: 'המלצה',
   facebook: 'פייסבוק / אינסטגרם',
   returning: 'לקוח חוזר',
+  portal: 'פורטל לקוח',
   other: 'אחר',
 }
 

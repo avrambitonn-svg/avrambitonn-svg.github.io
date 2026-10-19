@@ -93,7 +93,7 @@ export type ProjectType =
   | 'replacement'
   | 'other'
 
-export type LeadSource = 'phone' | 'whatsapp' | 'website' | 'referral' | 'facebook' | 'returning' | 'other'
+export type LeadSource = 'phone' | 'whatsapp' | 'website' | 'referral' | 'facebook' | 'returning' | 'portal' | 'other'
 
 export interface Photo {
   id: ID
@@ -317,7 +317,7 @@ export interface Contract {
   endDate: string
   nextVisit: string
   autoRenew: boolean
-  status: 'active' | 'expiring' | 'expired' | 'cancelled'
+  status: 'proposed' | 'active' | 'expiring' | 'expired' | 'cancelled'
   notes?: string
 }
 

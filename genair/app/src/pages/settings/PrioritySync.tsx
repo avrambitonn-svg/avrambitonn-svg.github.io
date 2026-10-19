@@ -91,7 +91,7 @@ export default function PrioritySync() {
           <>
             <button className="btn" disabled={!serverConfigured() || !!busy} onClick={() => run('test', async () => { const r = await testConnection(); setTest(r); toast.success(`מחובר (${r.latencyMs}ms)`) })}><PlugZap size={16} /> בדיקת חיבור</button>
             <button className="btn" disabled={!enabled || !!busy} onClick={() => run('prices', async () => { const r = await pullPrices(); toast.success(`נסרקו ${r.scanned} פריטים ב-Priority · ${r.matched} תואמים לקטלוג · עודכנו ${r.updated} מחירים`) })}><RefreshCw size={16} /> משיכת מחירים</button>
-            <button className="btn primary" disabled={!enabled || !!busy} onClick={() => run('queue', async () => { const r = await processQueue(); toast[r.failed ? 'error' : 'success'](`נשלחו ${r.done}, נכשלו ${r.failed}`) })}><Activity size={16} /> {busy === 'queue' ? 'שולח...' : 'שליחת כל הממתינים'}</button>
+            <button className="btn primary" disabled={!enabled || !!busy} onClick={() => run('queue', async () => { const r = await processQueue(); if (r.writeBlocked) toast.info('הכתיבה ל-Priority חסומה בשרת (PRIORITY_ALLOW_WRITE). הרשומות נשארו בתור.'); else toast[r.failed ? 'error' : 'success'](`נשלחו ${r.done}, נכשלו ${r.failed}`) })}><Activity size={16} /> {busy === 'queue' ? 'שולח...' : 'שליחת כל הממתינים'}</button>
           </>
         }
       />
