@@ -24,7 +24,7 @@ export interface User {
   active: boolean
   functions?: UserFunction[] // [platform] מנהל מחלקה / מנהל פרויקט, בנוסף לתפקיד
   googleCalendarId?: string // [platform] היומן האישי שאליו נכנסים האירועים שלו
-  initials?: string // [admin] ראשי תיבות באנגלית למספור תיקים לפי סוכן (DM-0073)
+  initials?: string // [admin] ראשי תיבות באנגלית למספור תיקים לפי סוכן (DM-0012)
 }
 
 export type SyncStatus = 'synced' | 'pending' | 'error' | 'not_synced' | 'disabled'

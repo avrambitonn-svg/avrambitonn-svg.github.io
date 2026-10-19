@@ -166,7 +166,7 @@ function UsersTab() {
         <Link className="btn primary mt16" to="/users"><UserCog size={16} /> למסך המשתמשים</Link>
       </Card>
       <Card title={<div className="row"><Hash size={17} /><h2>ראשי תיבות למספור תיקים</h2></div>} pad>
-        <p className="small muted">כשהמספור הוא לפי סוכן, כל תיק מקבל את ראשי התיבות של הסוכן (למשל <span className="ltr">DM-0073</span>). משנים בהגדרות ← רשימות ← מספור תיקים.</p>
+        <p className="small muted">כשהמספור הוא לפי סוכן, כל תיק מקבל את ראשי התיבות של הסוכן (למשל <span className="ltr">DM-0012</span>). משנים בהגדרות ← רשימות ← מספור תיקים.</p>
         <Link className="btn sm mt12" to="/settings?tab=lists#ls-caseNumbering">למספור תיקים</Link>
       </Card>
     </div>
