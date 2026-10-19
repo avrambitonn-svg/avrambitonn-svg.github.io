@@ -7,6 +7,26 @@ import type { AiMeta, Case, CatalogItem, Photo, QuoteLine, Survey } from '../typ
 import { projectTypeLabel } from '../labels'
 import { nowIso, uid } from '../format'
 
+// מסמך מקור שמצרפים לניתוח: תוכנית אדריכל, כתב כמויות, מפרט, הצעה של ספק או תמונה
+export interface SourceFile {
+  id: string
+  name: string
+  mime: string
+  dataUrl: string
+  size: number
+}
+
+// דרך השרת הבקשה עוברת דרך Vercel (מגבלה של 4.5MB לבקשה); ישירות מהדפדפן עד 32MB לבקשה
+export function sourceLimit(mode: 'server' | 'browser' | 'demo') {
+  return { files: 5, bytes: (mode === 'server' ? 3 : 20) * 1024 * 1024 }
+}
+
+export const sourceKind = (mime: string, name = ''): 'pdf' | 'image' | 'text' | null =>
+  mime === 'application/pdf' || /\.pdf$/i.test(name) ? 'pdf'
+    : mime.startsWith('image/') ? 'image'
+    : mime.startsWith('text/') || /\.(txt|csv)$/i.test(name) ? 'text'
+    : null
+
 export interface AiDraft {
   lines: QuoteLine[]
   meta: AiMeta
@@ -64,7 +84,8 @@ const SYSTEM = `אתה מעריך מחירים בכיר בחברת מיזוג א
 - מה שרואים בתמונות (לוחית יצרן, מצב לוח החשמל, מיקום יחידה חיצונית, תקרה) משמש לדיוק. מה שלא רואים, כתוב כהנחה.
 - כתוב בעברית פשוטה וקצרה. בכל שורה, reason קצר שמסביר למה השורה נדרשת.
 - confidence: low אם חסרים נתונים מהותיים, medium אם יש מספיק לטיוטה, high רק אם הכל ברור.
-- questions: מה איש המכירות צריך לברר עם הלקוח או בשטח לפני שליחה.`
+- questions: מה איש המכירות צריך לברר עם הלקוח או בשטח לפני שליחה.
+- לפעמים מצורפים מסמכי מקור (תוכנית אדריכל, כתב כמויות, מפרט טכני, הצעה של ספק או מתחרה). קח מהם חדרים, מידות, כמויות ודרישות, וב-reason ציין מאיזה מסמך הנתון (למשל "לפי התוכנית, עמ׳ 2"). אם המסמך סותר את הסקר בשטח, העדף את הסקר וכתוב את הסתירה ב-questions.`
 
 function describe(c: Case, survey: Survey, catalog: CatalogItem[]) {
   const rooms = survey.rooms.length
@@ -144,7 +165,25 @@ export function aiMode(): 'server' | 'browser' | 'demo' {
   return 'demo'
 }
 
-export async function draftQuote(c: Case, survey: Survey, catalog: CatalogItem[]): Promise<AiDraft> {
+async function sourceBlocks(sources: SourceFile[], px: number): Promise<unknown[]> {
+  const out: unknown[] = []
+  for (const [i, f] of sources.entries()) {
+    const kind = sourceKind(f.mime, f.name)
+    const label = { type: 'text', text: `מסמך מקור ${i + 1}: ${f.name}` }
+    if (kind === 'pdf') {
+      out.push(label, { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.dataUrl.split(',')[1] } })
+    } else if (kind === 'image') {
+      const img = await toImageBlock({ id: f.id, dataUrl: f.dataUrl, takenAt: '' } as Photo, px)
+      if (img) out.push(label, img)
+    } else if (kind === 'text') {
+      const text = await (await fetch(f.dataUrl)).text()
+      out.push({ type: 'text', text: `${label.text}\n${text.slice(0, 60_000)}` })
+    }
+  }
+  return out
+}
+
+export async function draftQuote(c: Case, survey: Survey, catalog: CatalogItem[], sources: SourceFile[] = []): Promise<AiDraft> {
   const mode = aiMode()
   if (mode === 'demo') return demoDraft(c, survey, catalog)
 
@@ -161,6 +200,8 @@ export async function draftQuote(c: Case, survey: Survey, catalog: CatalogItem[]
       content.push(images[i])
     }
   })
+  // מסמכים לפני הטקסט המסכם, כמו שהמודל מצפה
+  content.push(...(await sourceBlocks(sources.slice(0, sourceLimit(mode).files), px)))
   content.push({ type: 'text', text: describe(c, survey, catalog) })
 
   const body = {

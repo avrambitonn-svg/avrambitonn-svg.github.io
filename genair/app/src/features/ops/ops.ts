@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { app } from '../../lib/store'
 import type {
-  Address, Appointment, AppointmentType, Case, Certification, ChecklistItem, Contact, Contract, Customer, DB, ID, InstalledUnit, ServiceCall, Settings, StockEntry, User,
+  Address, Appointment, AppointmentType, Case, Certification, ChecklistItem, Contact, Contract, Customer, DB, ID, InstalledUnit, LeaveRequest, ServiceCall, Settings, StockEntry, User,
 } from '../../lib/types'
 import { addDays, daysBetween, date as fmtDate, time as fmtTime, uid, ymd } from '../../lib/format'
 import { dayStatus, loadCalendar, type Calendar, type DayStatus } from '../../lib/integrations/hebcal'
@@ -199,8 +199,50 @@ export interface Slot {
   label?: string
 }
 
-export function suggestSlots(opts: { appts: Appointment[]; userIds: ID[]; durationMin: number; cal: Calendar; settings: Settings; from?: Date; count?: number; maxDays?: number; excludeIds?: ID[] }): Slot[] {
-  const { appts, userIds, cal, settings, count = 3, maxDays = 45, excludeIds = [] } = opts
+// ---------- חופשות: מי לא זמין ומתי ----------
+// רק בקשות שאושרו חוסמות שיבוץ. חופשה חלקית (hours) חוסמת רק את השעות שלה, ביום אחד
+export const leaveCovers = (l: Pick<LeaveRequest, 'from' | 'to'>, day: string) => l.from <= day && day <= l.to
+
+export function leavesOn(leaves: LeaveRequest[] | undefined, day: string, userId?: ID, statuses: LeaveRequest['status'][] = ['approved']) {
+  return (leaves ?? []).filter((l) => statuses.includes(l.status) && (!userId || l.userId === userId) && leaveCovers(l, day))
+}
+
+// החופשה שחוסמת את העובד בטווח (או undefined). בלי שעות = כל היום
+export function leaveBlocking(leaves: LeaveRequest[] | undefined, userId: ID, start: Date, end: Date): LeaveRequest | undefined {
+  if (!leaves?.length) return undefined
+  const s = start.getTime()
+  const e = end.getTime()
+  const last = ymd(e > s ? new Date(e - 1) : start)
+  for (let d = dayStart(start); ymd(d) <= last; d = addDays(d, 1)) {
+    const k = ymd(d)
+    const hit = leavesOn(leaves, k, userId).find((l) => !l.hours || overlaps(s, e, +at(k, l.hours.start), +at(k, l.hours.end)))
+    if (hit) return hit
+  }
+  return undefined
+}
+
+export function leaveConflicts(leaves: LeaveRequest[] | undefined, userIds: ID[], start: Date, end: Date) {
+  return userIds.map((userId) => ({ userId, leave: leaveBlocking(leaves, userId, start, end) })).filter((x): x is { userId: ID; leave: LeaveRequest } => !!x.leave)
+}
+
+// משימות של העובד בטווח ימים (לאזהרה לפני אישור חופשה)
+export function appointmentsInRange(appts: Appointment[], userId: ID, from: string, to: string, hours?: LeaveRequest['hours']) {
+  return appts
+    .filter((a) => live(a) && a.status !== 'done' && a.userIds.includes(userId) && ymd(a.start) <= to && ymd(a.end) >= from)
+    .filter((a) => !hours || overlaps(+new Date(a.start), +new Date(a.end), +at(from, hours.start), +at(from, hours.end)))
+    .sort((a, b) => a.start.localeCompare(b.start))
+}
+
+// מספר ימי העבודה בטווח (לתצוגה: "3 ימים")
+export function leaveWorkDays(l: Pick<LeaveRequest, 'from' | 'to' | 'hours'>, s: Pick<Settings, 'workDays'>) {
+  if (l.hours) return 0
+  let n = 0
+  for (let d = dayStart(l.from); ymd(d) <= l.to; d = addDays(d, 1)) if (s.workDays.includes(d.getDay())) n++
+  return n
+}
+
+export function suggestSlots(opts: { appts: Appointment[]; userIds: ID[]; durationMin: number; cal: Calendar; settings: Settings; from?: Date; count?: number; maxDays?: number; excludeIds?: ID[]; leaves?: LeaveRequest[] }): Slot[] {
+  const { appts, userIds, cal, settings, count = 3, maxDays = 45, excludeIds = [], leaves } = opts
   const from = opts.from ?? new Date()
   const out: Slot[] = []
   const ws = toMin(settings.workStart)
@@ -222,6 +264,7 @@ export function suggestSlots(opts: { appts: Appointment[]; userIds: ID[]; durati
       const end = new Date(day.getTime())
       end.setMinutes(t + dur)
       if (userIds.length && conflictsFor(appts, userIds, start, end, excludeIds).length) continue
+      if (userIds.length && leaveConflicts(leaves, userIds, start, end).length) continue
       out.push({ start, end, short: st.short, label: st.label })
       break
     }

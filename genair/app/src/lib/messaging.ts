@@ -61,6 +61,9 @@ export async function sendMessage(opts: {
     }
   } else if (channel === 'whatsapp') {
     window.open(whatsappLink(opts.to, opts.body), '_blank', 'noopener')
+  } else if (channel === 'portal') {
+    // תשובה באזור האישי: רק נשמרת, והלקוח רואה אותה בפורטל (בלי חלון וואטסאפ)
+    status = 'sent'
   }
   const msg: Message = {
     id: uid('m'),
@@ -76,6 +79,6 @@ export async function sendMessage(opts: {
     templateKey: opts.templateKey,
   }
   app().upsert('messages', msg)
-  app().log({ kind: 'message', caseId: opts.caseId, serviceCallId: opts.serviceCallId, customerId: opts.customerId, text: `נשלחה הודעה: ${templates[opts.templateKey ?? 'free'].label}` })
+  app().log({ kind: 'message', caseId: opts.caseId, serviceCallId: opts.serviceCallId, customerId: opts.customerId, text: channel === 'portal' ? `תשובה ללקוח באזור האישי: ${opts.body.slice(0, 60)}` : `נשלחה הודעה: ${templates[opts.templateKey ?? 'free'].label}` })
   return msg
 }

@@ -23,7 +23,7 @@ import { CaseTeamCard } from '../../features/case/CaseTeamCard'
 import { CaseChat } from '../../features/chat/CaseChat'
 import { TasksPanel } from '../../features/tasks/TasksPanel'
 import { FlowPanel } from '../../features/flow/FlowPanel'
-import type { AppointmentType, CaseStage, Photo, Survey, SurveyRoom } from '../../lib/types'
+import type { Activity, AppointmentType, CaseStage, Photo, Survey, SurveyRoom } from '../../lib/types'
 
 type Tab = 'overview' | 'survey' | 'quotes' | 'schedule' | 'tasks' | 'docs' | 'money' | 'chat' | 'history' | 'portal'
 
@@ -65,7 +65,6 @@ export default function CasePage() {
   const quotes = useMemo(() => db.quotes.filter((q) => q.caseId === id).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [db.quotes, id])
   const appts = useMemo(() => db.appointments.filter((a) => a.caseId === id).sort((a, b) => a.start.localeCompare(b.start)), [db.appointments, id])
   const msgs = useMemo(() => db.messages.filter((m) => m.caseId === id).sort((a, b) => a.at.localeCompare(b.at)), [db.messages, id])
-  const acts = useMemo(() => db.activities.filter((a) => a.caseId === id), [db.activities, id])
   const docs = useMemo(() => db.docs.filter((d) => d.caseId === id), [db.docs, id])
   const tasks = useMemo(() => db.tasks.filter((t) => t.caseId === id), [db.tasks, id])
 
@@ -310,18 +309,7 @@ export default function CasePage() {
 
       {tab === 'chat' && <CaseChat caseId={k.id} onCompose={() => openWhatsapp('free')} />}
 
-      {tab === 'history' && (
-        <Card title="ציר זמן" pad>
-          <div className="timeline">
-            {acts.map((a) => (
-              <div key={a.id} className="tl-item">
-                <div className="small">{a.text}</div>
-                <div className="when">{dateTime(a.at)}{a.userId ? ` · ${db.users.find((u) => u.id === a.userId)?.name ?? ''}` : ''}</div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
+      {tab === 'history' && <HistoryTab caseId={k.id} />}
 
       {tab === 'portal' && (
         <div className="grid g2">
@@ -363,6 +351,54 @@ export default function CasePage() {
       )}
       {lostOpen && <LostDialog onClose={() => setLostOpen(false)} onSave={(r) => { setStage(k.id, 'lost', r); setLostOpen(false) }} />}
     </div>
+  )
+}
+
+// ציר הזמן של התיק, עם סינון לפי סוג והוספת הערה
+const historyFilters: { id: string; label: string; match: (a: Activity) => boolean }[] = [
+  { id: 'all', label: 'הכל', match: () => true },
+  { id: 'note', label: 'הערות', match: (a) => a.kind === 'note' && !/^(פלואו|שלב הושלם)/.test(a.text) },
+  { id: 'flow', label: 'פלואו', match: (a) => /^(פלואו|שלב הושלם)/.test(a.text) },
+  { id: 'stage', label: 'התקדמות', match: (a) => a.kind === 'created' || a.kind === 'stage' },
+  { id: 'money', label: 'הצעות ותשלומים', match: (a) => a.kind === 'quote' || a.kind === 'payment' },
+  { id: 'appointment', label: 'מועדים', match: (a) => a.kind === 'appointment' },
+  { id: 'docs', label: 'מסמכים', match: (a) => a.kind === 'document' },
+  { id: 'msg', label: 'הודעות', match: (a) => a.kind === 'message' || a.kind === 'portal' },
+  { id: 'sync', label: 'סנכרון', match: (a) => a.kind === 'sync' },
+]
+
+function HistoryTab({ caseId }: { caseId: string }) {
+  const activities = useApp((s) => s.db.activities)
+  const users = useApp((s) => s.db.users)
+  const log = useApp((s) => s.log)
+  const [filter, setFilter] = useState('all')
+  const [note, setNote] = useState('')
+  const acts = useMemo(() => activities.filter((a) => a.caseId === caseId), [activities, caseId])
+  const f = historyFilters.find((x) => x.id === filter) ?? historyFilters[0]
+  const shown = acts.filter(f.match)
+  return (
+    <Card title={<div className="row"><h2>ציר זמן</h2><span className="badge muted">{acts.length} רשומות</span></div>} pad>
+      <form className="row" style={{ gap: 8 }} onSubmit={(e) => { e.preventDefault(); if (!note.trim()) return; log({ kind: 'note', caseId, text: note.trim() }); setNote(''); setFilter('all') }}>
+        <input className="input grow" placeholder="הוספת הערה לתיק..." value={note} onChange={(e) => setNote(e.target.value)} />
+        <Dictate onText={(t) => setNote((v) => (v ? `${v} ${t}` : t))} />
+        <button className="btn primary" type="submit" disabled={!note.trim()}><Plus size={15} /> הוספה</button>
+      </form>
+      <div className="row wrap mt12" style={{ gap: 6 }}>
+        {historyFilters.filter((x) => x.id === 'all' || acts.some(x.match)).map((x) => (
+          <button key={x.id} type="button" className={`chip ${filter === x.id ? 'on' : ''}`} onClick={() => setFilter(x.id)}>{x.label}</button>
+        ))}
+      </div>
+      {shown.length === 0 ? <Empty title="אין רשומות מהסוג הזה" /> : (
+        <div className="timeline mt16">
+          {shown.map((a) => (
+            <div key={a.id} className="tl-item">
+              <div className="small">{a.kind === 'note' && !/^(פלואו|שלב הושלם)/.test(a.text) ? <><Badge tone="muted">הערה</Badge> </> : null}{a.text}</div>
+              <div className="when">{dateTime(a.at)}{a.userId ? ` · ${users.find((u) => u.id === a.userId)?.name ?? ''}` : ''}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   )
 }
 

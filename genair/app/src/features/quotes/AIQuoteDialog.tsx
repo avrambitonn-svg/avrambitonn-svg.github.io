@@ -1,15 +1,15 @@
 // טיוטת הצעת מחיר מהסקר בשטח: רואים מה נשלח, בונים, בודקים ומתקנים, ורק אז יוצרים הצעה
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Bot, Calculator, CheckCircle2, Circle, FileText, Image as ImageIcon, Loader2, MapPin, Mic, RotateCcw, Ruler, Server, Sparkles, Sun, Trash2, X,
+  Bot, Calculator, CheckCircle2, Circle, FileStack, FileText, Image as ImageIcon, Loader2, MapPin, Mic, Paperclip, RotateCcw, Ruler, Server, Sparkles, Sun, Trash2, X,
 } from 'lucide-react'
 import type { ID, QuoteLine } from '../../lib/types'
 import { useDB, useSettings } from '../../lib/store'
-import { aiMode, demoDraft, draftQuote, type AiDraft } from '../../lib/integrations/ai'
+import { aiMode, demoDraft, draftQuote, sourceKind, sourceLimit, type AiDraft, type SourceFile } from '../../lib/integrations/ai'
 import { ServerError } from '../../lib/integrations/server'
 import { createQuote } from '../../lib/actions'
 import { totals, lineTotal } from '../../lib/quote'
-import { date, money } from '../../lib/format'
+import { date, money, uid } from '../../lib/format'
 import { Badge, Callout, Empty, Modal, Progress, toast } from '../../components/ui'
 import { AiInsights, NumInput } from './parts'
 import { sleep, sunLabel } from './util'
@@ -24,7 +24,7 @@ const modes = [
 ] as const
 
 const runSteps = {
-  remote: ['מכין את התמונות ונתוני החדרים', 'Claude מנתח את הסקר', 'מתאים פריטים מהמחירון'],
+  remote: ['מכין את התמונות, המסמכים ונתוני החדרים', 'Claude מנתח את הסקר והמסמכים', 'מתאים פריטים מהמחירון'],
   local: ['קורא את נתוני החדרים', 'מחשב תפוקה לכל חדר', 'מוסיף עבודה וחומרים'],
 }
 
@@ -34,6 +34,7 @@ function errorText(e: unknown): string {
     if (e.code === 'network') return 'אין חיבור לשרת האינטגרציות. בדקו שהשרת פועל ושהכתובת בהגדרות נכונה.'
     if (e.status === 401 || e.status === 403) return 'השרת דחה את הבקשה. בדקו את קוד הגישה בהגדרות ← חיבורים.'
     if (e.status === 429 || e.status === 529) return 'שירות ה-AI עמוס כרגע. נסו שוב בעוד דקה.'
+    if (e.status === 413) return 'הבקשה גדולה מדי לשרת. הסירו מסמך או תמונה ונסו שוב.'
     return /[֐-׿]/.test(e.message) ? e.message : `שגיאה מהשרת: ${e.message}`
   }
   if (e instanceof SyntaxError) return 'התשובה של המודל לא הגיעה בפורמט תקין. אפשר לנסות שוב.'
@@ -42,6 +43,7 @@ function errorText(e: unknown): string {
   if (/api[ _-]?key|authentication|unauthorized|401/i.test(msg)) return 'מפתח ה-API לא תקין. בדקו אותו בהגדרות ← חיבורים.'
   if (/rate|overloaded|429|529/i.test(msg)) return 'שירות ה-AI עמוס כרגע. נסו שוב בעוד דקה.'
   if (/credit|billing|balance/i.test(msg)) return 'אין יתרה בחשבון ה-API. אפשר להמשיך עם המנוע המקומי.'
+  if (/too large|413|pdf|document/i.test(msg)) return 'אחד המסמכים גדול מדי או לא נקרא. הסירו אותו ונסו שוב.'
   return /[֐-׿]/.test(msg) ? msg : `שגיאה מהשירות: ${msg}`
 }
 
@@ -49,6 +51,7 @@ export function AIQuoteDialog({ caseId, onClose, onCreated }: { caseId: ID; onCl
   const cases = useDB((d) => d.cases)
   const catalog = useDB((d) => d.catalog)
   const users = useDB((d) => d.users)
+  const docs = useDB((d) => d.docs)
   const settings = useSettings()
   const k = cases.find((x) => x.id === caseId)
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -60,6 +63,7 @@ export function AIQuoteDialog({ caseId, onClose, onCreated }: { caseId: ID; onCl
   const [error, setError] = useState('')
   const [progress, setProgress] = useState(0)
   const [local, setLocal] = useState(mode === 'demo')
+  const [sources, setSources] = useState<SourceFile[]>([])
   const alive = useRef(true)
   useEffect(() => {
     alive.current = true
@@ -87,7 +91,26 @@ export function AIQuoteDialog({ caseId, onClose, onCreated }: { caseId: ID; onCl
   }
   const survey = k.survey
   const surveyor = users.find((u) => u.id === survey.doneBy)
-  const emptySurvey = !survey.rooms.length && !survey.photos.length
+  const emptySurvey = !survey.rooms.length && !survey.photos.length && !sources.length
+  const limit = sourceLimit(mode)
+  const usedBytes = sources.reduce((n, f) => n + f.size, 0)
+  // מסמכים שכבר נמצאים בתיק (קטנים, שנשמרו עם התוכן)
+  const caseDocs = docs.filter((d) => d.caseId === caseId && d.dataUrl && sourceKind(d.mime, d.name) && !sources.some((x) => x.id === d.id))
+
+  const addFiles = async (files: FileList | null) => {
+    if (!files) return
+    let bytes = usedBytes
+    const next: SourceFile[] = []
+    for (const f of Array.from(files)) {
+      if (!sourceKind(f.type, f.name)) { toast.error(`${f.name}: אפשר לצרף PDF, תמונה או קובץ טקסט`); continue }
+      if (sources.length + next.length >= limit.files) { toast.error(`עד ${limit.files} מסמכים בכל ניתוח`); break }
+      if (bytes + f.size > limit.bytes) { toast.error(`${f.name}: חורג מ-${Math.round(limit.bytes / 1048576)}MB לניתוח אחד`); continue }
+      bytes += f.size
+      const dataUrl = await new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.readAsDataURL(f) })
+      next.push({ id: uid('src'), name: f.name, mime: f.type || 'application/octet-stream', dataUrl, size: f.size })
+    }
+    setSources((l) => [...l, ...next])
+  }
 
   async function run(useLocal: boolean) {
     if (!k) return
@@ -96,7 +119,7 @@ export function AIQuoteDialog({ caseId, onClose, onCreated }: { caseId: ID; onCl
     setError('')
     const started = Date.now()
     try {
-      const d = useLocal ? demoDraft(k, survey, catalog) : await draftQuote(k, survey, catalog)
+      const d = useLocal ? demoDraft(k, survey, catalog) : await draftQuote(k, survey, catalog, sources)
       // המנוע המקומי מהיר מאוד; השהיה קצרה כדי שיהיה ברור שמשהו קרה
       await sleep(Math.max(0, (useLocal ? 1100 : 300) - (Date.now() - started)))
       if (!alive.current) return
@@ -232,6 +255,31 @@ export function AIQuoteDialog({ caseId, onClose, onCreated }: { caseId: ID; onCl
               {k.notes && <div className="ai-voice"><FileText size={16} /><div><span className="tiny muted">מהפנייה: </span>{k.notes}</div></div>}
             </div>
           )}
+
+          <div>
+            <div className="ai-sec-title"><FileStack size={15} /> מסמכי מקור <span className="tiny muted">(לא חובה)</span></div>
+            <p className="tiny muted" style={{ margin: '0 0 8px' }}>תוכנית אדריכל, כתב כמויות, מפרט טכני או הצעה של ספק. ה-AI קורא אותם ומשלב את הכמויות והמידות בטיוטה.</p>
+            {sources.length > 0 && (
+              <div className="list" style={{ border: '1px solid var(--line)', borderRadius: 10, marginBottom: 8 }}>
+                {sources.map((f) => (
+                  <div key={f.id} className="list-item">
+                    {sourceKind(f.mime, f.name) === 'image' ? <ImageIcon size={16} className="muted" /> : <FileText size={16} className="muted" />}
+                    <div className="grow"><div className="small strong">{f.name}</div><div className="tiny muted">{Math.max(1, Math.round(f.size / 1024))}KB</div></div>
+                    <button className="icon-btn" aria-label="הסרה" onClick={() => setSources((l) => l.filter((x) => x.id !== f.id))}><X size={15} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="row wrap" style={{ gap: 6 }}>
+              <label className="btn sm"><Paperclip size={15} /> צירוף קבצים<input type="file" hidden multiple accept=".pdf,image/*,.txt,.csv" onChange={(e) => { void addFiles(e.target.files); e.target.value = '' }} /></label>
+              {caseDocs.map((d) => (
+                <button key={d.id} className="chip" onClick={() => setSources((l) => [...l, { id: d.id, name: d.name, mime: d.mime, dataUrl: d.dataUrl!, size: d.size ?? 0 }])}>+ {d.name}</button>
+              ))}
+            </div>
+            {mode === 'demo' && sources.length > 0 && (
+              <div className="mt8"><Callout tone="warning">מנוע החישוב המקומי לא קורא מסמכים. כדי לנתח אותם צריך חיבור AI (הגדרות ← חיבורים).</Callout></div>
+            )}
+          </div>
 
           <div>
             <div className="ai-sec-title"><Bot size={15} /> מי יבנה את הטיוטה</div>

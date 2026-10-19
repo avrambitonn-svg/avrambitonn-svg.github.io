@@ -57,7 +57,7 @@ export async function pushCustomer(c: Customer): Promise<SyncState> {
     app().log({ kind: 'sync', customerId: c.id, text: `הלקוח נפתח ב-Priority (${res.custname})` })
     return s
   } catch (e) {
-    const s: SyncState = writeBlocked(e) ? { ...c.sync, status: 'pending', error: BLOCKED } : { ...c.sync, status: 'error', error: errText(e), lastSync: nowIso() }
+    const s: SyncState = writeBlocked(e) ? { ...c.sync, status: 'pending', error: BLOCKED } : { ...c.sync, status: 'error', error: errText(e), lastSync: nowIso(), attempts: (c.sync.attempts ?? 0) + 1 }
     setSync('customers', c.id, s)
     return s
   }
@@ -91,7 +91,7 @@ export async function pushOrder(q: Quote, custname: string): Promise<SyncState> 
     app().log({ kind: 'sync', caseId: q.caseId, text: `נפתחה הזמנה ב-Priority: ${res.ordname}` })
     return s
   } catch (e) {
-    const s: SyncState = writeBlocked(e) ? { ...q.sync, status: 'pending', error: BLOCKED } : { ...q.sync, status: 'error', error: errText(e), lastSync: nowIso() }
+    const s: SyncState = writeBlocked(e) ? { ...q.sync, status: 'pending', error: BLOCKED } : { ...q.sync, status: 'error', error: errText(e), lastSync: nowIso(), attempts: (q.sync.attempts ?? 0) + 1 }
     setSync('quotes', q.id, s)
     return s
   }

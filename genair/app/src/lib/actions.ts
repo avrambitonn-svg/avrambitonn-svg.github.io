@@ -19,15 +19,19 @@ export function createCustomer(c: Omit<Customer, 'id' | 'createdAt' | 'sync' | '
   return customer
 }
 
+// מספר ידני (number) נשמר כמו שהוא; ריק = המספר הבא לפי הגדרות המספור. customerId ריק = תיק בלי לקוח, משייכים אחר כך
 export function createCase(input: Omit<Case, 'id' | 'number' | 'createdAt' | 'updatedAt' | 'portal' | 'survey' | 'stage' | 'tags' | 'installerIds'> &
-  Partial<Pick<Case, 'stage' | 'tags' | 'installerIds'>>): Case {
+  Partial<Pick<Case, 'stage' | 'tags' | 'installerIds' | 'number'>>): Case {
   const s = app()
-  const number = nextCaseNumber(input.agentId)
+  const manual = input.number?.trim()
+  const number = manual || nextCaseNumber(input.agentId)
   const k: Case = {
     stage: 'lead',
     tags: [],
     installerIds: [],
     ...input,
+    customerId: input.customerId ?? '',
+    contactIds: input.customerId ? input.contactIds ?? [] : [],
     id: uid('k'),
     number,
     survey: { rooms: [], photos: [] },
@@ -36,8 +40,10 @@ export function createCase(input: Omit<Case, 'id' | 'number' | 'createdAt' | 'up
     updatedAt: nowIso(),
   }
   s.upsert('cases', k)
-  s.log({ kind: 'created', caseId: k.id, text: `התיק נפתח (${number})` })
-  const notifyIds = new Set([k.agentId, k.engineerId, k.managerId, ...s.db.users.filter((u) => u.role === 'admin').map((u) => u.id)].filter(Boolean) as ID[])
+  s.log({ kind: 'created', caseId: k.id, customerId: k.customerId || undefined, text: `התיק נפתח (${number})${k.customerId ? '' : ' — עדיין בלי לקוח'}` })
+  const notifyIds = new Set(
+    [k.agentId, k.engineerId, k.managerId, k.projectManagerId, ...(k.departmentManagerIds ?? []), ...s.db.users.filter((u) => u.role === 'admin').map((u) => u.id)].filter(Boolean) as ID[],
+  )
   notifyIds.delete(s.currentUserId)
   notifyIds.forEach((uidTo) => s.notify(uidTo, `תיק חדש: ${k.title}`, `/cases/${k.id}`))
   void createDriveFolder(k)

@@ -1,3 +1,4 @@
+// תוויות לתצוגה. סוגי פרויקטים וסטטוסי תיקים נקראים מההגדרות (הגדרות ← רשימות), עם ברירת מחדל מובנית.
 import type {
   AppointmentStatus,
   AppointmentType,
@@ -13,6 +14,8 @@ import type {
   ServiceStatus,
   SyncStatus,
 } from './types'
+import type { Config, ListOption } from './types'
+import { useApp } from './store'
 
 export type Tone = 'neutral' | 'info' | 'brand' | 'success' | 'warning' | 'danger' | 'muted'
 
@@ -24,7 +27,7 @@ export const roleLabel: Record<Role, string> = {
   installer: 'מתקין',
 }
 
-export const stageLabel: Record<CaseStage, string> = {
+const builtinStageLabel: Record<CaseStage, string> = {
   lead: 'ליד חדש',
   survey: 'סקר בשטח',
   quote: 'הצעת מחיר',
@@ -51,7 +54,7 @@ export const stageTone: Record<CaseStage, Tone> = {
 // סדר השלבים בצנרת המכירה (בלי "לא נסגר")
 export const pipeline: CaseStage[] = ['lead', 'survey', 'quote', 'approved', 'scheduled', 'installing', 'completed', 'closed']
 
-export const projectTypeLabel: Record<ProjectType, string> = {
+const builtinProjectTypeLabel: Record<string, string> = {
   apartment: 'דירה',
   luxury: 'דירת יוקרה / בית פרטי',
   institution: 'מוסדות ומבני ציבור',
@@ -62,6 +65,57 @@ export const projectTypeLabel: Record<ProjectType, string> = {
   replacement: 'החלפת מזגן',
   other: 'אחר',
 }
+
+// ---------- רשימות מההגדרות ----------
+// קריאה עצלה מה-store בתוך המלכודת: אין תלות בסדר טעינת המודולים (ואם ה-store עוד לא מוכן, חוזרים לברירת המחדל)
+function liveConfig(): Config | undefined {
+  try {
+    return useApp.getState().db.config
+  } catch {
+    return undefined
+  }
+}
+
+const protoKeys = new Set(Object.getOwnPropertyNames(Object.prototype))
+
+// מפה שמתנהגת כמו Record רגיל (גם Object.keys/entries), אבל קוראת את הרשימה העדכנית.
+// keys: רק פריטים פעילים (לבחירה ברשימות); get: כל פריט, גם מושבת (כדי שרשומות ישנות יוצגו נכון)
+function liveLabels<K extends string>(builtin: Record<string, string>, list: (c: Config) => ListOption[] | undefined, keysOf?: () => string[]): Record<K, string> {
+  const items = () => {
+    const c = liveConfig()
+    return (c && list(c)) || undefined
+  }
+  const label = (key: string): string | undefined => items()?.find((o) => o.key === key)?.label || builtin[key]
+  const keys = (): string[] => (keysOf ? keysOf() : items()?.filter((o) => o.active).map((o) => o.key) ?? Object.keys(builtin))
+  return new Proxy({} as Record<K, string>, {
+    get(_t, key) {
+      if (typeof key !== 'string') return undefined
+      if (protoKeys.has(key)) return (Object.prototype as unknown as Record<string, unknown>)[key]
+      return label(key) ?? key
+    },
+    has: (_t, key) => typeof key === 'string' && label(key) !== undefined,
+    ownKeys: () => keys(),
+    getOwnPropertyDescriptor: (_t, key) => {
+      if (typeof key !== 'string' || !keys().includes(key)) return undefined
+      return { value: label(key) ?? key, enumerable: true, configurable: true, writable: false }
+    },
+    set: () => false,
+    deleteProperty: () => false,
+  })
+}
+
+const caseStageKeys = Object.keys(builtinStageLabel)
+export const stageLabel: Record<CaseStage, string> = liveLabels<CaseStage>(builtinStageLabel, (c) => c.caseStages, () => caseStageKeys)
+export const projectTypeLabel: Record<ProjectType, string> = liveLabels<ProjectType>(builtinProjectTypeLabel, (c) => c.projectTypes)
+
+const colorIn = (list: ListOption[] | undefined, key?: string) => (key ? list?.find((o) => o.key === key)?.color : undefined)
+export const stageColor = (s: CaseStage) => colorIn(liveConfig()?.caseStages, s) ?? '#64748b'
+export const projectTypeColor = (t?: string) => colorIn(liveConfig()?.projectTypes, t) ?? '#64748b'
+export const projectTypeAutoName = (t?: string) => !!liveConfig()?.projectTypes.find((o) => o.key === t)?.autoName
+// תגיות נשמרות בתיק כטקסט (או כמפתח, אם הגיעו מתבנית): מחזירים תווית וצבע מההגדרות
+const tagOpt = (t: string) => liveConfig()?.tags.find((o) => o.key === t || o.label === t)
+export const tagLabel = (t: string) => tagOpt(t)?.label ?? t
+export const tagColor = (t: string) => tagOpt(t)?.color
 
 export const sourceLabel: Record<LeadSource, string> = {
   phone: 'טלפון',

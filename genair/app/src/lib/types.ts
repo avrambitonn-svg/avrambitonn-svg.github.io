@@ -24,6 +24,7 @@ export interface User {
   active: boolean
   functions?: UserFunction[] // [platform] מנהל מחלקה / מנהל פרויקט, בנוסף לתפקיד
   googleCalendarId?: string // [platform] היומן האישי שאליו נכנסים האירועים שלו
+  initials?: string // [admin] ראשי תיבות באנגלית למספור תיקים לפי סוכן (DM-0073)
 }
 
 export type SyncStatus = 'synced' | 'pending' | 'error' | 'not_synced' | 'disabled'
@@ -33,6 +34,7 @@ export interface SyncState {
   priorityId?: string
   lastSync?: ISO
   error?: string
+  attempts?: number // ניסיונות שנכשלו מאז הסנכרון האחרון שהצליח
 }
 
 export interface Address {
@@ -71,6 +73,7 @@ export interface Contact {
   phone: string
   email?: string
   primary?: boolean
+  fromCaseId?: ID // [admin] נוצר מתוך תיק (כרטיס הלקוח בתיק / אשף פתיחת תיק)
 }
 
 export type CaseStage =
@@ -409,6 +412,8 @@ export interface Message {
   by?: ID
   status: 'draft' | 'opened' | 'sent' | 'delivered' | 'read' | 'failed'
   templateKey?: string
+  readAt?: ISO // [collab] פנייה נכנסת שנפתחה בצוות (בלי זה היא "לא נקראה")
+  readBy?: ID // [collab] מי פתח אותה ראשון
 }
 
 export interface Activity {
@@ -466,6 +471,7 @@ export interface MoneyLine {
   supplierId?: ID // [admin]
   agentId?: ID // [admin] למי העמלה
   status?: 'planned' | 'pending' | 'paid' // [admin]
+  purchaseOrderId?: ID // [admin] הוצאה שנוצרה מקבלת הזמנת רכש
 }
 
 export interface Notification {
@@ -622,7 +628,7 @@ export interface PurchaseOrder {
   number: string
   supplierId: ID
   caseId?: ID
-  lines: { itemId?: ID; description: string; qty: number; unitCost: number }[]
+  lines: { itemId?: ID; description: string; qty: number; unitCost: number; unit?: string }[]
   status: 'draft' | 'sent' | 'confirmed' | 'received' | 'cancelled'
   toLocation?: string // מחסן / רכב
   expectedAt?: string
@@ -630,6 +636,11 @@ export interface PurchaseOrder {
   createdAt: ISO
   sentAt?: ISO
   receivedAt?: ISO
+  confirmedAt?: ISO
+  cancelledAt?: ISO
+  createdBy?: ID
+  sentVia?: 'whatsapp' | 'email' | 'copy'
+  moneyLineId?: ID // ההוצאה שנרשמה בתיק כשההזמנה התקבלה
 }
 
 export interface DB {

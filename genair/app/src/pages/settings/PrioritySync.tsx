@@ -65,7 +65,7 @@ export default function PrioritySync() {
     ) : (
       <div className="table-wrap">
         <table className="table">
-          <thead><tr><th>סוג</th><th>רשומה</th><th>סטטוס</th><th className="hide-mobile">שגיאה</th><th className="hide-mobile">ניסיון אחרון</th><th /></tr></thead>
+          <thead><tr><th>סוג</th><th>רשומה</th><th>סטטוס</th><th className="hide-mobile">שגיאה</th><th className="hide-mobile">ניסיונות</th><th className="hide-mobile">ניסיון אחרון</th><th /></tr></thead>
           <tbody>
             {list.map((r) => (
               <tr key={r.kind + r.id}>
@@ -73,6 +73,7 @@ export default function PrioritySync() {
                 <td className="small strong"><Link to={r.link}>{r.name}</Link></td>
                 <td><Badge tone={syncTone[r.sync.status]}>{syncLabel[r.sync.status]}</Badge></td>
                 <td className="small hide-mobile" style={{ color: 'var(--danger)' }}>{r.sync.error ?? ''}</td>
+                <td className="small num hide-mobile">{r.sync.attempts ?? (r.sync.status === 'error' ? 1 : '—')}</td>
                 <td className="tiny muted hide-mobile">{r.sync.lastSync ? relative(r.sync.lastSync) : '—'}</td>
                 <td>{r.kind !== 'פריט' && <button className="btn sm" disabled={!enabled || !!busy} onClick={() => run(r.id, r.retry)}>{busy === r.id ? '...' : 'ניסיון חוזר'}</button>}</td>
               </tr>

@@ -6,7 +6,7 @@ import {
 import { TasksCard } from '../features/tasks/TasksCard'
 import { useApp, useMe } from '../lib/store'
 import { Avatars, Badge, Card, Empty, Stat } from '../components/ui'
-import { appointmentStatusLabel, appointmentTypeColor, appointmentTypeLabel, pipeline, stageLabel } from '../lib/labels'
+import { appointmentStatusLabel, appointmentTypeColor, appointmentTypeLabel, pipeline, stageLabel, stageTone } from '../lib/labels'
 import { daysBetween, money, relative, sameDay, time, ymd } from '../lib/format'
 import { totals } from '../lib/quote'
 import type { Case, Quote } from '../lib/types'
@@ -30,6 +30,7 @@ export default function Dashboard() {
   const db = useApp((s) => s.db)
   const nav = useNavigate()
 
+  const recent = useMemo(() => [...db.cases].sort((x, y) => y.createdAt.localeCompare(x.createdAt)).slice(0, 5), [db.cases])
   const latestQuote = useMemo(() => {
     const m = new Map<string, Quote>()
     for (const q of db.quotes) {
@@ -190,6 +191,24 @@ export default function Dashboard() {
                 })}
               </div>
             )}
+          </Card>
+
+          <Card title="תיקים אחרונים" actions={<Link className="btn sm ghost" to="/cases">לכל התיקים</Link>}>
+            <div className="table-wrap">
+              <table className="table">
+                <thead><tr><th>מספר</th><th>שם</th><th className="hide-mobile">לקוח</th><th>סטטוס</th></tr></thead>
+                <tbody>
+                  {recent.map((k) => (
+                    <tr key={k.id} className="click" onClick={() => nav(`/cases/${k.id}`)}>
+                      <td className="num small nowrap">{k.number}</td>
+                      <td className="small strong">{k.title}</td>
+                      <td className="small hide-mobile">{db.customers.find((c) => c.id === k.customerId)?.name ?? <span className="muted">ללא לקוח</span>}</td>
+                      <td><Badge tone={stageTone[k.stage]} dot>{stageLabel[k.stage]}</Badge></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </Card>
 
           <Card title="צנרת מכירות" actions={<Link className="btn sm ghost" to="/cases">לכל התיקים</Link>} pad>
