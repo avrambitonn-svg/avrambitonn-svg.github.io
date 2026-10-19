@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { ChevronLeft, ChevronRight, Gauge, ListOrdered, Pause, Play, PlayCircle, Sparkles, X } from 'lucide-react'
 import { useApp } from '../../lib/store'
 import { brand } from '../../brand'
-import { Cancelled, Run, go, typeInto, type Step } from './engine'
+import { Cancelled, Run, chooseOption, go, typeInto, type Step } from './engine'
 import { chapters, shortSteps, steps as fullSteps } from './script'
 import './demo.css'
 
@@ -23,7 +23,7 @@ export function DemoPlayer() {
   const [mode, setMode] = useState<'off' | 'menu' | 'run'>('off')
   const [idx, setIdx] = useState(0)
   const [playing, setPlaying] = useState(true)
-  const [speed, setSpeed] = useState<(typeof speeds)[number]>(1)
+  const [speed, setSpeed] = useState<number>(1)
   const [clean, setClean] = useState(false)
   const [nonce, setNonce] = useState(0)
   const [spot, setSpot] = useState<Rect | null>(null)
@@ -76,7 +76,8 @@ export function DemoPlayer() {
       const m = window.location.hash.match(/[?&]demo=([\w-]+)/)
       if (!m) return
       const sp = Number(window.location.hash.match(/[?&]speed=([\d.]+)/)?.[1])
-      if (speeds.includes(sp as (typeof speeds)[number])) setSpeed(sp as (typeof speeds)[number])
+      // בקישור אפשר כל מהירות בין 0.5 ל-3 (למשל להקלטת סרטון); בכפתור יש 1, 1.5 ו-2
+      if (sp >= 0.5 && sp <= 3) setSpeed(sp)
       begin(m[1] === '1' || m[1] === 'full' ? undefined : m[1])
     }
     fromLink()
@@ -128,7 +129,7 @@ export function DemoPlayer() {
     const sp = () => speedRef.current
     ;(async () => {
       try {
-        if (step.route) { go(step.route); await run.sleep(500) }
+        if (step.route) { go(step.route); await run.sleep(Math.max(300, 500 / sp())) }
         if (step.before) await step.before()
         let el: HTMLElement | null = null
         if (step.target) {
@@ -144,7 +145,8 @@ export function DemoPlayer() {
           if (typeof step.action === 'object') {
             setClicks((c) => c + 1)
             await run.sleep(200)
-            await typeInto(run, el, step.action.type, step.action.clear ?? true, 60 / sp())
+            if ('select' in step.action) { chooseOption(el, step.action.select); await run.sleep(350 / sp()) }
+            else await typeInto(run, el, step.action.type, step.action.clear ?? true, 60 / sp())
             doneRef.current = true
           }
           if (step.action === 'scroll') el.scrollIntoView({ block: 'start', behavior: 'smooth' })
@@ -323,7 +325,7 @@ export function DemoPlayer() {
           </button>
           <button className="icon-btn" onClick={next} aria-label="הבא" title="הבא"><ChevronLeft size={20} /></button>
           <span className="demo-sep" />
-          <button className="btn sm ghost" onClick={() => setSpeed((s) => speeds[(speeds.indexOf(s) + 1) % speeds.length])} title="מהירות"><Gauge size={15} /> <span className="ltr">{speed}x</span></button>
+          <button className="btn sm ghost" onClick={() => setSpeed((s) => speeds[(speeds.indexOf(s as (typeof speeds)[number]) + 1) % speeds.length])} title="מהירות"><Gauge size={15} /> <span className="ltr">{speed}x</span></button>
           <div className="demo-chs">
             {track === 'full' && <button className="btn sm ghost" onClick={() => setChOpen((o) => !o)}><ListOrdered size={15} /> פרקים</button>}
             {chOpen && (
@@ -365,7 +367,10 @@ if (import.meta.env.DEV) {
       if (st.target) el = await run.waitFor(st.target, 4000)
       out.push({ i: i + 1, id: st.id, chapter: st.chapter, title: st.title, found: !st.target || !!el, optional: !!st.optional, tag: el ? `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 30)}` : null, size: el ? `${Math.round(el.getBoundingClientRect().width)}x${Math.round(el.getBoundingClientRect().height)}` : null })
       if (el && (st.action === 'press' || st.action === 'click')) { el.click(); await run.sleep(500) }
-      if (el && typeof st.action === 'object') await typeInto(run, el, st.action.type, st.action.clear ?? true, 5)
+      if (el && typeof st.action === 'object') {
+        if ('select' in st.action) chooseOption(el, st.action.select)
+        else await typeInto(run, el, st.action.type, st.action.clear ?? true, 5)
+      }
       if (st.after) await st.after()
       await run.sleep(150)
     }

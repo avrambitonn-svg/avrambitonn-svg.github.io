@@ -158,35 +158,89 @@ const raw: S[] = [
 
 export const steps: Step[] = raw.map((s, i) => ({ ...s, id: `s${i + 1}` }))
 
-// סיור קצר: רק מה שהכי חשוב, פחות משתי דקות. נפתח מהתפריט או מקישור עם ?demo=short
+// סיור קצר: אותם מסכים שמוצגים בסרטון של המערכת המקורית, עם הקלדה אמיתית: לקוח ותיק חדשים, צוות,
+// הצעה מהקטלוג, שיבוץ, אישור חופשה, עובד חדש וסוג פרויקט חדש. נפתח מהתפריט או מקישור עם ?demo=short
+const norm = (t?: string | null) => (t ?? '').replace(/\s+/g, ' ').trim()
+// מילוי שדה בלי אנימציה (לשדות משניים, כדי לא להאט את הסיור)
+const setField = (label: string, value: string) => () => {
+  const lab = [...document.querySelectorAll<HTMLLabelElement>('.modal label.field, .content label.field')].find((l) => norm(l.querySelector('span')?.textContent).startsWith(label))
+  const el = lab?.querySelector('input, textarea') as HTMLInputElement | null
+  if (!el) return
+  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')!.set!.call(el, value)
+  el.dispatchEvent(new Event('input', { bubbles: true }))
+}
+const clickBtn = (text: string, within = '.modal, .content') => () => {
+  const b = [...document.querySelectorAll<HTMLElement>(`${within.split(',').map((w) => `${w.trim()} button`).join(', ')}`)].find((x) => norm(x.textContent) === text || norm(x.textContent).endsWith(text))
+  b?.click()
+}
+const steps_ = (...fns: (() => void)[]) => async () => {
+  for (const f of fns) {
+    f()
+    await new Promise((r) => setTimeout(r, 160))
+  }
+}
+
 const short: S[] = [
-  { chapter: 'intro', route: '/', before: asUser('u-admin'), title: 'פתיחה', text: '', read: 3800, slide: { kicker: brand.name, title: 'מערכת התפעול לחברת מיזוג', sub: 'בפחות משתי דקות: מה שהכי חשוב לניהול העסק' } },
-  { chapter: 'dashboard', route: '/', target: '.content .grid.g4', title: 'העסק במבט אחד', text: 'הכנסות החודש, פניות חדשות, הצעות פתוחות וקריאות שירות. לכל מספר יש מגמה של שנה אחורה.', read: 3600 },
-  { chapter: 'dashboard', target: card('הכנסות ורווח גולמי'), title: 'לאן העסק הולך', text: 'הכנסות ורווח גולמי לכל חודש, מול התקופה המקבילה בשנה שעברה.', read: 3400 },
-  { chapter: 'dashboard', target: card('צנרת מכירות'), title: 'צנרת המכירות', text: 'כמה תיקים בכל שלב, כמה הם שווים, ומה יחס הסגירה בפועל.', read: 3200 },
-  { chapter: 'dashboard', target: card('דורש טיפול עכשיו'), title: 'שום דבר לא נופל בין הכיסאות', text: 'המערכת מוצאת לבד מה תקוע: הצעה שנצפתה ולא אושרה, ליד שלא חזרו אליו, חוזה שמסתיים.', read: 3800 },
-  { chapter: 'case', route: '/cases/k1', target: { text: 'גולדברג', sel: 'h1', closest: '.card' }, title: 'כל התיק בעמוד אחד', text: 'לקוח, צוות, סקר, משימות, מסמכים, כספים וצ׳אט. מהליד ועד המסירה.', read: 3400 },
-  { chapter: 'quote', target: tab('סקר בשטח'), action: 'press', title: 'מהסקר בשטח', text: 'חדרים, מידות ותמונות שנאספו בשטח.', read: 1800 },
-  { chapter: 'quote', target: btn('בניית טיוטה מהסקר'), action: 'click', title: 'הצעת מחיר עם AI', text: 'ה-AI בונה טיוטה מתוך המחירון שלכם, בשניות.', read: 2400 },
-  { chapter: 'quote', target: btn('בניית טיוטה', '.modal-foot, .modal'), action: 'click', title: 'בונים', text: 'המחירים תמיד מהמחירון. ה-AI רק בוחר פריטים וכמויות.', read: 2200 },
-  { chapter: 'quote', target: { text: 'יצירת הצעה', within: '.modal', sel: 'button' }, title: 'בודקים ושולחים', text: 'כל שורה עם הסבר, וההצעה מוכנה לשליחה בוואטסאפ.', read: 3000, after: closeModal },
-  { chapter: 'portal', route: '/portal/pt-k1', target: btn('אישור ההצעה וחתימה'), action: 'click', title: 'הלקוח מאשר מהנייד', text: 'קישור אישי: הלקוח רואה את ההצעה, מאשר וחותם באצבע.', read: 3200 },
-  { chapter: 'portal', target: { text: 'חתימה', within: '.modal', sel: 'label, span, div' }, title: 'חתימה ומקדמה', text: 'ההצעה הופכת להזמנה, והצוות מקבל התראה.', read: 2800, after: closeModal },
-  { chapter: 'schedule', route: '/calendar', before: asUser('u-admin'), target: btn('שבוע'), action: 'press', title: 'שיבוץ חכם', text: 'כל הצוותים ביומן אחד. שבתות וחגים חסומים, והמערכת מציעה מועדים פנויים.', read: 3400 },
-  { chapter: 'field', route: '/field', before: asUser('u-inst1'), target: { text: 'היום', sel: '.content h2', closest: '.card', exact: true }, optional: true, title: 'אפליקציה למתקין', text: 'כתובת וניווט, צ׳קליסט, תמונות וחתימת הלקוח, מהנייד.', read: 3200 },
-  { chapter: 'service', route: '/service', before: asUser('u-admin'), target: '.content .stat-row, .content .page-head', title: 'שירות ואחריות', text: 'קריאות שירות, אחריות שמחושבת לבד וחוזי תחזוקה.', read: 3000 },
-  { chapter: 'manage', route: '/reports', target: '.content .rp-kpis', title: 'דוחות ניהול', text: 'תיקים, תקציב, הוצאות ויתרה, כל אחד מול התקופה הקודמת.', read: 3600 },
-  { chapter: 'manage', target: card('הכנסות ורווח גולמי לפי חודש'), title: 'הכנסות ורווח', text: 'לכל חודש, עם יחס סגירה, שיעור רווח ומהירות העסקה.', read: 3400 },
-  { chapter: 'manage', target: card('תיקים שנפתחו לפי חודש וסוג פרויקט'), title: 'מה נכנס', text: 'תיקים לפי חודש וסוג פרויקט, ותיקים לפי סטטוס.', read: 3000 },
-  { chapter: 'manage', target: card('מכירות לפי סוכן'), optional: true, title: 'סוכנים ולקוחות', text: 'מי מוכר כמה, ומי הלקוחות הכי חשובים. ייצוא ל-PDF ול-Excel בלחיצה.', read: 3200 },
-  { chapter: 'integrations', route: '/settings/priority', target: '.content .page-head', title: 'מחובר ל-Priority', text: 'לקוחות, מחירים והזמנות עוברים בלי הקלדה כפולה.', read: 3000 },
+  // דשבורד
+  { chapter: 'dashboard', route: '/', before: asUser('u-admin'), target: '.content .grid.g4', title: 'הדשבורד', text: 'הכנסות החודש, פניות חדשות, הצעות פתוחות וקריאות שירות, עם מגמה של שנה.', read: 2600 },
+  { chapter: 'dashboard', target: card('הכנסות ורווח גולמי'), title: 'הכנסות ורווח', text: 'כל חודש, מול התקופה המקבילה אשתקד.', read: 1800 },
+  { chapter: 'team', target: '.content input[aria-label="משימה חדשה"]', action: { type: 'להזמין מנוף לפרויקט נבון' }, title: 'משימה חדשה', text: 'כותבים משימה, בוחרים אחראי, משתפים ומגדירים תזכורת.', read: 1500 },
+  { chapter: 'team', target: '.content .tk-add select[aria-label="אחראי"]', action: { select: 'משה כהן' }, title: 'למי', text: 'המשימה עוברת למשה מהמשרד, והוא מקבל התראה.', read: 1500, after: () => (document.querySelector('.content .tk-add button[type=submit]') as HTMLElement | null)?.click() },
+
+  // פתיחת תיק: ארבעה שלבים
+  { chapter: 'newcase', target: btn('תיק חדש'), action: 'click', title: 'פתיחת תיק', text: 'הסוכן פותח תיק בשטח, מהנייד או מהמחשב.', read: 1400 },
+  { chapter: 'newcase', target: btn('לקוח חדש'), action: 'press', title: 'לקוח חדש', text: 'לקוח שלא קיים נפתח כאן כ"לקוח זמני", עד שייפתח ב-Priority.', read: 2000 },
+  { chapter: 'newcase', target: field('שם הלקוח', '.content'), action: { type: 'משפחת נבון' }, title: 'שם הלקוח', text: 'מקלידים שם וטלפון.', read: 500 },
+  { chapter: 'newcase', target: field('טלפון נייד', '.content'), action: { type: '0541234567' }, title: 'טלפון', text: 'המערכת בודקת שאין כבר לקוח עם אותו מספר.', read: 900 },
+  { chapter: 'newcase', target: field('עיר', '.content'), action: { type: 'ירושלים' }, title: 'כתובת הפרויקט', text: 'עיר, רחוב, קומה והערות כניסה.', read: 400 },
+  { chapter: 'newcase', target: field('רחוב', '.content'), action: { type: 'הרצל' }, title: 'כתובת הפרויקט', text: 'עיר, רחוב, קומה והערות כניסה.', read: 500, after: steps_(setField('מספר', '24'), setField('קומה', '3'), clickBtn('הבא', '.content')) },
+  { chapter: 'newcase', target: { text: 'דירת יוקרה', sel: '.content .choice' }, action: 'press', title: 'סוג הפרויקט', text: 'לכל סוג תבנית עבודה משלו, ושם התיק נבנה לבד.', read: 1600, after: clickBtn('הבא', '.content') },
+  { chapter: 'newcase', target: field('סוכן אחראי', '.content'), action: { select: 'אבי לוי' }, title: 'הצוות', text: 'סוכן, מהנדס, מנהל במשרד, מנהלי מחלקה ומנהל פרויקט.', read: 1400 },
+  { chapter: 'newcase', target: { text: 'משה כהן', sel: '.content .pick-user' }, action: 'press', title: 'מנהלי מחלקה', text: 'כל מי שנבחר מקבל את המשימות והעדכונים של התיק.', read: 1200 },
+  { chapter: 'newcase', target: field('מי מנהל את הביצוע', '.content'), action: { select: 'סאמר' }, title: 'מנהל פרויקט', text: 'מקבל את משימות הביצוע: ציוד, מנוף ומסירה.', read: 1000, after: clickBtn('הבא', '.content') },
+  { chapter: 'newcase', target: btn('יצירת התיק'), action: 'click', title: 'יצירת התיק', text: 'נפתחים מספר תיק, תיקייה ב-Drive, תהליך עבודה עם משימות לצוות, והתראות לכולם.', read: 2400 },
+  // מיד אחרי הפתיחה המערכת מציעה לקבוע ביקור שטח
+  { chapter: 'schedule', target: '.modal .slot-btn', action: 'press', optional: true, title: 'ביקור שטח', text: 'מיד אחרי הפתיחה המערכת מציעה לקבוע סקר, במועד שבו הצוות פנוי.', read: 1800 },
+  { chapter: 'schedule', target: btn('קביעת המועד'), action: 'click', title: 'נקבע', text: 'הביקור נכנס ליומן הגוגל של כל משתתף, והלקוח מקבל אישור.', read: 1600, after: clickBtn('סיום', '.modal') },
+
+  // דף התיק
+  { chapter: 'case', target: card('פלואו'), optional: true, title: 'התיק נפתח', text: 'התהליך התחיל בשלב הראשון, והמשימות כבר אצל הצוות.', read: 2000 },
+  { chapter: 'case', target: tab('מסמכים'), action: 'press', title: 'מסמכים', text: 'תיקיות קבועות לכל תיק: משרד, לקוח, מתקין, ספקים וארכיון. מסונכרן ל-Drive.', read: 2000 },
+  { chapter: 'case', target: tab('כספים'), action: 'press', title: 'תקציב והוצאות', text: 'תקציב מול ביצוע, הוצאות לפי ספק ועמלת סוכן.', read: 1600 },
+  { chapter: 'quote', target: tab('הצעות מחיר'), action: 'press', title: 'הצעת מחיר', text: 'מהקטלוג, או טיוטה מ-AI מתמונות הסקר ומסמכים.', read: 1400 },
+  { chapter: 'quote', target: btn('הצעה ידנית'), action: 'click', title: 'הצעה מהקטלוג', text: 'פותחים הצעה ומוסיפים פריטים.', read: 700 },
+  { chapter: 'quote', target: btn('מהקטלוג'), action: 'click', title: 'מהמחירון', text: 'המחירים מגיעים מ-Priority.', read: 700 },
+  { chapter: 'quote', target: '.modal .qe-pick-search input', action: { type: 'מיני מרכזי' }, title: 'חיפוש פריט', text: 'לפי שם, מק״ט או קטגוריה.', read: 600 },
+  { chapter: 'quote', target: { text: 'הוספה', sel: '.modal .qe-pick button' }, action: 'press', title: 'הוספה', text: 'הפריט נכנס להצעה עם המחיר מהמחירון.', read: 1000, after: clickBtn('סיום', '.modal') },
+  { chapter: 'quote', target: { text: 'רווחיות', sel: '.hd', closest: 'div' }, optional: true, pad: 12, title: 'סכומים ורווחיות', text: 'מע״מ, הנחה ורווח שרק ההנהלה רואה. משם שולחים ללקוח בוואטסאפ.', read: 2000 },
+
+  // יומן
+  { chapter: 'schedule', route: '/calendar', target: btn('שבוע'), action: 'press', title: 'יומן', text: 'כל הצוות ביומן אחד, וכל עובד מחבר את יומן הגוגל שלו.', read: 1800 },
+
+  // אישורי חופשה ועובדים
+  { chapter: 'team', route: '/leave?tab=pending', target: { text: 'אישור', sel: '.content .btn.success' }, action: 'click', title: 'אישורי חופשה', text: 'עובד מבקש חופשה והמנהל מאשר. מי שבחופשה לא יופיע כפנוי בשיבוץ.', read: 2000 },
+  { chapter: 'team', target: '.modal .btn.success', action: 'click', title: 'אושר', text: 'העובד מקבל הודעה.', read: 700 },
+  { chapter: 'manage', route: '/users', target: btn('משתמש חדש'), action: 'click', title: 'עובד חדש', text: 'מוסיפים עובד וקובעים מה מותר לו לראות.', read: 1200 },
+  { chapter: 'manage', target: field('שם מלא', '.modal'), action: { type: 'רון אברהם' }, title: 'שם', text: 'שם, טלפון ותפקיד.', read: 400 },
+  { chapter: 'manage', target: field('תפקיד במערכת', '.modal'), action: { select: 'מתקין' }, title: 'תפקיד', text: 'מתקין רואה רק את העבודות שלו, בלי מחירים ורווחים.', read: 1600, after: steps_(setField('טלפון', '0529876543'), clickBtn('שמירה', '.modal')) },
+  { chapter: 'manage', target: { text: 'רון אברהם', sel: '.content *', closest: 'tr, .list-item, .card' }, optional: true, title: 'נוסף לצוות', text: 'רון כבר מופיע בצוות, ואפשר לשבץ אותו.', read: 1400 },
+
+  // לקוחות, דוחות, הגדרות, Priority
+  { chapter: 'manage', route: '/customers', target: '.content input[placeholder^="חיפוש שם"]', action: { type: 'נבון' }, title: 'לקוחות', text: 'כל לקוח עם סטטוס הסנכרון שלו ל-Priority.', read: 600 },
+  { chapter: 'manage', target: { text: 'משפחת נבון', sel: '.content td, .content a, .content b', closest: 'tr' }, title: 'לקוח זמני', text: 'הלקוח שנפתח עכשיו מסומן "זמני" ו"ממתין" עד שייפתח ב-Priority.', read: 2000 },
+  { chapter: 'manage', route: '/reports', target: '.content .rp-kpis', title: 'דוחות', text: 'תיקים, תקציב, הוצאות ויתרה מול התקופה הקודמת. ייצוא ל-PDF ול-Excel.', read: 2400 },
+  { chapter: 'manage', target: card('תיקים שנפתחו לפי חודש וסוג פרויקט'), title: 'לפי חודש וסטטוס', text: 'תיקים לפי חודש וסטטוס, ובהמשך ביצועי סוכנים, לקוחות מובילים ותפוקת מתקינים.', read: 2000 },
+  { chapter: 'manage', route: '/settings', target: tab('רשימות'), action: 'press', title: 'הגדרות', text: 'המנהל משנה לבד, בלי מתכנת.', read: 900, after: () => (document.querySelector('#ls-projectTypes .ls-head[aria-expanded="false"]') as HTMLElement | null)?.click() },
+  { chapter: 'manage', target: '.content #ls-projectTypes input[aria-label="פריט חדש"]', action: { type: 'מיזוג חדר שרתים' }, title: 'סוג פרויקט חדש', text: 'מוסיפים, והוא מופיע מיד בפתיחת תיק.', read: 1200, after: () => (document.querySelector('#ls-projectTypes .ls-add button[type=submit]') as HTMLElement | null)?.click() },
+  { chapter: 'manage', target: tab('תהליכי עבודה'), action: 'press', title: 'תבניות ושלבי עבודה', text: 'לכל סוג פרויקט תבנית: שלבים, ומי מקבל איזו משימה בכל שלב.', read: 2000 },
+  { chapter: 'integrations', route: '/settings/priority', target: '.content .page-head', title: 'סנכרון Priority', text: 'מה סונכרן, מה ממתין ומה נכשל, עם ניסיון חוזר.', read: 2000 },
   {
     chapter: 'end', route: '/', title: 'סיכום', text: '', read: 9000,
     slide: {
       kicker: 'וזה רק חלק קטן',
       title: 'יש עוד המון פיצ׳רים מתקדמים',
       sub: 'שעוזרים לנהל את העסק, כל יום',
-      items: ['צ׳אט צוות ופניות לקוחות', 'משימות ותזכורות', 'אישורי חופשה', 'מלאי במחסן וברכבים', 'ספקים והזמנות רכש', 'חוזי תחזוקה', 'בנייה רוויה ושדרוגי דיירים', 'עמלות סוכנים', 'תיקייה ומסמכים לכל תיק', 'הכתבה קולית', 'וואטסאפ, Waze ויומן גוגל', 'שבתות וחגים ביומן', 'הרשאות לפי תפקיד', 'התראות בזמן אמת', 'ייצוא ל-PDF ול-Excel', 'עובד מכל נייד'],
+      items: ['הצעת מחיר מ-AI', 'אזור אישי וחתימה ללקוח', 'אפליקציה למתקין', 'קריאות שירות ואחריות', 'חוזי תחזוקה', 'מלאי במחסן וברכבים', 'ספקים והזמנות רכש', 'בנייה רוויה ושדרוגי דיירים', 'צ׳אט צוות ופניות לקוחות', 'עמלות סוכנים', 'הכתבה קולית', 'וואטסאפ, Waze ויומן גוגל', 'שבתות וחגים ביומן', 'הרשאות לפי תפקיד', 'התראות בזמן אמת', 'עובד מכל נייד'],
     },
   },
 ]

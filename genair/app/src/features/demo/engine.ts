@@ -18,7 +18,8 @@ export interface Step {
   target?: Target
   title: string
   text: string
-  action?: 'click' | 'press' | { type: string; clear?: boolean } | 'scroll' // click: לוחץ אחרי ההסבר; press: לוחץ קודם ואז מסביר
+  // click: לוחץ אחרי ההסבר; press: לוחץ קודם ואז מסביר; type: מקליד; select: בוחר אפשרות ברשימה (לפי טקסט)
+  action?: 'click' | 'press' | { type: string; clear?: boolean } | { select: string } | 'scroll'
   before?: () => void | Promise<void>
   after?: () => void | Promise<void>
   read?: number // זמן קריאה במילישניות (ברירת מחדל: לפי אורך הטקסט)
@@ -116,6 +117,17 @@ export async function typeInto(run: Run, el: HTMLElement, text: string, clear = 
     input.dispatchEvent(new Event('input', { bubbles: true }))
     await run.sleep(perChar)
   }
+}
+
+// בחירת אפשרות ברשימה נפתחת לפי הטקסט שלה, כמו שמשתמש היה בוחר
+export function chooseOption(el: HTMLElement, text: string) {
+  const select = el.matches('select') ? (el as HTMLSelectElement) : (el.querySelector('select') as HTMLSelectElement | null)
+  if (!select) return
+  const opt = [...select.options].find((o) => o.text.includes(text))
+  if (!opt) return
+  select.focus()
+  Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, opt.value)
+  select.dispatchEvent(new Event('change', { bubbles: true }))
 }
 
 export function go(route: string) {
