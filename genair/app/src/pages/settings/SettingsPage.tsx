@@ -369,6 +369,7 @@ function DataTab() {
       <Card title="מה שמור במערכת" pad>
         <div className="grid g2 small">{counts.map(([l, n]) => <div key={l}><span className="muted">{l}: </span><b>{n}</b></div>)}</div>
         <div className="tiny muted mt12">במצב הדגמה הנתונים נשמרים בדפדפן הזה בלבד. בייצור הם נשמרים בשרת, עם גיבוי יומי.</div>
+        <div className="tiny muted mt8">גרסת המערכת: <span className="ltr">{new Intl.DateTimeFormat('he-IL', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(__BUILD_TIME__))}</span></div>
       </Card>
       <Card title="גיבוי ושחזור" pad>
         <div className="row wrap">
