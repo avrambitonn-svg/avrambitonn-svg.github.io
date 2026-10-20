@@ -316,12 +316,28 @@ export class PrioritySync {
       return this.markError('customers', c, new Error(`ב-Priority יש ${found.length} לקוחות עם אותו טלפון או ח״פ (${found.map((r) => r.CUSTNAME).join(', ')}). צריך לבחור ידנית.`));
     }
     if (found.length === 1) return this.linkCustomer(c, found[0]);
-    const custname = await P.createCustomer(this.client, payload);
+    const custname = await this.createNumberedCustomer(payload);
     if (!custname) throw new HttpError(502, 'priority_bad_response', 'Priority לא החזיר מספר לקוח');
     this.patch('customers', c.id, { temp: false });
     this.synced('customers', c.id, 'sync', sync, { priorityId: custname, hash, remoteHash: M.hashOf(M.pick(payload, M.CUSTOMER_KEYS)) });
     this.activity(`הלקוח נפתח ב-Priority (${custname})`, { customerId: c.id });
     this.queueDependents(c.id);
+  }
+
+  /**
+   * With a prefix the customer gets the next number here (GN000123) and is a regular customer in Priority
+   * at once; a number already taken in Priority is skipped. Without one, Priority numbers it (temporary).
+   */
+  async createNumberedCustomer(payload) {
+    const prefix = this.cfg.customerPrefix;
+    if (!prefix) return P.createCustomer(this.client, payload);
+    for (let i = 0; i < 20; i++) {
+      const { from } = this.store.reserve('priorityCustomer', 1);
+      const custname = `${prefix}${String(from).padStart(6, '0')}`;
+      if (await P.getCustomer(this.client, custname)) continue;
+      return P.createCustomer(this.client, { CUSTNAME: custname, ...payload });
+    }
+    throw new HttpError(409, 'customer_number_taken', `לא נמצא מספר לקוח פנוי עם הקידומת ${prefix}`);
   }
 
   /** An existing Priority customer: Priority's details win, and only what it lacks is filled in from the app. */
@@ -369,7 +385,7 @@ export class PrioritySync {
     if (!this.writeGate('contacts', ct)) return;
     if (sync.key) {
       await P.updateContact(this.client, custname, sync.key, payload);
-      return this.synced('contacts', ct.id, 'sync', sync, { hash });
+      return this.synced('contacts', ct.id, 'sync', sync, { hash, key: { ...sync.key, NAME: payload.NAME } });
     }
     const list = await P.listContacts(this.client, custname);
     const digits = (s) => String(s ?? '').replace(/\D/g, '');
@@ -408,6 +424,57 @@ export class PrioritySync {
 
   // ---- quotes -> CPROF, approved quotes -> ORDERS
 
+  /** Priority's status tables (cached for an hour): which status means what in this installation. */
+  async statuses() {
+    if (this.statusCache && this.now() - this.statusCache.at < HOUR) return this.statusCache;
+    const [cust, cprof] = await Promise.all([P.listCustomerStatuses(this.client), P.listQuoteStatuses(this.client)]);
+    const y = (v) => v === 'Y';
+    const pick = (list, ...tests) => tests.map((t) => list.find(t)).find(Boolean)?.STATDES;
+    this.statusCache = {
+      at: this.now(),
+      // a customer that may have orders / service calls opened for it
+      custFor: (flag) => pick(cust, (r) => y(r.ACTIVESTATFLAG) && y(r[flag]), (r) => y(r[flag]) && !y(r.TMPFLAG)),
+      custAllows: (name, flag) => y(cust.find((r) => r.STATDES === name)?.[flag]),
+      quoteApproved: pick(cprof, (r) => y(r.AFTERAPPFLAG) && y(r.OPENORDFLAG), (r) => y(r.OPENORDFLAG) && y(r.ACTIVEFLAG) && !y(r.INITSTATFLAG)),
+      quoteRejected: pick(cprof, (r) => !y(r.ACTIVEFLAG) && !y(r.OPENORDFLAG) && !/cancel|בוטל/i.test(r.STATDES), (r) => !y(r.ACTIVEFLAG) && !y(r.OPENORDFLAG)),
+      quoteEditable: (name) => !name || y(cprof.find((r) => r.STATDES === name)?.CHANGEFLAG),
+    };
+    return this.statusCache;
+  }
+
+  /**
+   * New customers start in Priority as temporary / potential. Before an order or a service call is
+   * opened for one, it is moved to the active status that allows it (PRIORITY_AUTO_ACTIVATE=off to leave that to the office).
+   */
+  async ensureCustomerAllows(custname, flag, ref = {}) {
+    const st = await this.statuses();
+    const cur = await P.customerStatus(this.client, custname);
+    if (cur && st.custAllows(cur, flag)) return;
+    if (!this.cfg.autoActivate) throw new HttpError(409, 'customer_not_active', `הלקוח ${custname} בסטטוס "${cur}" ב-Priority, שלא מאפשר את הפעולה. צריך להעביר אותו לסטטוס פעיל ב-Priority`);
+    const to = st.custFor(flag);
+    if (!to) return;
+    try {
+      await P.updateCustomer(this.client, custname, { STATDES: to });
+    } catch (e) {
+      // a temporary customer (number T...) can be made regular only by Priority's own action
+      if (/לקוח\s*זמני|temporary/i.test(String(e?.details?.message ?? ''))) {
+        throw new HttpError(409, 'customer_temporary', `הלקוח ${custname} הוא לקוח זמני ב-Priority. צריך להפוך אותו ללקוח רגיל ב-Priority (פעולה "הפיכת לקוח זמני ללקוח"), ואז זה ימשיך לבד`);
+      }
+      throw e;
+    }
+    this.activity(`הלקוח עבר ב-Priority מ"${cur}" ל"${to}"`, ref);
+  }
+
+  /** Sends document lines; if Priority refuses a line description, sends them again without descriptions. */
+  async lenient(send, lines) {
+    try {
+      return await send(lines);
+    } catch (e) {
+      if (!M.descriptionRefused(e) || !lines.some((l) => l.PDES)) throw e;
+      return send(M.withoutDescriptions(lines));
+    }
+  }
+
   quoteContext(q) {
     const k = this.store.get('cases', q.caseId);
     const custname = this.customerPid(k?.customerId);
@@ -416,6 +483,7 @@ export class PrioritySync {
   }
 
   async pushQuote(q, now) {
+    if (q.status === 'rejected') return this.closeQuote(q);
     if (!['sent', 'viewed', 'approved'].includes(q.status)) return;
     const { k, custname, lines } = this.quoteContext(q);
     if (!k || !lines.length) return;
@@ -434,11 +502,15 @@ export class PrioritySync {
             let num = cprof.priorityId;
             if (!num) num = (await P.findQuote(this.client, head.REFERENCE))?.CPROFNUM;
             if (num) {
+              // lines can be replaced only while the quote is in a status that allows changes (Draft)
+              if (!(await this.statuses()).quoteEditable(await P.quoteStatus(this.client, num))) {
+                throw new HttpError(409, 'quote_locked', `ההצעה ${num} ב-Priority כבר לא בטיוטה, ולכן אי אפשר לעדכן בה שורות. שינוי נוסף צריך להיות גרסה חדשה של ההצעה`);
+              }
               const { CUSTNAME: _c, ...rest } = head;
               await P.updateQuote(this.client, num, rest);
-              await P.replaceQuoteLines(this.client, num, lines);
+              await this.lenient((l) => P.replaceQuoteLines(this.client, num, l), lines);
             } else {
-              num = await P.createQuote(this.client, payload);
+              num = await this.lenient((l) => P.createQuote(this.client, { ...head, CPROFITEMS_SUBFORM: l }), lines);
               this.activity(`הצעה ${q.number} נפתחה ב-Priority (${num})`, { caseId: q.caseId });
             }
             this.synced('quotes', q.id, 'cprof', cprof, { priorityId: String(num), hash });
@@ -459,12 +531,41 @@ export class PrioritySync {
     if (!this.writeGate('quotes', q)) return;
     let ordname = (await P.findOrder(this.client, head.REFERENCE))?.ORDNAME;
     if (!ordname) {
-      const cur = this.store.get('quotes', q.id);
-      ordname = await P.createOrder(this.client, { ...head, ...(cur?.cprof?.priorityId ? { CPROFNUM: cur.cprof.priorityId } : {}), ORDERITEMS_SUBFORM: lines });
+      await this.ensureCustomerAllows(custname, 'OPENORDFLAG', { caseId: q.caseId });
+      const cprofNum = this.store.get('quotes', q.id)?.cprof?.priorityId;
+      // the quote in Priority is marked approved, so the order can be based on it
+      let linked = false;
+      if (cprofNum) {
+        const approved = (await this.statuses()).quoteApproved;
+        try {
+          if (approved && (await P.quoteStatus(this.client, cprofNum)) !== approved) await P.updateQuote(this.client, cprofNum, { STATDES: approved });
+          linked = true;
+        } catch (err) {
+          if (fatal(err)) throw err;
+        }
+      }
+      const send = (withQuote) => this.lenient((l) => P.createOrder(this.client, { ...head, ...(withQuote ? { CPROFNUM: cprofNum } : {}), ORDERITEMS_SUBFORM: l }), lines);
+      try {
+        ordname = await send(linked);
+      } catch (err) {
+        // the order still opens without the link, with the quote number as its reference
+        if (!linked || fatal(err) || !/הצעת מחיר|CPROF/.test(String(err?.details?.message ?? ''))) throw err;
+        ordname = await send(false);
+      }
       if (!ordname) throw new HttpError(502, 'priority_bad_response', 'Priority לא החזיר מספר הזמנה');
       this.activity(`נפתחה הזמנה ב-Priority: ${ordname} (מהצעה ${q.number})`, { caseId: q.caseId });
     }
     this.synced('quotes', q.id, 'sync', sync, { priorityId: String(ordname) });
+  }
+
+  /** A quote the customer turned down is closed in Priority too (once). */
+  async closeQuote(q) {
+    const cprof = q.cprof ?? {};
+    if (!cprof.priorityId || cprof.closed || !this.on('quotes') || !this.canWrite) return;
+    const to = (await this.statuses()).quoteRejected;
+    if (to) await P.updateQuote(this.client, cprof.priorityId, { STATDES: to });
+    this.patch('quotes', q.id, { cprof: { ...cprof, closed: true } });
+    this.activity(`הצעה ${q.number} סומנה ב-Priority כ"${to}"`, { caseId: q.caseId });
   }
 
   // ---- purchase orders
@@ -484,7 +585,7 @@ export class PrioritySync {
     const details = String(po.number).slice(0, M.LIMITS.DETAILS);
     let num = (await P.findPurchaseOrder(this.client, details))?.ORDNAME;
     if (!num) {
-      num = await P.createPurchaseOrder(this.client, { SUPNAME: supname, DETAILS: details, PORDERITEMS_SUBFORM: lines });
+      num = await this.lenient((l) => P.createPurchaseOrder(this.client, { SUPNAME: supname, DETAILS: details, PORDERITEMS_SUBFORM: l }), lines);
       if (!num) throw new HttpError(502, 'priority_bad_response', 'Priority לא החזיר מספר הזמנת רכש');
       this.activity(`הזמנת רכש ${po.number} נפתחה ב-Priority (${num})`, po.caseId ? { caseId: po.caseId } : {});
     }
@@ -504,6 +605,7 @@ export class PrioritySync {
     const ref = String(sc.number).slice(0, M.LIMITS.REFERENCE);
     let docno = (await P.findServiceCall(this.client, ref))?.DOCNO;
     if (!docno) {
+      await this.ensureCustomerAllows(custname, 'OPENSERVCALLFLAG', { serviceCallId: sc.id, customerId: sc.customerId });
       const unit = sc.unitId ? this.store.get('units', sc.unitId) : undefined;
       const cust = this.store.get('customers', sc.customerId);
       docno = await P.createServiceCall(this.client, {

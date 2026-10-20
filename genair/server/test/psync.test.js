@@ -28,7 +28,23 @@ function evalFilter(row, filter) {
 
 class FakePriority {
   constructor(tables = {}) {
-    this.t = { CUSTOMERS: [], CPROF: [], ORDERS: [], SUPPLIERS: [], PORDERS: [], DOCUMENTS_Q: [], AINVOICES: [], CINVOICES: [], EINVOICES: [], TINVOICES: [], LOGPART: [], OBLIGO: [], PARTBAL: [], ...tables };
+    this.t = {
+      CUSTOMERS: [], CPROF: [], ORDERS: [], SUPPLIERS: [], PORDERS: [], DOCUMENTS_Q: [], AINVOICES: [], CINVOICES: [], EINVOICES: [], TINVOICES: [], LOGPART: [], OBLIGO: [], PARTBAL: [],
+      // status tables as they are in Priority's demo
+      CUSTSTATS: [
+        { STATDES: 'Potential', INITSTATFLAG: 'Y', TMPFLAG: 'Y', OPENORDFLAG: 'Y' },
+        { STATDES: 'Active', ACTIVESTATFLAG: 'Y', OPENORDFLAG: 'Y', OPENSERVCALLFLAG: 'Y' },
+        { STATDES: 'Inactive' },
+      ],
+      CPROFSTATS: [
+        { STATDES: 'Draft', INITSTATFLAG: 'Y', CHANGEFLAG: 'Y', ACTIVEFLAG: 'Y', OPENORDFLAG: 'N' },
+        { STATDES: 'Sent', ACTIVEFLAG: 'Y', OPENORDFLAG: 'Y' },
+        { STATDES: 'Canceled' },
+        { STATDES: 'אושרה', ACTIVEFLAG: 'Y', AFTERAPPFLAG: 'Y', OPENORDFLAG: 'Y' },
+        { STATDES: 'דחיית הצעה' },
+      ],
+      ...tables,
+    };
     this.n = 0;
     this.calls = [];
   }
@@ -66,7 +82,23 @@ class FakePriority {
       return line;
     }
     const key = KEYS[p.form];
+    const refuse = (message) => {
+      throw new HttpError(502, 'priority_rejected', message, { message });
+    };
+    // the real Priority's rules that the first live test ran into
+    const cust = body.CUSTNAME && this.t.CUSTOMERS.find((c) => c.CUSTNAME === body.CUSTNAME);
+    if (p.form === 'ORDERS' && body.CPROFNUM && this.t.CPROF.find((c) => c.CPROFNUM === body.CPROFNUM)?.STATDES === 'Draft') refuse(`שורה 1- הצעת מחיר ${body.CPROFNUM}: לא ניתן לבסס הזמנה על הצעת מחיר בסטטוס "Draft".`);
+    if (p.form === 'DOCUMENTS_Q' && cust?.STATDES === 'Potential') refuse(`שורה 1- מס. לקוח ${body.CUSTNAME}: הלקוח ${body.CUSTNAME} הינו לקוח זמני.`);
+    for (const [f, v] of Object.entries(body)) {
+      if (f.endsWith('_SUBFORM') && Array.isArray(v) && v.some((l) => l.PDES && l.PARTNAME !== '000')) refuse('שורה 2- תאור מוצר: אין לשנות תאור מוצר אלא אם כן סומן כניתן לשנוי');
+    }
     const row = { ...body, [key]: body[key] ?? `${PREFIX[p.form]}${++this.n}` };
+    // like the demo: without a number Priority opens a temporary customer (T...); with one, a regular active one
+    if (p.form === 'CUSTOMERS') {
+      if (!body.CUSTNAME) row.CUSTNAME = `T${String(++this.n).padStart(6, '0')}`;
+      row.STATDES = row.STATDES ?? (body.CUSTNAME ? 'Active' : 'Potential');
+    }
+    if (p.form === 'CPROF') row.STATDES = 'Draft';
     for (const [f, v] of Object.entries(row)) if (f.endsWith('_SUBFORM') && Array.isArray(v)) row[f] = v.map((l) => ({ ...l, KLINE: ++this.n }));
     if (p.form === 'CUSTOMERS') row.CREATEDDATE = new Date().toISOString().slice(0, 10) + 'T00:00:00Z';
     this.t[p.form].push(row);
@@ -81,7 +113,12 @@ class FakePriority {
       Object.assign(line, body);
       return line;
     }
-    return Object.assign(this.row(p.form, p.key), body);
+    const row = this.row(p.form, p.key);
+    if (p.form === 'CUSTOMERS' && body.STATDES && /^T/.test(row.CUSTNAME)) {
+      const message = 'שורה 1- כדי להפוך לקוח זמני ללקוח רגיל יש להשתמש בתוכנית "הפיכת לקוח זמני ללקוח"';
+      throw new HttpError(502, 'priority_rejected', message, { message });
+    }
+    return Object.assign(row, body);
   }
   async del(path) {
     this.calls.push(['DELETE', path]);
@@ -96,7 +133,7 @@ class FakePriority {
 }
 
 const STREAMS = ['customers', 'contacts', 'quotes', 'orders', 'suppliers', 'purchasing', 'service', 'invoices', 'receipts', 'items', 'balances', 'stock'];
-const syncCfg = (over = {}) => ({ enabled: true, streams: new Set(STREAMS), hotSec: 60, warmSec: 600, pushDebounceMs: 0, genericPart: '000', importCustomers: 'new', importItems: false, warehouses: {}, ...over });
+const syncCfg = (over = {}) => ({ customerPrefix: 'GN', enabled: true, streams: new Set(STREAMS), hotSec: 60, warmSec: 600, pushDebounceMs: 0, genericPart: '000', importCustomers: 'new', importItems: false, autoActivate: true, warehouses: {}, ...over });
 
 async function setup({ priority = new FakePriority(), allowWrite = true, cfg = {}, data = {} } = {}) {
   const store = await new DocStore({}).init();
@@ -167,7 +204,8 @@ test('an approved quote becomes a Priority quote and an order, with catalog SKUs
   const order = priority.t.ORDERS[0];
   assert.equal(order.REFERENCE, 'Q-1042');
   assert.equal(order.CPROFNUM, priority.t.CPROF[0].CPROFNUM);
-  assert.deepEqual(order.ORDERITEMS_SUBFORM.map((l) => [l.PARTNAME, l.TQUANT, l.PRICE]), [['MINI-5', 1, 8100], ['000', 2, 315]]);
+  assert.deepEqual(order.ORDERITEMS_SUBFORM.map((l) => [l.PARTNAME, l.TQUANT, l.PRICE, l.PDES]), [['MINI-5', 1, 8100, undefined], ['000', 2, 315, 'פירוק מזגן ישן']], 'catalog lines go by SKU only; free lines keep their text');
+  assert.equal(priority.t.CPROF[0].STATDES, 'אושרה', 'the quote is approved in Priority before the order is based on it');
   const q = store.get('quotes', 'q1');
   assert.equal(q.sync.priorityId, order.ORDNAME);
   assert.equal(q.cprof.status, 'synced');
@@ -185,6 +223,60 @@ test('an order already in Priority with the quote number is linked, not created 
   await engine.chain;
   assert.equal(priority.t.ORDERS.length, 1);
   assert.equal(store.get('quotes', 'q1').sync.priorityId, 'SO777');
+});
+
+test('a new customer gets the next GN number, is regular in Priority at once, and a service call opens for it', async () => {
+  const calls = [{ id: 'sc1', number: 'SC-1', customerId: 'c1', description: 'נזילה', status: 'new', urgency: 'normal', source: 'phone' }];
+  const priority = new FakePriority({ CUSTOMERS: [{ CUSTNAME: 'GN000001', CUSTDES: 'someone else', PHONE: '000' }] });
+  const { store, engine } = await setup({ priority, data: { serviceCalls: calls } });
+  await engine.sweep();
+  await engine.chain;
+  const row = priority.t.CUSTOMERS.find((r) => r.CUSTDES === 'משפחת נבון');
+  assert.equal(row.CUSTNAME, 'GN000002', 'a number already in Priority is skipped');
+  assert.equal(row.STATDES, 'Active');
+  assert.equal(priority.t.DOCUMENTS_Q.length, 1);
+  assert.equal(store.get('serviceCalls', 'sc1').sync.status, 'synced');
+});
+
+test('a potential (non temporary) customer is moved to active before a service call', async () => {
+  const priority = new FakePriority({ CUSTOMERS: [{ CUSTNAME: '7001', CUSTDES: 'נבון', PHONE: '0541234567', STATDES: 'Potential' }] });
+  const calls = [{ id: 'sc1', number: 'SC-1', customerId: 'c1', description: 'x', status: 'new', urgency: 'normal', source: 'phone' }];
+  const { engine } = await setup({ priority, data: { serviceCalls: calls } });
+  await engine.sweep();
+  await engine.chain;
+  assert.equal(priority.t.CUSTOMERS[0].STATDES, 'Active');
+  assert.equal(priority.t.DOCUMENTS_Q.length, 1);
+});
+
+test('a temporary customer (T...) blocks a service call with an explanation of what to do in Priority', async () => {
+  const calls = [{ id: 'sc1', number: 'SC-1', customerId: 'c1', description: 'x', status: 'new', urgency: 'normal', source: 'phone' }];
+  const { store, engine, priority } = await setup({ cfg: { customerPrefix: '' }, data: { serviceCalls: calls } });
+  await engine.sweep();
+  await engine.chain;
+  assert.match(priority.t.CUSTOMERS[0].CUSTNAME, /^T/);
+  assert.equal(priority.t.DOCUMENTS_Q.length, 0);
+  assert.match(store.get('serviceCalls', 'sc1').sync.error, /הפיכת לקוח זמני ללקוח/);
+});
+
+test('with PRIORITY_AUTO_ACTIVATE=off a temporary customer is left to the office, with a clear reason', async () => {
+  const calls = [{ id: 'sc1', number: 'SC-1', customerId: 'c1', description: 'x', status: 'new', urgency: 'normal', source: 'phone' }];
+  const priority0 = new FakePriority({ CUSTOMERS: [{ CUSTNAME: '7001', CUSTDES: 'נבון', PHONE: '0541234567', STATDES: 'Potential' }] });
+  const { store, engine, priority } = await setup({ priority: priority0, cfg: { autoActivate: false }, data: { serviceCalls: calls } });
+  await engine.sweep();
+  await engine.chain;
+  assert.equal(priority.t.DOCUMENTS_Q.length, 0);
+  assert.match(store.get('serviceCalls', 'sc1').sync.error, /סטטוס פעיל/);
+});
+
+test('a quote the customer rejected is closed in Priority', async () => {
+  const quote = { id: 'q1', caseId: 'k1', number: 'Q-9', status: 'sent', discountPct: 0, lines: [{ id: 'l1', itemId: 'i1', description: 'a', qty: 1, unitPrice: 100 }] };
+  const { store, engine, priority } = await setup({ data: { quotes: [quote] } });
+  await engine.sweep();
+  await engine.chain;
+  store.applyOps([{ op: 'patch', collection: 'quotes', id: 'q1', data: { status: 'rejected' }, at: Date.now() }], { clientId: 'dev' });
+  await engine.sweep();
+  await engine.chain;
+  assert.equal(priority.t.CPROF[0].STATDES, 'דחיית הצעה');
 });
 
 test('editing a sent quote replaces its lines in Priority', async () => {

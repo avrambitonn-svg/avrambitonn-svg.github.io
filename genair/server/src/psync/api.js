@@ -59,8 +59,26 @@ export async function createContact(client, custname, payload) {
   return { NAME: String(res?.NAME ?? payload.NAME), FIRM: res?.FIRM };
 }
 
+// FIRM is the customer's name (a string) in CUSTPERSONNEL's key, checked against the demo
+const firmKey = (f) => (typeof f === 'number' ? String(f) : q(f));
 export const updateContact = (client, custname, key, payload) =>
-  client.patch(`${contactsPath(custname)}(NAME=${q(key.NAME)},FIRM=${Number(key.FIRM)})`, payload);
+  client.patch(`${contactsPath(custname)}(NAME=${q(key.NAME)},FIRM=${firmKey(key.FIRM)})`, payload);
+
+// ---------------------------------------------------------------- statuses
+// Every installation names its statuses differently; their meaning is in flags (checked in the demo):
+// CUSTSTATS: ACTIVESTATFLAG, TMPFLAG, OPENORDFLAG, OPENSERVCALLFLAG
+// CPROFSTATS: INITSTATFLAG, CHANGEFLAG (lines editable), ACTIVEFLAG, AFTERAPPFLAG (approved), OPENORDFLAG
+
+export const listCustomerStatuses = (client) => all(client, 'CUSTSTATS', { $select: 'STATDES,INITSTATFLAG,TMPFLAG,ACTIVESTATFLAG,OPENORDFLAG,OPENSERVCALLFLAG' });
+export const listQuoteStatuses = (client) => all(client, 'CPROFSTATS', { $select: 'STATDES,INITSTATFLAG,CHANGEFLAG,ACTIVEFLAG,AFTERAPPFLAG,OPENORDFLAG,TOAPPROVECPROF' });
+
+export async function customerStatus(client, custname) {
+  return rows(await client.get('CUSTOMERS', buildQuery({ $select: 'STATDES', $filter: `CUSTNAME eq ${q(custname)}`, $top: 1 })))[0]?.STATDES;
+}
+
+export async function quoteStatus(client, num) {
+  return rows(await client.get('CPROF', buildQuery({ $select: 'STATDES', $filter: `CPROFNUM eq ${q(num)}`, $top: 1 })))[0]?.STATDES;
+}
 
 // ---------------------------------------------------------------- quotes and orders
 

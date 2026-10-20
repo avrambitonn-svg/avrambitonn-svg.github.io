@@ -88,6 +88,11 @@ export function prioritySyncConfig(env = process.env) {
     genericPart: str(env.PRIORITY_GENERIC_PART) || '000',
     importCustomers: str(env.PRIORITY_IMPORT_CUSTOMERS).toLowerCase() || 'new', // new | all | off
     importItems: bool(env.PRIORITY_IMPORT_ITEMS),
+    // move a temporary customer to an active status when an order / service call needs it
+    autoActivate: str(env.PRIORITY_AUTO_ACTIVATE).toLowerCase() !== 'off',
+    // customer numbers: "GN" -> GN000001, GN000002... A customer opened with its own number is a regular
+    // customer in Priority at once. "off" lets Priority number it, and then it starts as temporary (T...).
+    customerPrefix: /^off$/i.test(str(env.PRIORITY_CUSTOMER_PREFIX)) ? '' : (str(env.PRIORITY_CUSTOMER_PREFIX) || 'GN').slice(0, 8),
     warehouses,
   };
 }

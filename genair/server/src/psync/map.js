@@ -94,7 +94,11 @@ export const contactOut = (c) =>
 
 // ---------------------------------------------------------------- quotes and orders
 
-/** Quote lines as Priority document lines. Lines without a catalog item go out under a generic part. */
+/**
+ * Quote lines as Priority document lines. A catalog item goes out by its SKU only: Priority refuses a
+ * different description unless the part allows it. Lines without a catalog item go out under the
+ * generic part with their own description.
+ */
 export function documentLines(q, catalog, genericPart) {
   const factor = 1 - (Number(q.discountPct) || 0) / 100;
   return (q.lines ?? [])
@@ -105,10 +109,16 @@ export function documentLines(q, catalog, genericPart) {
         PARTNAME: cut(item?.sku || genericPart, LIMITS.PARTNAME),
         TQUANT: Number(l.qty),
         PRICE: Math.round(Number(l.unitPrice) * factor * 100) / 100,
-        PDES: cut(l.description, LIMITS.PDES),
+        PDES: item?.sku ? undefined : cut(l.description, LIMITS.PDES),
       });
     });
 }
+
+/** The same lines without descriptions, for parts that don't allow changing theirs. */
+export const withoutDescriptions = (lines) => lines.map(({ PDES: _d, ...rest }) => rest);
+
+/** Priority refused a line description ("אין לשנות תאור מוצר..."). */
+export const descriptionRefused = (e) => /תאור מוצר|PDES|part description/i.test(String(e?.details?.message ?? e?.message ?? ''));
 
 export const quoteHead = (q, custname, title) => clean({ CUSTNAME: custname, REFERENCE: cut(q.number, LIMITS.REFERENCE), DETAILS: cut(title || q.number, LIMITS.DETAILS) });
 
@@ -140,7 +150,7 @@ export function purchaseLines(po, catalog, genericPart) {
     .filter((l) => Number(l.qty) > 0)
     .map((l) => {
       const item = l.itemId ? catalog.get(l.itemId) : undefined;
-      return clean({ PARTNAME: cut(item?.sku || genericPart, LIMITS.PARTNAME), TQUANT: Number(l.qty), PRICE: Number(l.unitCost) || 0, PDES: cut(l.description, LIMITS.PDES) });
+      return clean({ PARTNAME: cut(item?.sku || genericPart, LIMITS.PARTNAME), TQUANT: Number(l.qty), PRICE: Number(l.unitCost) || 0, PDES: item?.sku ? undefined : cut(l.description, LIMITS.PDES) });
     });
 }
 
