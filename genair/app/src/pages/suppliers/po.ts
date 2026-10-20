@@ -99,7 +99,7 @@ export function receivePo(id: ID, opts: { location: string; qty?: Record<number,
       if (!l.itemId || l.qty <= 0) return
       const item = s.db.catalog.find((c) => c.id === l.itemId)
       if (!item || item.category === 'labor' || (item.category === 'service' && item.id !== 's-gas')) return
-      moveStock(l.itemId, opts.location, l.qty)
+      moveStock(l.itemId, opts.location, l.qty, { kind: 'receive', purchaseOrderId: po.id, caseId: po.caseId })
       stocked++
     })
   }

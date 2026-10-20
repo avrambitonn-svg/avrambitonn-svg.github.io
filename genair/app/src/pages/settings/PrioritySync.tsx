@@ -10,18 +10,26 @@ import { bridge } from '../../lib/sync/bridge'
 import { serverConfigured } from '../../lib/integrations/server'
 import type { IntegrationState, SyncState } from '../../lib/types'
 
-type RowKind = 'לקוח' | 'איש קשר' | 'הצעה ב-Priority' | 'הזמנה' | 'ספק' | 'הזמנת רכש' | 'קריאת שירות' | 'פריט'
+type RowKind = 'לקוח' | 'איש קשר' | 'הצעה ב-Priority' | 'הזמנה' | 'ספק' | 'הזמנת רכש' | 'קבלת סחורה' | 'קריאת שירות' | 'פריט' | 'מזגן מותקן' | 'קובץ' | 'תנועת מלאי' | 'סוכן' | 'הערה'
 interface Row { kind: RowKind; id: string; name: string; sync: SyncState; link: string; retry?: () => Promise<unknown> }
 
 // [במערכת, מסך ב-Priority, כיוון, שדות]
 const mapping: [string, string, string, string][] = [
   ['לקוחות', 'CUSTOMERS', '⇄', 'CUSTNAME (מספר), CUSTDES (שם), PHONE, EMAIL, ADDRESS, STATE (עיר), VATNUM (ח״פ). לקוח שנפתח ב-Priority נכנס למערכת'],
-  ['אנשי קשר', 'CUSTPERSONNEL_SUBFORM', '→', 'NAME, CELLPHONE, EMAIL, POSITIONDES'],
+  ['אנשי קשר', 'CUSTPERSONNEL_SUBFORM', '⇄', 'NAME, CELLPHONE, EMAIL, POSITIONDES. איש קשר שנוסף או נערך ב-Priority נכנס למערכת'],
   ['הצעות מחיר', 'CPROF + CPROFITEMS_SUBFORM', '→', 'CUSTNAME, REFERENCE (מספר ההצעה), DETAILS; שורות: PARTNAME, TQUANT, PRICE, PDES. עריכה מחליפה את השורות'],
   ['הזמנות', 'ORDERS + ORDERITEMS_SUBFORM', '⇄', 'נפתחת כשההצעה מאושרת (REFERENCE, CPROFNUM). חוזר: ORDSTATUSDES, BOOLCLOSED, TOTPRICE'],
   ['ספקים', 'SUPPLIERS', '→', 'SUPDES, PHONE, EMAIL, ADDRESS, VATNUM'],
-  ['הזמנות רכש', 'PORDERS + PORDERITEMS_SUBFORM', '→', 'SUPNAME, DETAILS (מספר ההזמנה); שורות: PARTNAME, TQUANT, PRICE'],
-  ['קריאות שירות', 'DOCUMENTS_Q', '→', 'CUSTNAME, REFERENCE, SERNUM, PHONENUM, תיאור (DOCTEXT_Q_SUBFORM)'],
+  ['הזמנות רכש', 'PORDERS + PORDERITEMS_SUBFORM', '⇄', 'SUPNAME, DETAILS (מספר ההזמנה); שורות: PARTNAME, TQUANT, PRICE. סטטוס: מאושרת/מבוטלת, וחוזר STATDES'],
+  ['קריאות שירות', 'DOCUMENTS_Q', '⇄', 'נפתחת: CUSTNAME, REFERENCE, SERNUM, PHONENUM, תיאור. נסגרת/מבוטלת בשני הכיוונים (CALLSTATUSCODE לפי CALLSTATUSES), מה נעשה ב-DETAILS'],
+  ['סוכנים', 'AGENTS', '→', 'AGENTNAME, AGENTCODE. הסוכן של התיק נשלח עם ההצעה וההזמנה'],
+  ['כתובות נוספות', 'CUSTDESTS_SUBFORM', '→', 'CODE, CODEDES, ADDRESS, STATE'],
+  ['קבצים', 'CUSTEXTFILE_SUBFORM, SUPEXTFILE_SUBFORM', '→', 'EXTFILEDES (מספר התיק ושם הקובץ), הקובץ עצמו. עד PRIORITY_FILES_MAX_MB'],
+  ['מזגנים מותקנים', 'SERNUMBERS', '⇄', 'SERNUM, PARTNAME, CUSTNAME, INSTDATE, LOCATION. חוזר: WARDATEFINAL, LASTMAINTDATE, NEXTMAINTDATE'],
+  ['תנועות מלאי', 'DOCUMENTS_T, DOCUMENTS_D', '→', 'העברה בין מחסן לרכב (T), חלקים שנוצלו אצל לקוח (D). נסגרות כסופיות'],
+  ['קבלת סחורה', 'DOCUMENTS_P', '→', 'הזמנת רכש שהתקבלה: מאושרת ב-PORDERS ונפתחת קבלה סופית מולה'],
+  ['חשבוניות ספק', 'YINVOICES, PINVOICES', '←', 'סופיות, לפי ORDNAME של הזמנת הרכש → הוצאה בתיק'],
+  ['הערות', 'CUSTNOTES_SUBFORM', '→', 'הערה בתיק → פעילות של הלקוח (SUBJECT)'],
   ['חשבוניות', 'AINVOICES, CINVOICES, EINVOICES', '←', 'רק סופיות (FINAL): IVNUM, IVDATE, TOTPRICE, ORDNAME → כספי התיק'],
   ['קבלות', 'TINVOICES', '←', 'רק סופיות: IVNUM, IVDATE, TOTPRICE → תשלומים בתיק. תשלום שהוקלד במערכת מקושר ולא נספר פעמיים'],
   ['פריטים ומחירים', 'LOGPART', '←', 'PARTNAME (מק״ט), BASEPLPRICE, COST, לפי UDATE'],
@@ -32,9 +40,10 @@ const mapping: [string, string, string, string][] = [
 const streamLabel: Record<string, string> = {
   customers: 'לקוחות', contacts: 'אנשי קשר', quotes: 'הצעות מחיר', orders: 'הזמנות', suppliers: 'ספקים', purchasing: 'הזמנות רכש',
   service: 'קריאות שירות', invoices: 'חשבוניות', receipts: 'קבלות', items: 'מחירים ופריטים', balances: 'יתרות לקוחות', stock: 'מלאי',
+  agents: 'סוכנים', addresses: 'כתובות', units: 'מזגנים מותקנים', files: 'קבצים', stockmoves: 'תנועות מלאי', notes: 'הערות', supplierinvoices: 'חשבוניות ספק',
 }
 const countLabel: Record<string, string> = { updated: 'עודכנו', added: 'נוספו', linked: 'קושרו', unmatched: 'בלי תיק', conflicts: 'התנגשויות', imported: 'יובאו' }
-const runLabel = { hot: 'כל דקה: הזמנות, חשבוניות וקבלות', warm: 'כל 10 דקות: לקוחות, מחירים, יתרות ומלאי', full: 'סבב מלא' }
+const runLabel = { hot: 'כל דקה: הזמנות, חשבוניות, קבלות וקריאות שירות', warm: 'כל 10 דקות: לקוחות, אנשי קשר, מחירים, יתרות, מלאי ומזגנים', full: 'סבב מלא' }
 
 export default function PrioritySync() {
   const db = useApp((s) => s.db)
@@ -53,6 +62,12 @@ export default function PrioritySync() {
     for (const sp of db.suppliers) if (sp.sync) out.push({ kind: 'ספק', id: sp.id, name: sp.name, sync: sp.sync, link: `/suppliers/${sp.id}` })
     for (const po of db.purchaseOrders) if (po.sync) out.push({ kind: 'הזמנת רכש', id: po.id, name: po.number, sync: po.sync, link: `/suppliers?po=${po.id}` })
     for (const sc of db.serviceCalls) if (sc.sync) out.push({ kind: 'קריאת שירות', id: sc.id, name: sc.number, sync: sc.sync, link: `/service/${sc.id}` })
+    for (const po of db.purchaseOrders) if (po.receipt) out.push({ kind: 'קבלת סחורה', id: `${po.id}-r`, name: po.number, sync: po.receipt, link: `/suppliers?po=${po.id}` })
+    for (const u of db.units) if (u.sync) out.push({ kind: 'מזגן מותקן', id: u.id, name: `${u.model} · ${u.serial}`, sync: u.sync, link: `/customers/${u.customerId}` })
+    for (const d of db.docs) if (d.sync) out.push({ kind: 'קובץ', id: d.id, name: d.name, sync: d.sync, link: d.caseId ? `/cases/${d.caseId}` : '/settings' })
+    for (const m of db.stockMoves ?? []) if (m.sync && m.sync.status !== 'disabled') out.push({ kind: 'תנועת מלאי', id: m.id, name: `${db.catalog.find((c) => c.id === m.itemId)?.name ?? ''} × ${m.qty}${m.from ? ` · מ${m.from}` : ''}${m.to ? ` · ל${m.to}` : ''}`, sync: m.sync, link: '/inventory' })
+    for (const u of db.users) if (u.agentSync) out.push({ kind: 'סוכן', id: u.id, name: u.name, sync: u.agentSync, link: '/users' })
+    for (const a of db.activities) if (a.sync && a.sync.status !== 'synced') out.push({ kind: 'הערה', id: a.id, name: a.text.slice(0, 60), sync: a.sync, link: a.caseId ? `/cases/${a.caseId}` : '/' })
     for (const q of db.quotes.filter((x) => x.status === 'approved')) {
       const k = db.cases.find((x) => x.id === q.caseId)
       const cust = db.customers.find((x) => x.id === k?.customerId)
@@ -63,7 +78,7 @@ export default function PrioritySync() {
     }
     for (const i of db.catalog) out.push({ kind: 'פריט', id: i.id, name: `${i.sku} · ${i.name}`, sync: i.sync, link: '/settings', retry: async () => {} })
     return out
-  }, [db.customers, db.contacts, db.quotes, db.cases, db.catalog, db.suppliers, db.purchaseOrders, db.serviceCalls])
+  }, [db.customers, db.contacts, db.quotes, db.cases, db.catalog, db.suppliers, db.purchaseOrders, db.serviceCalls, db.units, db.docs, db.stockMoves, db.users, db.activities])
   const engine = serverSync()
   const engineState = db.integrations?.find((x) => x.id === 'priority')
 

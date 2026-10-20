@@ -9,8 +9,10 @@ import { bearer, bootstrapOrg, loginAs } from './fixtures.js';
 
 // ------------------------------------------------------------ a small in-memory Priority (OData subset the engine uses)
 
-const KEYS = { CUSTOMERS: 'CUSTNAME', CPROF: 'CPROFNUM', ORDERS: 'ORDNAME', SUPPLIERS: 'SUPNAME', PORDERS: 'ORDNAME', DOCUMENTS_Q: 'DOCNO' };
-const PREFIX = { CUSTOMERS: 'C', CPROF: 'PQ', ORDERS: 'SO', SUPPLIERS: 'S', PORDERS: 'PO', DOCUMENTS_Q: 'SC' };
+const KEYS = { CUSTOMERS: 'CUSTNAME', CPROF: 'CPROFNUM', ORDERS: 'ORDNAME', SUPPLIERS: 'SUPNAME', PORDERS: 'ORDNAME', DOCUMENTS_Q: 'DOCNO', DOCUMENTS_T: 'DOCNO', DOCUMENTS_D: 'DOCNO', DOCUMENTS_P: 'DOCNO', SERNUMBERS: 'SERNUM', AGENTS: 'AGENTCODE' };
+const PREFIX = { CUSTOMERS: 'C', CPROF: 'PQ', ORDERS: 'SO', SUPPLIERS: 'S', PORDERS: 'PO', DOCUMENTS_Q: 'SC', DOCUMENTS_T: 'WR', DOCUMENTS_D: 'SH', DOCUMENTS_P: 'GR', AGENTS: 'A' };
+// "'X'" or "DOCNO='X',TYPE='T'" -> X
+const keyOf = (k) => (k === undefined ? undefined : /^'(.*)'$/.exec(k)?.[1] ?? /DOCNO='([^']*)'/.exec(k)?.[1] ?? k);
 
 function evalFilter(row, filter) {
   if (!filter) return true;
@@ -36,6 +38,11 @@ class FakePriority {
         { STATDES: 'Active', ACTIVESTATFLAG: 'Y', OPENORDFLAG: 'Y', OPENSERVCALLFLAG: 'Y' },
         { STATDES: 'Inactive' },
       ],
+      AGENTS: [], YINVOICES: [], PINVOICES: [], SERNUMBERS: [], DOCUMENTS_T: [], DOCUMENTS_D: [], DOCUMENTS_P: [],
+      CALLSTATUSES: [{ CODE: 'Open', INITSTATFLAG: 'Y', ACTIVEFLAG: 'Y' }, { CODE: 'Closed', FINAL: 'Y' }, { CODE: 'Canceled', FINAL: 'Y', CANCEL: 'Y' }],
+      TDOCSTATS: [{ STATDES: 'Draft' }, { STATDES: 'Final', FINALFLAG: 'Y', DEFAULTFINAL: 'Y' }],
+      DDOCSTATS: [{ STATDES: 'Draft' }, { STATDES: 'Final', FINALFLAG: 'Y', DEFAULTFINAL: 'Y' }],
+      PORDSTATS: [{ STATDES: 'טיוטא', INITSTATFLAG: 'Y' }, { STATDES: 'אושרה', APPROVED: 'Y', OPENDOCFLAG: 'Y', AFTERAPPFLAG: 'Y' }, { STATDES: 'Closed', CLOSEDBOOL: 'Y', CLOSESTATFLAG: 'Y' }, { STATDES: 'Canceled', CLOSEDBOOL: 'Y' }],
       CPROFSTATS: [
         { STATDES: 'Draft', INITSTATFLAG: 'Y', CHANGEFLAG: 'Y', ACTIVEFLAG: 'Y', OPENORDFLAG: 'N' },
         { STATDES: 'Sent', ACTIVEFLAG: 'Y', OPENORDFLAG: 'Y' },
@@ -49,9 +56,9 @@ class FakePriority {
     this.calls = [];
   }
   parse(path) {
-    const m = /^(\w+)(?:\('([^']*)'\))?(?:\/(\w+)(?:\(([^)]*)\))?)?$/.exec(path);
+    const m = /^(\w+)(?:\(([^)]*)\))?(?:\/(\w+)(?:\(([^)]*)\))?)?$/.exec(path);
     if (!m) throw new Error(`fake priority: bad path ${path}`);
-    return { form: m[1], key: m[2], sub: m[3], subKey: m[4] };
+    return { form: m[1], key: keyOf(m[2]), sub: m[3], subKey: m[4] };
   }
   row(form, key) {
     const r = this.t[form].find((x) => String(x[KEYS[form]]) === key);
@@ -99,6 +106,10 @@ class FakePriority {
       row.STATDES = row.STATDES ?? (body.CUSTNAME ? 'Active' : 'Potential');
     }
     if (p.form === 'CPROF') row.STATDES = 'Draft';
+    if (['DOCUMENTS_T', 'DOCUMENTS_D', 'DOCUMENTS_P'].includes(p.form)) row.STATDES = 'Draft';
+    if (p.form === 'PORDERS') row.STATDES = 'טיוטא';
+    if (p.form === 'DOCUMENTS_P' && body.TRANSORDER_P_SUBFORM?.some((l) => this.t.PORDERS.find((o) => o.ORDNAME === l.ORDNAME)?.STATDES === 'טיוטא')) refuse('הזמנת רכש נמצאת בסטטוס "טיוטא".');
+    if (p.form === 'DOCUMENTS_Q' && body.CALLSTATUSCODE === undefined) row.CALLSTATUSCODE = 'Open';
     for (const [f, v] of Object.entries(row)) if (f.endsWith('_SUBFORM') && Array.isArray(v)) row[f] = v.map((l) => ({ ...l, KLINE: ++this.n }));
     if (p.form === 'CUSTOMERS') row.CREATEDDATE = new Date().toISOString().slice(0, 10) + 'T00:00:00Z';
     this.t[p.form].push(row);
@@ -109,11 +120,16 @@ class FakePriority {
     const p = this.parse(path);
     if (p.sub) {
       const name = /NAME='([^']*)'/.exec(p.subKey)?.[1];
-      const line = this.row(p.form, p.key)[p.sub].find((l) => l.NAME === name);
+      const code = keyOf(p.subKey);
+      const line = this.row(p.form, p.key)[p.sub].find((l) => (name ? l.NAME === name : String(l.CODE) === code));
       Object.assign(line, body);
       return line;
     }
     const row = this.row(p.form, p.key);
+    if (p.form === 'DOCUMENTS_Q' && row.CALLSTATUSCODE === 'Closed') {
+      const message = "לא ניתן לבצע שינויים בתעודה אשר נמצאת בסטטוס 'Closed'";
+      throw new HttpError(502, 'priority_rejected', message, { message });
+    }
     if (p.form === 'CUSTOMERS' && body.STATDES && /^T/.test(row.CUSTNAME)) {
       const message = 'שורה 1- כדי להפוך לקוח זמני ללקוח רגיל יש להשתמש בתוכנית "הפיכת לקוח זמני ללקוח"';
       throw new HttpError(502, 'priority_rejected', message, { message });
@@ -132,8 +148,8 @@ class FakePriority {
   }
 }
 
-const STREAMS = ['customers', 'contacts', 'quotes', 'orders', 'suppliers', 'purchasing', 'service', 'invoices', 'receipts', 'items', 'balances', 'stock'];
-const syncCfg = (over = {}) => ({ customerPrefix: 'GN', enabled: true, streams: new Set(STREAMS), hotSec: 60, warmSec: 600, pushDebounceMs: 0, genericPart: '000', importCustomers: 'new', importItems: false, autoActivate: true, warehouses: {}, ...over });
+const STREAMS = ['agents', 'customers', 'addresses', 'contacts', 'quotes', 'orders', 'suppliers', 'purchasing', 'service', 'units', 'files', 'stockmoves', 'notes', 'invoices', 'receipts', 'supplierinvoices', 'items', 'balances', 'stock'];
+const syncCfg = (over = {}) => ({ customerPrefix: 'GN', filesMaxMb: 8, enabled: true, streams: new Set(STREAMS), hotSec: 60, warmSec: 600, pushDebounceMs: 0, genericPart: '000', importCustomers: 'new', importItems: false, autoActivate: true, warehouses: {}, ...over });
 
 async function setup({ priority = new FakePriority(), allowWrite = true, cfg = {}, data = {} } = {}) {
   const store = await new DocStore({}).init();
@@ -484,4 +500,135 @@ test('without PRIORITY_SYNC the engine does not start and status says why', asyn
   const st = await s.request('GET', '/api/priority/sync/status', { headers: bearer(admin) });
   assert.equal(st.json.running, false);
   assert.match(st.json.reason, /PRIORITY_SYNC/);
+});
+
+// ------------------------------------------------------------ everything else with a counterpart in Priority
+
+const past = () => new Date(Date.now() - 10 * 60_000).toISOString();
+
+test('agents, extra addresses, files and notes reach Priority once', async () => {
+  const { store, engine, priority } = await setup({
+    cfg: {},
+    data: {
+      customers: [{ id: 'c1', name: 'משפחת נבון', phone: '0541234567', addresses: [{ id: 'a1', city: 'ירושלים', street: 'הרצל', number: '24' }, { id: 'a2', label: 'המשרד', city: 'תל אביב', street: 'יגאל אלון', number: '90' }], sync: { status: 'pending' } }],
+      cases: [{ id: 'k1', number: 'GN-1', customerId: 'c1', agentId: 'ua', title: 'דירה', stage: 'quote', createdAt: past() }],
+      quotes: [{ id: 'q1', caseId: 'k1', number: 'Q-1', status: 'approved', discountPct: 0, lines: [{ id: 'l1', itemId: 'i1', description: 'x', qty: 1, unitPrice: 100 }] }],
+      docs: [{ id: 'd1', caseId: 'k1', folder: 'customer', name: 'הצעה חתומה.pdf', mime: 'application/pdf', dataUrl: 'data:application/pdf;base64,JVBERi0=', uploadedAt: past() }],
+      activities: [{ id: 'a1', kind: 'note', caseId: 'k1', text: 'הלקוח מבקש יחידות שקטות', at: new Date().toISOString() }, { id: 'a0', kind: 'note', caseId: 'k1', text: 'ישנה', at: '2020-01-01T00:00:00Z' }],
+    },
+  });
+  userWrite(store, [{ op: 'upsert', collection: 'users', id: 'ua', data: { name: 'אבי לוי', role: 'agent', active: true, initials: 'AL' } }]);
+  engine.saveState({ customersSince: past() });
+  await engine.sweep({ all: true });
+  await engine.chain;
+  const cust = priority.t.CUSTOMERS[0];
+  assert.equal(priority.t.AGENTS[0].AGENTNAME, 'אבי לוי');
+  assert.equal(store.get('users', 'ua').priorityAgent, priority.t.AGENTS[0].AGENTCODE);
+  assert.equal(priority.t.ORDERS[0].AGENTCODE, priority.t.AGENTS[0].AGENTCODE, 'the order carries the case agent');
+  assert.deepEqual(cust.CUSTDESTS_SUBFORM.map((d) => [d.CODE, d.CODEDES, d.STATE]), [['01', 'המשרד', 'תל אביב']]);
+  assert.equal(cust.CUSTEXTFILE_SUBFORM[0].EXTFILEDES, 'GN-1 · הצעה חתומה.pdf');
+  assert.deepEqual(cust.CUSTNOTES_SUBFORM.map((n) => n.SUBJECT), ['GN-1: הלקוח מבקש יחידות שקטות'], 'notes older than the sync start stay out');
+  await engine.sweep({ all: true });
+  await engine.chain;
+  assert.equal(priority.t.AGENTS.length, 1);
+  assert.equal(cust.CUSTEXTFILE_SUBFORM.length, 1);
+  assert.equal(cust.CUSTDESTS_SUBFORM.length, 1);
+  assert.equal(cust.CUSTNOTES_SUBFORM.length, 1);
+});
+
+test('installed units become serial numbers; service calls close both ways', async () => {
+  const { store, engine, priority } = await setup({
+    data: {
+      units: [{ id: 'un1', customerId: 'c1', itemId: 'i1', model: 'X', serial: 'SN-77', location: 'סלון', installedAt: '2026-10-01', warrantyUntil: '2029-10-01' }],
+      serviceCalls: [
+        { id: 'sc1', number: 'SC-1', customerId: 'c1', description: 'נזילה', status: 'in_progress', urgency: 'normal', source: 'phone' },
+        { id: 'sc2', number: 'SC-2', customerId: 'c1', description: 'רעש', status: 'new', urgency: 'normal', source: 'phone' },
+      ],
+    },
+  });
+  await engine.sweep();
+  await engine.chain;
+  assert.deepEqual(priority.t.SERNUMBERS.map((r) => [r.SERNUM, r.PARTNAME, r.LOCATION]), [['SN-77', 'MINI-5', 'סלון']]);
+  userWrite(store, [{ op: 'patch', collection: 'serviceCalls', id: 'sc1', data: { status: 'done', resolution: 'נוקה קו הניקוז' } }]);
+  await engine.sweep();
+  await engine.chain;
+  const call1 = priority.t.DOCUMENTS_Q.find((r) => r.REFERENCE === 'SC-1');
+  assert.equal(call1.DETAILS, 'נוקה קו הניקוז', 'what was done goes in before the call is closed');
+  assert.equal(call1.CALLSTATUSCODE, 'Closed');
+  // closed in Priority by the office -> closed here
+  const call2 = priority.t.DOCUMENTS_Q.find((r) => r.REFERENCE === 'SC-2');
+  Object.assign(call2, { CALLSTATUSCODE: 'Closed', STATUSDATE: new Date().toISOString() });
+  await engine.run('hot');
+  assert.equal(store.get('serviceCalls', 'sc2').status, 'done');
+  // a later sweep doesn't try to change the closed call again
+  const writes = priority.writes().length;
+  await engine.sweep({ all: true });
+  await engine.chain;
+  assert.equal(priority.writes().length, writes);
+});
+
+test('stock movements: a transfer and parts used become final documents; a quick put-back cancels out', async () => {
+  const at = past();
+  const { store, engine, priority } = await setup({
+    cfg: { warehouses: { Main: 'מחסן ראשי', 'Main:V1': 'רכב — רון' } },
+    data: {
+      stockMoves: [
+        { id: 'sm1', kind: 'transfer', itemId: 'i1', qty: 4, from: 'מחסן ראשי', to: 'רכב — רון', at },
+        { id: 'sm2', kind: 'use', itemId: 'i1', qty: 3, from: 'רכב — רון', customerId: 'c1', serviceCallId: 'sc1', at },
+        { id: 'sm3', kind: 'return', itemId: 'i1', qty: 1, to: 'רכב — רון', customerId: 'c1', serviceCallId: 'sc1', at },
+        { id: 'sm4', kind: 'use', itemId: 'i1', qty: 1, from: 'רכב — רון', customerId: 'c1', serviceCallId: 'sc9', at: new Date().toISOString() },
+        { id: 'sm5', kind: 'use', itemId: 'i1', qty: 1, from: 'מחסן לא ממופה', customerId: 'c1', at },
+      ],
+    },
+  });
+  await engine.sweep();
+  await engine.chain;
+  const T = priority.t.DOCUMENTS_T[0];
+  assert.deepEqual([T.WARHSNAME, T.LOCNAME, T.TOWARHSNAME, T.TOLOCNAME, T.STATDES], ['Main', '0', 'Main', 'V1', 'Final']);
+  assert.equal(T.TRANSORDER_T_SUBFORM[0].TQUANT, 4);
+  assert.equal(priority.t.DOCUMENTS_D.length, 1, 'the job within the grace period waits');
+  const D = priority.t.DOCUMENTS_D[0];
+  assert.deepEqual([D.CUSTNAME, D.LOCNAME, D.STATDES, D.TRANSORDER_D_SUBFORM[0].TQUANT], [priority.t.CUSTOMERS[0].CUSTNAME, 'V1', 'Final', 2], 'three used, one put back');
+  assert.equal(store.get('stockMoves', 'sm3').sync.status, 'disabled');
+  assert.match(store.get('stockMoves', 'sm5').sync.error, /לא ממופה/);
+});
+
+test('a received purchase order is approved and received in Priority; supplier invoices become expenses', async () => {
+  const { store, engine, priority } = await setup({
+    data: {
+      suppliers: [{ id: 's1', name: 'ספק מיזוג', phone: '021234567', active: true }],
+      purchaseOrders: [{ id: 'po1', number: 'PO-1', supplierId: 's1', caseId: 'k1', status: 'sent', lines: [{ itemId: 'i1', description: 'x', qty: 2, unitCost: 5000 }] }],
+    },
+  });
+  await engine.sweep();
+  await engine.chain;
+  assert.equal(priority.t.PORDERS[0].STATDES, 'אושרה');
+  userWrite(store, [{ op: 'patch', collection: 'purchaseOrders', id: 'po1', data: { status: 'received', toLocation: 'מחסן ראשי', receivedAt: new Date().toISOString() } }]);
+  await engine.sweep();
+  await engine.chain;
+  const gr = priority.t.DOCUMENTS_P[0];
+  assert.deepEqual([gr.STATDES, gr.TOWARHSNAME, gr.TRANSORDER_P_SUBFORM[0].ORDNAME], ['Final', 'Main', priority.t.PORDERS[0].ORDNAME]);
+  priority.t.YINVOICES.push({ IVNUM: 'SI-9', SUPNAME: priority.t.SUPPLIERS[0].SUPNAME, ORDNAME: priority.t.PORDERS[0].ORDNAME, IVDATE: new Date().toISOString().slice(0, 10) + 'T00:00:00Z', TOTPRICE: 11800, FINAL: 'Y' });
+  await engine.run('hot');
+  const exp = store.list('money').find((m) => m.priorityId === 'SI-9');
+  assert.deepEqual([exp.kind, exp.caseId, exp.amount, exp.source], ['expense', 'k1', 11800, 'priority']);
+});
+
+test('contacts added or edited in Priority come into the app', async () => {
+  const { store, engine, priority } = await setup();
+  await engine.sweep();
+  await engine.chain;
+  const cust = priority.t.CUSTOMERS[0];
+  cust.CUSTPERSONNEL_SUBFORM = [{ NAME: 'דנה מהנהלת החשבונות', CELLPHONE: '0529991111', EMAIL: 'dana@example.com', FIRM: cust.CUSTDES }];
+  await engine.run('warm');
+  const ct = store.list('contacts').find((c) => c.name === 'דנה מהנהלת החשבונות');
+  assert.equal(ct.customerId, 'c1');
+  assert.equal(ct.phone, '0529991111');
+  cust.CUSTPERSONNEL_SUBFORM[0].CELLPHONE = '0529992222';
+  await engine.run('warm');
+  assert.equal(store.get('contacts', ct.id).phone, '0529992222');
+  const writes = priority.writes().length;
+  await engine.sweep({ all: true });
+  await engine.chain;
+  assert.equal(priority.writes().length, writes, 'a contact that came from Priority is not sent back');
 });

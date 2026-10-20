@@ -409,7 +409,7 @@ function TransferModal({ init, locations, onClose }: { init: Transfer; locations
   const valid = itemId && from && to && from !== to && qty > 0 && qty <= avail
   const save = () => {
     if (!valid) return
-    moveStock(itemId, from, -qty)
+    moveStock(itemId, from, -qty, { kind: 'transfer', other: to })
     moveStock(itemId, to, qty)
     const owner = users.find((u) => vanOf(u) === to)
     if (owner && owner.id !== app().currentUserId) app().notify(owner.id, `הועברו לרכב שלך: ${it?.name} × ${qty}`, '/inventory')

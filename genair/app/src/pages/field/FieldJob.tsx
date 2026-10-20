@@ -228,7 +228,7 @@ function PartsCard({ ap, db }: { ap: Appointment; db: DB }) {
 
   const add = () => {
     if (!itemId || qty <= 0) return
-    const left = moveStock(itemId, van, -qty)
+    const left = moveStock(itemId, van, -qty, { kind: 'use', appointmentId: ap.id, serviceCallId: ap.serviceCallId, caseId: ap.caseId, customerId: ap.customerId })
     const exists = parts.find((p) => p.itemId === itemId && p.location === van)
     const next = exists ? parts.map((p) => (p === exists ? { ...p, qty: p.qty + qty } : p)) : [...parts, { itemId, qty, location: van }]
     useApp.getState().patch('appointments', ap.id, { partsUsed: next })
@@ -240,7 +240,7 @@ function PartsCard({ ap, db }: { ap: Appointment; db: DB }) {
   }
   const remove = (i: number) => {
     const p = parts[i]
-    moveStock(p.itemId, p.location ?? van, p.qty)
+    moveStock(p.itemId, p.location ?? van, p.qty, { kind: 'return', appointmentId: ap.id, serviceCallId: ap.serviceCallId, caseId: ap.caseId, customerId: ap.customerId })
     const next = parts.filter((_, j) => j !== i)
     useApp.getState().patch('appointments', ap.id, { partsUsed: next })
     syncCall(next)

@@ -180,3 +180,93 @@ export function listStock(client, warehouses) {
   const filter = warehouses.map((w) => `WARHSNAME eq ${q(w)}`).join(' or ');
   return all(client, 'PARTBAL', { $select: 'PARTNAME,WARHSNAME,BALANCE', $filter: filter });
 }
+
+// ---------------------------------------------------------------- attachments
+// Customers keep files in CUSTEXTFILE_SUBFORM, suppliers in SUPEXTFILE_SUBFORM (EXTFILES_SUBFORM on a
+// customer is closed to the API in the demo). The file goes up inline as a data: URI in EXTFILENAME.
+
+export const FILE_TARGETS = {
+  customer: (id) => `CUSTOMERS(${q(id)})/CUSTEXTFILE_SUBFORM`,
+  supplier: (id) => `SUPPLIERS(${q(id)})/SUPEXTFILE_SUBFORM`,
+};
+
+export async function listFiles(client, path) {
+  return rows(await client.get(path, buildQuery({ $select: 'EXTFILEDES,EXTFILENUM' })));
+}
+
+export const attachFile = (client, path, payload) => client.post(path, payload);
+
+// ---------------------------------------------------------------- serial numbers (installed units)
+
+const SERIAL_FIELDS = 'SERNUM,PARTNAME,CUSTNAME,INSTDATE,WARDATEFINAL,LASTMAINTDATE,NEXTMAINTDATE,LOCATION,UDATE';
+
+export async function findSerial(client, sernum, partname) {
+  return rows(await client.get('SERNUMBERS', buildQuery({ $select: SERIAL_FIELDS, $filter: `SERNUM eq ${q(sernum)} and PARTNAME eq ${q(partname)}`, $top: 1 })))[0];
+}
+
+export const createSerial = (client, payload) => client.post('SERNUMBERS', payload);
+
+export const listSerialsChanged = (client, since) => all(client, 'SERNUMBERS', { $select: SERIAL_FIELDS, $filter: `UDATE ge ${odataDate(since)}` });
+
+// ---------------------------------------------------------------- service call status
+
+const callPath = (docno) => `DOCUMENTS_Q(DOCNO=${q(docno)},TYPE='Q')`;
+export const listCallStatuses = (client) => all(client, 'CALLSTATUSES', { $select: 'CODE,INITSTATFLAG,ACTIVEFLAG,FINAL,CANCEL' });
+export const updateServiceCall = (client, docno, data) => client.patch(callPath(docno), data);
+export const listServiceCallsChanged = (client, since) =>
+  all(client, 'DOCUMENTS_Q', { $select: 'DOCNO,CALLSTATUSCODE,STATUSDATE', $filter: `STATUSDATE ge ${odataDate(since)}` });
+
+// ---------------------------------------------------------------- stock documents
+// T = transfer between warehouses, D = shipment to a customer (parts used on a job), P = goods receipt.
+// They are created as drafts and then moved to the status marked final in xDOCSTATS.
+
+export const STOCK_DOCS = {
+  T: { form: 'DOCUMENTS_T', lines: 'TRANSORDER_T_SUBFORM', stats: 'TDOCSTATS' },
+  D: { form: 'DOCUMENTS_D', lines: 'TRANSORDER_D_SUBFORM', stats: 'DDOCSTATS' },
+  P: { form: 'DOCUMENTS_P', lines: 'TRANSORDER_P_SUBFORM', stats: null },
+};
+
+export async function finalStatus(client, type) {
+  const stats = STOCK_DOCS[type].stats;
+  if (!stats) return 'Final';
+  const list = await all(client, stats, { $select: 'STATDES,FINALFLAG,DEFAULTFINAL' });
+  return (list.find((r) => r.FINALFLAG === 'Y' && r.DEFAULTFINAL === 'Y') ?? list.find((r) => r.FINALFLAG === 'Y'))?.STATDES ?? 'Final';
+}
+
+export async function findStockDoc(client, type, details) {
+  return rows(await client.get(STOCK_DOCS[type].form, buildQuery({ $select: 'DOCNO,STATDES', $filter: `DETAILS eq ${q(details)}`, $top: 1 })))[0];
+}
+
+export async function createStockDoc(client, type, payload) {
+  const res = await client.post(STOCK_DOCS[type].form, payload);
+  return String(res?.DOCNO ?? '');
+}
+
+export const setStockDocStatus = (client, type, docno, status) => client.patch(`${STOCK_DOCS[type].form}(DOCNO=${q(docno)},TYPE='${type}')`, { STATDES: status });
+
+// ---------------------------------------------------------------- purchase order status, supplier invoices
+
+export const listPurchaseStatuses = (client) => all(client, 'PORDSTATS', { $select: 'STATDES,INITSTATFLAG,OPENDOCFLAG,APPROVED,AFTERAPPFLAG,CLOSEDBOOL,CLOSESTATFLAG' });
+export const updatePurchaseOrder = (client, ordname, data) => client.patch(`PORDERS(${q(ordname)})`, data);
+export const listPurchaseOrders = (client, filter) => all(client, 'PORDERS', { $select: 'ORDNAME,STATDES,CLOSEDBOOL', $filter: filter });
+
+export const SUPPLIER_INVOICE_FORMS = ['YINVOICES', 'PINVOICES'];
+export const listFinalSupplierDocs = (client, form, since) =>
+  all(client, form, { $select: 'IVNUM,SUPNAME,IVDATE,ORDNAME,TOTPRICE,FINAL,DETAILS', $filter: `IVDATE ge ${odataDate(since)} and FINAL eq 'Y'` });
+
+// ---------------------------------------------------------------- agents, sites, customer activities
+
+export const listAgents = (client) => all(client, 'AGENTS', { $select: 'AGENTCODE,AGENTNAME,EMAIL,CELLPHONE' });
+export async function createAgent(client, payload) {
+  const res = await client.post('AGENTS', payload);
+  return String(res?.AGENTCODE ?? payload.AGENTCODE);
+}
+
+const destsPath = (custname) => `CUSTOMERS(${q(custname)})/CUSTDESTS_SUBFORM`;
+export async function listSites(client, custname) {
+  return rows(await client.get(destsPath(custname), buildQuery({ $select: 'CODE,CODEDES,ADDRESS,STATE' })));
+}
+export const createSite = (client, custname, payload) => client.post(destsPath(custname), payload);
+export const updateSite = (client, custname, code, payload) => client.patch(`${destsPath(custname)}(${q(code)})`, payload);
+
+export const createCustomerNote = (client, custname, payload) => client.post(`CUSTOMERS(${q(custname)})/CUSTNOTES_SUBFORM`, payload);

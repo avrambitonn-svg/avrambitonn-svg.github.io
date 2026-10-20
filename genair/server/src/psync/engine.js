@@ -16,6 +16,7 @@ import { randomBytes } from 'node:crypto';
 import { HttpError } from '../http.js';
 import * as P from './api.js';
 import * as M from './map.js';
+import * as X from './more.js';
 
 export const ORIGIN = 'priority-sync';
 export const STATE = { c: 'integrations', id: 'priority' };
@@ -29,12 +30,17 @@ const errText = (e) => (e instanceof HttpError ? (e.details?.message ? `${e.mess
 
 // collection -> the stream that pushes it, in dependency order (customers before what hangs on them)
 const PUSH = [
+  ['users', 'agents'],
   ['customers', 'customers'],
   ['contacts', 'contacts'],
   ['suppliers', 'suppliers'],
   ['quotes', 'quotes'],
   ['purchaseOrders', 'purchasing'],
   ['serviceCalls', 'service'],
+  ['units', 'units'],
+  ['docs', 'files'],
+  ['stockMoves', 'stockmoves'],
+  ['activities', 'notes'],
 ];
 const PUSH_OF = new Map(PUSH);
 
@@ -44,8 +50,9 @@ const apiClosed = (e) => e instanceof HttpError && e.code === 'priority_rejected
 const fatal = (e) => e instanceof HttpError && (e.code === 'priority_auth_failed' || e.code === 'priority_rate_limited' || e.code === 'priority_unavailable' || /_timeout$|_unreachable$/.test(e.code));
 
 export class PrioritySync {
-  constructor({ store, client, priority, sync, now = Date.now, log = console }) {
+  constructor({ store, client, priority, sync, now = Date.now, log = console, readFile }) {
     this.store = store;
+    this.readFile = readFile;
     this.client = client;
     this.p = priority;
     this.cfg = sync;
@@ -181,12 +188,17 @@ export class PrioritySync {
           await this.stream('orders', () => this.pullOrders(kind === 'full' ? 30 * DAY : DAY));
           await this.stream('invoices', () => this.pullMoney(P.INVOICE_FORMS, kind === 'full' ? 120 * DAY : 14 * DAY));
           await this.stream('receipts', () => this.pullMoney(['TINVOICES'], kind === 'full' ? 120 * DAY : 14 * DAY));
+          await this.stream('service', () => X.pullServiceCalls(this, kind === 'full' ? 30 * DAY : DAY));
+          await this.stream('supplierinvoices', () => X.pullSupplierInvoices(this, kind === 'full' ? 120 * DAY : 14 * DAY));
         }
         if (kind !== 'hot') {
           await this.stream('customers', () => this.pullCustomers());
           await this.stream('items', () => this.pullItems(kind === 'full'));
           await this.stream('balances', () => this.pullBalances());
           await this.stream('stock', () => this.pullStock());
+          await this.stream('units', () => X.pullUnits(this));
+          await this.stream('contacts', () => X.pullContacts(this));
+          await this.stream('purchasing', () => X.pullPurchaseOrders(this));
         }
       } catch (e) {
         error = errText(e);
@@ -245,7 +257,12 @@ export class PrioritySync {
     if (!e) return;
     this.inflight.add(key);
     try {
-      if (c === 'customers') await this.pushCustomer(e, now);
+      if (c === 'users') await X.pushAgent(this, e, now);
+      else if (c === 'units') await X.pushUnit(this, e, now);
+      else if (c === 'docs') await X.pushDoc(this, e, now);
+      else if (c === 'stockMoves') await X.pushStockMove(this, e, now);
+      else if (c === 'activities') await X.pushNote(this, e, now);
+      else if (c === 'customers') await this.pushCustomer(e, now);
       else if (c === 'contacts') await this.pushContact(e, now);
       else if (c === 'suppliers') await this.pushSupplier(e, now);
       else if (c === 'quotes') await this.pushQuote(e, now);
@@ -299,7 +316,7 @@ export class PrioritySync {
     const payload = M.customerOut(c);
     const hash = M.hashOf(payload);
     const sync = c.sync ?? {};
-    if (sync.priorityId && sync.hash === hash && sync.status === 'synced') return;
+    if (sync.priorityId && sync.hash === hash && sync.status === 'synced') return this.canWrite ? X.pushSites(this, c, sync.priorityId) : undefined;
     if (sync.status === 'disabled' || !this.due(sync, now)) return;
     if (!payload.CUSTDES || !payload.PHONE) return this.holdPending('customers', c, 'חסר שם או טלפון');
     // linked before the engine ran: no baseline yet, so nothing is overwritten; the next pull decides
@@ -309,7 +326,7 @@ export class PrioritySync {
     if (sync.priorityId) {
       await P.updateCustomer(this.client, sync.priorityId, payload);
       this.synced('customers', c.id, 'sync', sync, { hash, remoteHash: M.hashOf(M.pick(payload, M.CUSTOMER_KEYS)) });
-      return;
+      return X.pushSites(this, this.store.get('customers', c.id), sync.priorityId);
     }
     const found = await P.findCustomer(this.client, { phone: payload.PHONE, vat: payload.VATNUM });
     if (found.length > 1) {
@@ -321,6 +338,7 @@ export class PrioritySync {
     this.patch('customers', c.id, { temp: false });
     this.synced('customers', c.id, 'sync', sync, { priorityId: custname, hash, remoteHash: M.hashOf(M.pick(payload, M.CUSTOMER_KEYS)) });
     this.activity(`הלקוח נפתח ב-Priority (${custname})`, { customerId: c.id });
+    await X.pushSites(this, this.store.get('customers', c.id), custname);
     this.queueDependents(c.id);
   }
 
@@ -479,15 +497,15 @@ export class PrioritySync {
     const k = this.store.get('cases', q.caseId);
     const custname = this.customerPid(k?.customerId);
     const catalog = new Map(this.store.list('catalog').map((i) => [i.id, i]));
-    return { k, custname, lines: M.documentLines(q, catalog, this.cfg.genericPart) };
+    return { k, custname, agent: X.agentCode(this, k), lines: M.documentLines(q, catalog, this.cfg.genericPart) };
   }
 
   async pushQuote(q, now) {
     if (q.status === 'rejected') return this.closeQuote(q);
     if (!['sent', 'viewed', 'approved'].includes(q.status)) return;
-    const { k, custname, lines } = this.quoteContext(q);
+    const { k, custname, agent, lines } = this.quoteContext(q);
     if (!k || !lines.length) return;
-    const head = M.quoteHead(q, custname, k.title);
+    const head = { ...M.quoteHead(q, custname, k.title), ...(agent ? { AGENTCODE: agent } : {}) };
 
     // the quote itself, while it is still open
     // once the order exists, the quote in Priority is history and is left alone
@@ -571,9 +589,9 @@ export class PrioritySync {
   // ---- purchase orders
 
   async pushPurchaseOrder(po, now) {
-    if (!['sent', 'confirmed', 'received'].includes(po.status)) return;
     const sync = po.sync ?? {};
-    if (sync.priorityId && sync.status === 'synced') return;
+    if (sync.priorityId && sync.status === 'synced') return X.pushPurchaseFollowups(this, po);
+    if (!['sent', 'confirmed', 'received'].includes(po.status)) return;
     if (!this.due(sync, now)) return;
     const sup = this.store.get('suppliers', po.supplierId);
     const supname = sup?.priorityId || sup?.sync?.priorityId;
@@ -590,14 +608,15 @@ export class PrioritySync {
       this.activity(`הזמנת רכש ${po.number} נפתחה ב-Priority (${num})`, po.caseId ? { caseId: po.caseId } : {});
     }
     this.synced('purchaseOrders', po.id, 'sync', sync, { priorityId: String(num) });
+    await X.pushPurchaseFollowups(this, this.store.get('purchaseOrders', po.id));
   }
 
   // ---- service calls
 
   async pushServiceCall(sc, now) {
-    if (sc.status === 'cancelled') return;
     const sync = sc.sync ?? {};
-    if (sync.priorityId && sync.status === 'synced') return;
+    if (sync.priorityId && sync.status === 'synced') return X.pushCallStatus(this, sc);
+    if (sc.status === 'cancelled') return;
     if (!this.due(sync, now)) return;
     const custname = this.customerPid(sc.customerId);
     if (!custname) return this.holdPending('serviceCalls', sc, 'ממתין לפתיחת הלקוח ב-Priority');
@@ -619,6 +638,7 @@ export class PrioritySync {
       this.activity(`קריאת שירות ${sc.number} נפתחה ב-Priority (${docno})`, { serviceCallId: sc.id, customerId: sc.customerId });
     }
     this.synced('serviceCalls', sc.id, 'sync', sync, { priorityId: String(docno) });
+    await X.pushCallStatus(this, this.store.get('serviceCalls', sc.id));
   }
 
   // ------------------------------------------------------------ Priority -> app
@@ -829,16 +849,22 @@ export class PrioritySync {
   /** Stock per mapped warehouse (PRIORITY_WAREHOUSES): Priority's count wins. */
   async pullStock() {
     const map = this.cfg.warehouses;
-    const names = Object.keys(map);
+    const names = [...new Set(Object.keys(map).map((k) => k.split(':')[0]))];
     if (!names.length) return { updated: 0, skipped: 'אין מיפוי מחסנים (PRIORITY_WAREHOUSES)' };
+    // "Main" sums every bin of the warehouse; "Main:EAST" is that bin only
+    const locationOf = (row) => map[`${row.WARHSNAME}:${String(row.LOCNAME ?? '').trim()}`] ?? map[row.WARHSNAME];
     const bySku = new Map(this.store.list('catalog').filter((i) => i.sku).map((i) => [String(i.sku), i]));
     const stock = this.store.list('stock');
-    let updated = 0;
+    const totals = new Map();
     for (const row of await P.listStock(this.client, names)) {
       const item = bySku.get(String(row.PARTNAME ?? '').trim());
-      const location = map[row.WARHSNAME];
+      const location = locationOf(row);
       if (!item || !location) continue;
-      const qty = Number(row.BALANCE) || 0;
+      const key = `${item.id}\u0000${location}`;
+      totals.set(key, { item, location, row, qty: (totals.get(key)?.qty ?? 0) + (Number(row.BALANCE) || 0) });
+    }
+    let updated = 0;
+    for (const { item, location, row, qty } of totals.values()) {
       const cur = stock.find((s) => s.itemId === item.id && s.location === location);
       if (cur && cur.qty === qty) continue;
       if (cur) this.patch('stock', cur.id, { qty });

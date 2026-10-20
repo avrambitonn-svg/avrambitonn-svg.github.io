@@ -67,7 +67,10 @@ export function priorityConfig(env = process.env) {
 
 // Automatic two-way sync with Priority (server-side worker, needs the shared database).
 // PRIORITY_SYNC=on starts it. Streams can be narrowed with PRIORITY_SYNC_STREAMS (comma list).
-export const SYNC_STREAMS = ['customers', 'contacts', 'quotes', 'orders', 'suppliers', 'purchasing', 'service', 'invoices', 'receipts', 'items', 'balances', 'stock'];
+export const SYNC_STREAMS = [
+  'agents', 'customers', 'addresses', 'contacts', 'quotes', 'orders', 'suppliers', 'purchasing', 'service', 'units', 'files', 'stockmoves', 'notes',
+  'invoices', 'receipts', 'supplierinvoices', 'items', 'balances', 'stock',
+];
 
 export function prioritySyncConfig(env = process.env) {
   const num = (v, d, min) => (Number(v) >= min ? Number(v) : d);
@@ -88,6 +91,7 @@ export function prioritySyncConfig(env = process.env) {
     genericPart: str(env.PRIORITY_GENERIC_PART) || '000',
     importCustomers: str(env.PRIORITY_IMPORT_CUSTOMERS).toLowerCase() || 'new', // new | all | off
     importItems: bool(env.PRIORITY_IMPORT_ITEMS),
+    filesMaxMb: num(env.PRIORITY_FILES_MAX_MB, 8, 1),
     // move a temporary customer to an active status when an order / service call needs it
     autoActivate: str(env.PRIORITY_AUTO_ACTIVATE).toLowerCase() !== 'off',
     // customer numbers: "GN" -> GN000001, GN000002... A customer opened with its own number is a regular

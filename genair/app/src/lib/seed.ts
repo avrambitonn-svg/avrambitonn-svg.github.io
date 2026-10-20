@@ -454,6 +454,7 @@ export function seedDB(): DB {
     leaves: [],
     suppliers: [],
     purchaseOrders: [],
+    stockMoves: [],
     config: defaultConfig(),
     counters: { case: 142, quote: 93, service: 313, contract: 21, apt: 0, po: 0 },
   })

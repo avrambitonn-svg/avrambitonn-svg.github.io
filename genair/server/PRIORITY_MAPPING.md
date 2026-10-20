@@ -115,3 +115,22 @@
 | `PARTBAL` | ← | `PARTNAME`, `WARHSNAME`, `BALANCE` | רק מחסנים ב-`PRIORITY_WAREHOUSES` |
 
 לרוב המסמכים אין שדה "עודכן לאחרונה" ב-API (יש ב-`LOGPART`, `SERNUMBERS`, `ACCOUNTS`). לכן המנוע מושך לפי תאריך המסמך או הסטטוס עם חפיפה (יום להזמנות, 14 יום לחשבוניות וקבלות, 120 יום בסבב מלא), ומדלג על מה שכבר ראה לפי hash.
+
+## סבב שני: כל מה שיש לו מקבילה
+
+| מסך | כיוון | שדות | נבדק בדמו |
+|---|---|---|---|
+| `AGENTS` | → | `AGENTCODE` (ראשי תיבות + מספר), `AGENTNAME`, `EMAIL`, `CELLPHONE`. קישור לפי שם | כן |
+| `CUSTDESTS_SUBFORM` (מפתח `CODE`) | → | `CODE` 01, 02..., `CODEDES`, `ADDRESS`, `STATE` | כן |
+| `CUSTEXTFILE_SUBFORM`, `SUPEXTFILE_SUBFORM` | → | `EXTFILEDES` (68), `EXTFILENAME` = `data:<mime>;base64,...` | כן (על לקוח `EXTFILES_SUBFORM` סגור ל-API) |
+| `SERNUMBERS` (מפתח `SERNUM`,`PART`) | ⇄ | `SERNUM`, `PARTNAME`, `CUSTNAME`, `INSTDATE`, `LOCATION`. חוזר: `WARDATEFINAL`, `LASTMAINTDATE`, `NEXTMAINTDATE` לפי `UDATE` | כן. הפריט חייב `SERNFLAG`. תאריך אחריות דורש קוד אחריות, ולכן לא נשלח |
+| `DOCUMENTS_Q` | ⇄ | `CALLSTATUSCODE` לפי `CALLSTATUSES` (`FINAL`, `CANCEL`), `DETAILS` (24) | כן. טקסטים (`DOCTEXT_Q`) לקריאה בלבד, ותעודה סגורה לא ניתנת לשינוי |
+| `DOCUMENTS_T` + `TRANSORDER_T_SUBFORM` | → | `CURDATE` (חובה), `WARHSNAME`/`LOCNAME` → `TOWARHSNAME`/`TOLOCNAME`, `DETAILS` = `SM <מזהה>` | כן, כולל סטטוס `Final` (`TDOCSTATS.FINALFLAG`) |
+| `DOCUMENTS_D` + `TRANSORDER_D_SUBFORM` | → | `CUSTNAME`, `WARHSNAME`, `CURDATE`, שורות | כן, כולל `Final` (`DDOCSTATS`) |
+| `PORDERS.STATDES` | ⇄ | מאושרת לפי `PORDSTATS` (`APPROVED`, `OPENDOCFLAG`, `AFTERAPPFLAG`), מבוטלת (`CLOSEDBOOL` בלי `CLOSESTATFLAG`) | כן |
+| `DOCUMENTS_P` + `TRANSORDER_P_SUBFORM` | → | `SUPNAME`, `TOWARHSNAME`, `CURDATE`, שורות עם `ORDNAME` | כן. נדחית כשההזמנה בטיוטה, ולכן מאשרים אותה קודם |
+| `YINVOICES`, `PINVOICES` | ← | `IVNUM`, `SUPNAME`, `ORDNAME`, `TOTPRICE`, `IVDATE`, רק `FINAL` | קריאה |
+| `CUSTNOTES_SUBFORM` | → | `SUBJECT` (52), `CURDATE` | כן |
+| `CUSTPERSONNEL_SUBFORM` | ← | `NAME`, `CELLPHONE`/`PHONENUM`, `EMAIL`, `POSITIONDES` | כן |
+
+סגורים ל-API בדמו: `DOCPROJ` (פרויקטים), `TECHNICIANS`, `DOCUMENTS_NCONT`, `DOCUMENTS_A`, `WARRANTIES`.

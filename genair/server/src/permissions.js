@@ -7,7 +7,7 @@ import { SYSTEM } from './db/store.js';
 
 const MANAGERS = new Set(['admin', 'office']);
 const MANAGER_ONLY = new Set(['users', 'config', 'settings']);
-const INSTALLER = new Set(['appointments', 'serviceCalls', 'stock', 'docs', 'messages', 'chat', 'tasks', 'notifications', 'leaves', 'units', 'activities']);
+const INSTALLER = new Set(['appointments', 'serviceCalls', 'stock', 'stockMoves', 'docs', 'messages', 'chat', 'tasks', 'notifications', 'leaves', 'units', 'activities']);
 // fields an installer's device writes when a job is finished (setStage, flow engine, maintenance visit)
 const INSTALLER_PATCH = { cases: new Set(['stage', 'updatedAt', 'closedAt', 'flow', 'installerIds']), contracts: new Set(['nextVisit']) };
 

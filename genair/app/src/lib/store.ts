@@ -238,7 +238,7 @@ export const useApp = create<AppState>()(
         const db = p.db ? ({ ...current.db, ...p.db } as DB) : current.db
         db.config = { ...defaultConfig(), ...(p.db?.config ?? {}) }
         // מודולים שנוספו אחרי שהדפדפן כבר שמר נתונים: מקבלים את נתוני ההדגמה שלהם
-        for (const c of ['chat', 'leaves', 'suppliers', 'purchaseOrders'] as const) if (!p.db?.[c]?.length) (db[c] as unknown[]) = current.db[c]
+        for (const c of ['chat', 'leaves', 'suppliers', 'purchaseOrders', 'stockMoves'] as const) if (!p.db?.[c]?.length) (db[c] as unknown[]) = current.db[c]
         const settings = { ...defaultSettings, ...(p.settings ?? {}) }
         if (serverMode) {
           // כתובת השרת והמפתחות של המכשיר נשמרים בהגדרות החיבור, כדי שיעברו גם בין שני העותקים

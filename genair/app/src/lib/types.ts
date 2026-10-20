@@ -25,6 +25,8 @@ export interface User {
   functions?: UserFunction[] // [platform] מנהל מחלקה / מנהל פרויקט, בנוסף לתפקיד
   googleCalendarId?: string // [platform] היומן האישי שאליו נכנסים האירועים שלו
   initials?: string // [admin] ראשי תיבות באנגלית למספור תיקים לפי סוכן (DM-0012)
+  priorityAgent?: string // [platform] קוד הסוכן ב-Priority (AGENTS)
+  agentSync?: SyncState // [platform]
 }
 
 export type SyncStatus = 'synced' | 'pending' | 'error' | 'not_synced' | 'disabled'
@@ -83,6 +85,7 @@ export interface Customer {
   temp?: boolean // לקוח זמני, עד שנפתח ב-Priority
   sync: SyncState
   balance?: PriorityBalance // [platform]
+  addressCodes?: Record<ID, string> // [platform] כתובת נוספת -> קוד אתר ב-Priority (CUSTDESTS)
   tags?: string[]
   notes?: string
   createdAt: ISO
@@ -335,6 +338,7 @@ export interface ServiceCall {
   createdAt: ISO
   closedAt?: ISO
   sync?: SyncState // [platform]
+  priorityStatus?: string // [platform] הסטטוס האחרון שנשלח ל-Priority או הגיע ממנו
 }
 
 export interface InstalledUnit {
@@ -351,6 +355,7 @@ export interface InstalledUnit {
   warrantyUntil: string
   lastServiceAt?: string
   nextServiceAt?: string
+  sync?: SyncState // [platform] מספר סידורי ב-Priority (SERNUMBERS)
 }
 
 export type ContractType = 'maintenance' | 'smoke_annual' | 'heating' | 'vrf_service'
@@ -412,6 +417,25 @@ export interface StockEntry {
   min: number
 }
 
+// [platform] תנועת מלאי: העברה בין מחסן לרכב, חלק שנוצל אצל לקוח, החזרה או קבלה מספק.
+// הרישום הזה מה שנשלח ל-Priority כתעודה (העברה בין מחסנים / משלוח ללקוח)
+export interface StockMove {
+  id: ID
+  kind: 'transfer' | 'use' | 'return' | 'receive'
+  itemId: ID
+  qty: number
+  from?: string
+  to?: string
+  at: ISO
+  userId?: ID
+  customerId?: ID
+  serviceCallId?: ID
+  appointmentId?: ID
+  caseId?: ID
+  purchaseOrderId?: ID
+  sync?: SyncState
+}
+
 export interface Task {
   id: ID
   title: string
@@ -470,6 +494,7 @@ export interface Activity {
     | 'portal'
     | 'service'
   text: string
+  sync?: SyncState // [platform] הערה שנשלחה ל-Priority (פעילויות לקוח)
 }
 
 export interface Doc {
@@ -491,6 +516,7 @@ export interface Doc {
   webViewLink?: string // [platform]
   customerVisible?: boolean // [platform] מוצג ללקוח באזור האישי (ברירת מחדל: תיקיית "לקוח")
   source?: 'portal' // [platform] הלקוח העלה מהאזור האישי
+  sync?: SyncState // [platform] צורף ב-Priority
 }
 
 export interface MoneyLine {
@@ -683,6 +709,8 @@ export interface PurchaseOrder {
   sentVia?: 'whatsapp' | 'email' | 'copy'
   moneyLineId?: ID // ההוצאה שנרשמה בתיק כשההזמנה התקבלה
   sync?: SyncState // [platform]
+  priorityStatus?: string // [platform] הסטטוס ב-Priority
+  receipt?: SyncState // [platform] תעודת קבלת הסחורה ב-Priority
 }
 
 // [platform] מצב מנוע הסנכרון עם Priority, כפי שהשרת כותב אותו
@@ -721,6 +749,7 @@ export interface DB {
   leaves: LeaveRequest[] // [collab]
   suppliers: Supplier[] // [admin]
   purchaseOrders: PurchaseOrder[] // [admin]
+  stockMoves: StockMove[] // [platform]
   integrations?: IntegrationState[] // [platform] רק השרת כותב
   config: Config // [admin]
   counters: Record<string, number>

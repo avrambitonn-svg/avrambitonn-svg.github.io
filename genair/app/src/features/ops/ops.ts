@@ -2,8 +2,7 @@
 import { useEffect, useState } from 'react'
 import { app } from '../../lib/store'
 import type {
-  Address, Appointment, AppointmentType, Case, Certification, ChecklistItem, Contact, Contract, Customer, DB, ID, InstalledUnit, LeaveRequest, ServiceCall, Settings, StockEntry, User,
-} from '../../lib/types'
+  Address, Appointment, AppointmentType, Case, Certification, ChecklistItem, Contact, Contract, Customer, DB, ID, InstalledUnit, LeaveRequest, ServiceCall, Settings, StockEntry, User, StockMove } from '../../lib/types'
 import { addDays, daysBetween, date as fmtDate, time as fmtTime, uid, ymd } from '../../lib/format'
 import { dayStatus, loadCalendar, type Calendar, type DayStatus } from '../../lib/integrations/hebcal'
 import { forecast, type DayForecast } from '../../lib/integrations/weather'
@@ -316,16 +315,30 @@ export const openStatuses: ServiceCall['status'][] = ['new', 'assigned', 'schedu
 export const findStock = (stock: StockEntry[], itemId: ID, location: string) => stock.find((x) => x.itemId === itemId && x.location === location)
 
 // שינוי כמות במיקום. אם אין רשומה, נוצרת אחת (מינימום 0). מחזיר את הכמות החדשה.
-export function moveStock(itemId: ID, location: string, delta: number): number {
+// מה התנועה: לאן היא שייכת, כדי שתגיע ל-Priority כתעודה הנכונה
+export type MoveMeta = Omit<StockMove, 'id' | 'itemId' | 'qty' | 'at' | 'from' | 'to' | 'sync'> & { other?: string }
+
+/** משנה את הכמות במיקום ורושם תנועה. בהעברה בין מחסנים: other = מיקום היעד, ונרשמת תנועה אחת לשני הצדדים */
+export function moveStock(itemId: ID, location: string, delta: number, meta?: MoveMeta): number {
   const s = app()
   const e = findStock(s.db.stock, itemId, location)
+  let qty: number
   if (e) {
-    const qty = e.qty + delta
+    qty = e.qty + delta
     s.patch('stock', e.id, { qty })
-    return qty
+  } else {
+    qty = delta
+    s.upsert('stock', { id: uid('st'), itemId, location, qty: delta, min: 0 })
   }
-  s.upsert('stock', { id: uid('st'), itemId, location, qty: delta, min: 0 })
-  return delta
+  if (meta && delta !== 0) {
+    const { other, ...rest } = meta
+    const out = delta < 0
+    s.upsert('stockMoves', {
+      id: uid('sm'), itemId, qty: Math.abs(delta), at: new Date().toISOString(), userId: s.currentUserId, ...rest,
+      ...(meta.kind === 'transfer' ? { from: location, to: other } : out ? { from: location } : { to: location }),
+    })
+  }
+  return qty
 }
 
 export function setStock(itemId: ID, location: string, qty: number, min?: number) {

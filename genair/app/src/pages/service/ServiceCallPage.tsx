@@ -327,7 +327,7 @@ function PartsCard({ call }: { call: ServiceCall }) {
 
   const add = () => {
     if (!itemId || qty <= 0) return
-    const left = moveStock(itemId, loc, -qty)
+    const left = moveStock(itemId, loc, -qty, { kind: 'use', serviceCallId: call.id, customerId: call.customerId })
     const ex = parts.find((p) => p.itemId === itemId)
     const next = ex ? parts.map((p) => (p === ex ? { ...p, qty: p.qty + qty } : p)) : [...parts, { itemId, qty }]
     useApp.getState().patch('serviceCalls', call.id, { partsUsed: next })
@@ -339,7 +339,7 @@ function PartsCard({ call }: { call: ServiceCall }) {
   }
   const remove = (i: number) => {
     const p = parts[i]
-    moveStock(p.itemId, loc, p.qty)
+    moveStock(p.itemId, loc, p.qty, { kind: 'return', serviceCallId: call.id, customerId: call.customerId })
     useApp.getState().patch('serviceCalls', call.id, { partsUsed: parts.filter((_, j) => j !== i) })
     toast.info(`הוחזר ל${loc}`)
   }
