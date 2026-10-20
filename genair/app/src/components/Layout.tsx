@@ -25,7 +25,7 @@ const nav: { group: string; items: NavItem[] }[] = [
   {
     group: 'עבודה שוטפת',
     items: [
-      { to: '/', label: 'דשבורד', icon: <LayoutDashboard size={18} /> },
+      { to: '/', label: 'דשבורד', icon: <LayoutDashboard size={18} />, roles: ['admin', 'office', 'agent', 'engineer'] },
       { to: '/cases', label: 'תיקים ופרויקטים', icon: <FolderKanban size={18} />, roles: ['admin', 'office', 'agent', 'engineer'] },
       { to: '/calendar', label: 'לוח זמנים', icon: <CalendarDays size={18} /> },
       { to: '/tasks', label: 'משימות', icon: <ListChecks size={18} />, count: (s) => s.db.tasks.filter((t) => !t.done && (t.assigneeId === s.currentUserId || t.sharedWith?.includes(s.currentUserId)) && !!t.due && t.due <= new Date().toISOString().slice(0, 10)).length },
@@ -287,11 +287,16 @@ export function Layout() {
       <ChatWidget />
 
       <nav className="mobile-nav no-print">
-        <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}><LayoutDashboard size={20} />ראשי</NavLink>
         {me.role === 'installer' ? (
-          <NavLink to="/field" className={({ isActive }) => (isActive ? 'active' : '')}><HardHat size={20} />היום שלי</NavLink>
+          <>
+            <NavLink to="/field" className={({ isActive }) => (isActive ? 'active' : '')}><HardHat size={20} />היום שלי</NavLink>
+            <NavLink to="/tasks" className={({ isActive }) => (isActive ? 'active' : '')}><ListChecks size={20} />משימות</NavLink>
+          </>
         ) : (
-          <NavLink to="/cases" className={({ isActive }) => (isActive ? 'active' : '')}><FolderKanban size={20} />תיקים</NavLink>
+          <>
+            <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}><LayoutDashboard size={20} />ראשי</NavLink>
+            <NavLink to="/cases" className={({ isActive }) => (isActive ? 'active' : '')}><FolderKanban size={20} />תיקים</NavLink>
+          </>
         )}
         <NavLink to="/calendar" className={({ isActive }) => (isActive ? 'active' : '')}><CalendarDays size={20} />לו״ז</NavLink>
         <NavLink to="/service" className={({ isActive }) => (isActive ? 'active' : '')}><Wrench size={20} />שירות</NavLink>

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import {
   AlertTriangle, ArrowLeft, BadgeCheck, CalendarClock, CheckCircle2, CircleDollarSign, Eye, FileText, HardHat, Inbox, Plus, RefreshCw, ShieldAlert, Wrench, Boxes, PhoneCall, PlayCircle,
 } from 'lucide-react'
@@ -29,7 +29,14 @@ function greeting() {
 
 interface Alert { key: string; icon: React.ReactNode; text: string; sub?: string; to: string; tone: 'danger' | 'warning' | 'info' }
 
+// מתקין לא רואה את מספרי החברה: המסך הראשי שלו הוא "היום שלי"
 export default function Dashboard() {
+  const me = useMe()
+  if (me.role === 'installer') return <Navigate to="/field" replace />
+  return <CompanyDashboard />
+}
+
+function CompanyDashboard() {
   const me = useMe()
   const db = useApp((s) => s.db)
   const nav = useNavigate()
@@ -174,8 +181,7 @@ export default function Dashboard() {
           <div className="sub">{gregDate.format(today)} · {hebDate.format(today)}</div>
         </div>
         <div className="row wrap">
-          {me.role === 'installer' && <Link className="btn primary" to="/field"><HardHat size={17} /> היום שלי</Link>}
-          {me.role !== 'installer' && <Link className="btn primary" to="/cases/new"><Plus size={17} /> תיק חדש</Link>}
+          <Link className="btn primary" to="/cases/new"><Plus size={17} /> תיק חדש</Link>
           <button className="btn" onClick={() => startDemo()}><PlayCircle size={17} /> הדגמה מודרכת</button>
           <Link className="btn" to="/service"><Wrench size={17} /> קריאת שירות</Link>
         </div>
@@ -190,33 +196,31 @@ export default function Dashboard() {
         <KpiTile icon={<Wrench size={18} />} tone={stats.urgent ? 'danger' : 'warning'} label="קריאות שירות פתוחות" value={stats.service} sub={stats.urgent ? `${stats.urgent} דחופות` : 'אין דחופות'} spark={trends.serviceByMonth} onClick={() => nav('/service')} />
       </div>
 
-      {me.role !== 'installer' && (
-        <div className="grid dash-hero stagger" style={{ '--r': 2 } as React.CSSProperties}>
-          <Card title={<div><h2>הכנסות ורווח גולמי</h2><div className="tiny muted">12 החודשים האחרונים · לפי תאריך אישור ההצעה · לפני מע״מ</div></div>} actions={<Link className="btn sm ghost" to="/reports">לכל הדוחות</Link>} pad>
-            <div className="dash-hero-fig">
-              <div>
-                <div className="tiny muted">מתחילת השנה</div>
-                <div className="dash-big"><CountUp value={trends.ytd} format={money} /></div>
-                <Trend cur={trends.ytd} prev={trends.ytdPrev} suffix="לעומת התקופה המקבילה אשתקד" />
-              </div>
-              <Legend line series={[{ key: 'rev', label: 'הכנסות', color: 'var(--brand)' }, { key: 'profit', label: 'רווח גולמי', color: 'var(--violet)' }]} />
+      <div className="grid dash-hero stagger" style={{ '--r': 2 } as React.CSSProperties}>
+        <Card title={<div><h2>הכנסות ורווח גולמי</h2><div className="tiny muted">12 החודשים האחרונים · לפי תאריך אישור ההצעה · לפני מע״מ</div></div>} actions={<Link className="btn sm ghost" to="/reports">לכל הדוחות</Link>} pad>
+          <div className="dash-hero-fig">
+            <div>
+              <div className="tiny muted">מתחילת השנה</div>
+              <div className="dash-big"><CountUp value={trends.ytd} format={money} /></div>
+              <Trend cur={trends.ytd} prev={trends.ytdPrev} suffix="לעומת התקופה המקבילה אשתקד" />
             </div>
-            <AreaChart partialLast labels={months.map((m) => m.label)} format={money} axisFormat={compactMoney} height={230}
-              series={[{ key: 'rev', label: 'הכנסות', color: 'var(--brand)' }, { key: 'profit', label: 'רווח גולמי', color: 'var(--violet)' }]}
-              data={[trends.revenue, trends.profit]} />
-          </Card>
-          <Card title={<div><h2>צנרת מכירות</h2><div className="tiny muted">תיקים פתוחים לפי שלב</div></div>} actions={<Link className="btn sm ghost" to="/cases">לתיקים</Link>} pad>
-            <BarList ramp labelWidth={104} rows={funnel.map((f) => ({ key: f.st, label: stageLabel[f.st], value: f.n, display: <span>{f.n}{f.v > 0 && <span className="tiny muted"> · {compactMoney(f.v)}</span>}</span> }))} />
-            <div className="dash-pipe-foot">
-              <Ring value={trends.close90} label="יחס סגירה" sub={`${trends.won90} מתוך ${trends.decided90} הצעות · 90 יום`} />
-              <div>
-                <div className="tiny muted">שווי הצנרת</div>
-                <div className="strong" style={{ fontSize: 20 }}><CountUp value={pipeValue} format={money} /></div>
-              </div>
+            <Legend line series={[{ key: 'rev', label: 'הכנסות', color: 'var(--brand)' }, { key: 'profit', label: 'רווח גולמי', color: 'var(--violet)' }]} />
+          </div>
+          <AreaChart partialLast labels={months.map((m) => m.label)} format={money} axisFormat={compactMoney} height={230}
+            series={[{ key: 'rev', label: 'הכנסות', color: 'var(--brand)' }, { key: 'profit', label: 'רווח גולמי', color: 'var(--violet)' }]}
+            data={[trends.revenue, trends.profit]} />
+        </Card>
+        <Card title={<div><h2>צנרת מכירות</h2><div className="tiny muted">תיקים פתוחים לפי שלב</div></div>} actions={<Link className="btn sm ghost" to="/cases">לתיקים</Link>} pad>
+          <BarList ramp labelWidth={104} rows={funnel.map((f) => ({ key: f.st, label: stageLabel[f.st], value: f.n, display: <span>{f.n}{f.v > 0 && <span className="tiny muted"> · {compactMoney(f.v)}</span>}</span> }))} />
+          <div className="dash-pipe-foot">
+            <Ring value={trends.close90} label="יחס סגירה" sub={`${trends.won90} מתוך ${trends.decided90} הצעות · 90 יום`} />
+            <div>
+              <div className="tiny muted">שווי הצנרת</div>
+              <div className="strong" style={{ fontSize: 20 }}><CountUp value={pipeValue} format={money} /></div>
             </div>
-          </Card>
-        </div>
-      )}
+          </div>
+        </Card>
+      </div>
 
       <div className="grid g-side stagger" style={{ '--r': 3 } as React.CSSProperties}>
         <div className="col" style={{ gap: 16 }}>
@@ -288,7 +292,7 @@ export default function Dashboard() {
         <div className="col" style={{ gap: 16 }}>
           <TasksCard />
 
-          {me.role !== 'installer' && trends.byType.length > 0 && (
+          {trends.byType.length > 0 && (
             <Card title={<div><h2>פניות לפי סוג פרויקט</h2><div className="tiny muted">12 החודשים האחרונים</div></div>} pad>
               <Donut parts={trends.byType} centerLabel="פניות" size={150} />
             </Card>
