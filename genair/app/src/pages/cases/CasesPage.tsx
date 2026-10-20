@@ -9,6 +9,8 @@ import { totals } from '../../lib/quote'
 import { setStage } from '../../lib/actions'
 import type { Case, CaseStage, ProjectType, Quote } from '../../lib/types'
 
+const updatedText = (d: number) => (d <= 0 ? 'עודכן היום' : d === 1 ? 'עודכן אתמול' : `עודכן לפני ${d} ימים`)
+
 export default function CasesPage() {
   const db = useApp((s) => s.db)
   const me = useMe()
@@ -127,15 +129,15 @@ export default function CasesPage() {
                     >
                       <div className="row between">
                         <span className="tiny muted num">{k.number}</span>
-                        {k.priority !== 'normal' && <Badge tone="danger">{k.priority === 'urgent' ? 'דחוף' : 'עדיפות'}</Badge>}
+                        {k.priority !== 'normal' && <Badge tone={k.priority === 'urgent' ? 'danger' : 'warning'}>{k.priority === 'urgent' ? 'דחוף' : 'עדיפות גבוהה'}</Badge>}
                       </div>
                       <div className="strong small" style={{ lineHeight: 1.35 }}>{k.title}</div>
                       <div className="tiny muted">{c?.name} · {projectTypeLabel[k.projectType]}</div>
                       <div className="row between mt8">
-                        <span className="small strong num">{qv ? money(totals(qv).net) : '—'}</span>
+                        {qv ? <span className="small strong num" title="סכום ההצעה האחרונה, לפני מע״מ">{money(totals(qv).net)}</span> : <span className="tiny muted">אין עדיין הצעה</span>}
                         <span className="row" style={{ gap: 6 }}>
                           {qv?.ai && <span title="טיוטה מ-AI"><Sparkles size={14} color="var(--brand)" /></span>}
-                          <span className="tiny muted">{daysBetween(k.updatedAt, new Date())} ימים</span>
+                          <span className="tiny muted" title="מתי התיק עודכן לאחרונה">{updatedText(daysBetween(k.updatedAt, new Date()))}</span>
                           {a && <Avatar user={a} />}
                         </span>
                       </div>
