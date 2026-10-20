@@ -95,3 +95,23 @@
 - `$count=true` לא מחזיר `@odata.count`; `/$count` כן עובד (2000 לקוחות בדמו) אבל איטי, ולכן `/api/priority/test` מסתפק ב-`$top=5`.
 - שגיאה מפריוריטי מגיעה בפורמט `{"error":{"code":"400","message":"..."}}` (OData) או `{"FORM":{"InterfaceErrors":{"text":"..."}}}` (שגיאות טופס בכתיבה). השרת מחזיר את ההודעה ב-`error.details.message`.
 - כתיבה **לא נבדקה** מול הדמו (הוא משותף לכולם). ה-payload-ים נבדקו בבדיקות יחידה בלבד. בהתקנת live: לבדוק פעם ראשונה עם `?dryRun=1`, ואז בכתיבה אמיתית על לקוח בדיקה.
+
+## סנכרון אוטומטי: מסכים נוספים
+
+השדות נלקחו מה-`$metadata` של הדמו. הקריאות (הזמנות, חשבוניות, קבלות, יתרות, מלאי) נבדקו מול הדמו ב-20.10.2026. הכתיבות נבדקו בבדיקות יחידה בלבד.
+
+| מסך | כיוון | שדות | הערות |
+|---|---|---|---|
+| `CUSTPERSONNEL_SUBFORM` (מפתח `NAME`,`FIRM`) | → | `NAME`, `CELLPHONE`, `EMAIL`, `POSITIONDES` | נוצר תחת הלקוח; מקושר לפי שם או טלפון |
+| `CPROF` | → | `CUSTNAME`, `REFERENCE` (מספר ההצעה), `DETAILS`, שורות | עריכה: `PATCH` לכותרת ומחיקה והוספה של השורות (`KLINE`) |
+| `ORDERS` | ⇄ | יציאה: כמו `CPROF` + `CPROFNUM`. חזרה: `ORDSTATUSDES`, `BOOLCLOSED`, `TOTPRICE` | משיכה לפי `STATUSDATE` |
+| `SUPPLIERS` | → | `SUPDES`, `PHONE`, `EMAIL`, `ADDRESS`, `VATNUM` | קישור לפי ח״פ או שם |
+| `PORDERS` + `PORDERITEMS_SUBFORM` | → | `SUPNAME`, `DETAILS` (מספר ההזמנה), שורות `PARTNAME`, `TQUANT`, `PRICE`, `PDES` | |
+| `DOCUMENTS_Q` | → | `CUSTNAME`, `REFERENCE`, `SERNUM`, `PHONENUM`, `DOCTEXT_Q_SUBFORM.TEXT` | סטטוסים לא נשלחים (קודים משתנים בין התקנות) |
+| `AINVOICES`, `CINVOICES`, `EINVOICES` | ← | `IVNUM`, `CUSTNAME`, `IVDATE`, `ORDNAME`, `TOTPRICE`, `DETAILS` | רק `FINAL eq 'Y'`. חשבונית מס קבלה נרשמת גם כחשבונית וגם כתשלום |
+| `TINVOICES` | ← | כמו למעלה | קבלות. התיק לפי `ORDNAME`, אחרת התיק הפתוח האחרון של הלקוח |
+| `OBLIGO` | ← | `OBLIGO`, `IV_DEBIT`, `ACC_DEBIT`, `ORD_DEBIT` | |
+| `LOGPART` | ← | `PARTNAME`, `BASEPLPRICE`, `COST`, `UDATE` | `UDATE` כולל שעה, ולכן המשיכה לפי זמן מדויק |
+| `PARTBAL` | ← | `PARTNAME`, `WARHSNAME`, `BALANCE` | רק מחסנים ב-`PRIORITY_WAREHOUSES` |
+
+לרוב המסמכים אין שדה "עודכן לאחרונה" ב-API (יש ב-`LOGPART`, `SERNUMBERS`, `ACCOUNTS`). לכן המנוע מושך לפי תאריך המסמך או הסטטוס עם חפיפה (יום להזמנות, 14 יום לחשבוניות וקבלות, 120 יום בסבב מלא), ומדלג על מה שכבר ראה לפי hash.

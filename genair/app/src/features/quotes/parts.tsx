@@ -1,7 +1,7 @@
 // רכיבים קטנים שמשותפים לעורך ההצעה ולחלון ה-AI
 import { useEffect, useRef, useState } from 'react'
 import { Bot, Calculator, CircleHelp, Lightbulb } from 'lucide-react'
-import type { AiMeta, SyncState } from '../../lib/types'
+import type { AiMeta, PriorityOrder, SyncState } from '../../lib/types'
 import { Badge } from '../../components/ui'
 import { syncLabel, syncTone } from '../../lib/labels'
 import { dateTime } from '../../lib/format'
@@ -61,13 +61,14 @@ export function SourceBadge({ meta }: { meta: Pick<AiMeta, 'source' | 'model'> }
   )
 }
 
-export function PrioritySyncBadge({ sync }: { sync: SyncState }) {
+export function PrioritySyncBadge({ sync, order }: { sync: SyncState; order?: PriorityOrder }) {
   const tip = [sync.priorityId && `מספר ב-Priority: ${sync.priorityId}`, sync.lastSync && `עודכן ${dateTime(sync.lastSync)}`, sync.error].filter(Boolean).join(' · ')
   return (
     <span title={tip || undefined}>
       <Badge tone={syncTone[sync.status]} dot>
         {syncLabel[sync.status]} ב-Priority{sync.priorityId && <> · <span className="ltr">{sync.priorityId}</span></>}
       </Badge>
+      {order?.status && <> <Badge tone={order.closed ? 'success' : 'brand'} >{order.status}{order.closed ? ' · סגורה' : ''}</Badge></>}
     </span>
   )
 }

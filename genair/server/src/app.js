@@ -9,6 +9,7 @@ import * as auth from './auth.js';
 import * as db from './dbroutes.js';
 import * as files from './files.js';
 import * as portal from './portal.js';
+import * as psync from './psync/index.js';
 import { getStore } from './db/index.js';
 
 async function dbHealth(cfg) {
@@ -31,6 +32,7 @@ async function health({ cfg }) {
       features: {
         priority: p.mode === 'off' || p.configured ? p.mode : 'off',
         priorityWrite: Boolean(p.configured && p.allowWrite),
+        prioritySync: Boolean(psync.currentEngine()),
         ai: Boolean(cfg.ai.apiKey),
         whatsapp: Boolean(cfg.whatsapp.token && cfg.whatsapp.phoneNumberId),
         google: google.googleFeatures(cfg),
@@ -40,7 +42,7 @@ async function health({ cfg }) {
   };
 }
 
-// access: 'public'      - no credentials (health, Meta's webhook, login, the customer portal, the lead form)
+// access: 'public'      - no credentials (health, Meta's and Priority's webhooks, login, the customer portal, the lead form)
 //         'integration' - the session token or x-app-token (open while neither APP_TOKEN nor any user exists)
 //         'session'     - a signed-in user (the route checks it itself, with the role it needs)
 const ROUTES = [
@@ -52,6 +54,9 @@ const ROUTES = [
   { method: 'GET', path: '/api/priority/pricelists', handle: priority.listPricelists },
   { method: 'POST', path: '/api/priority/quotes', handle: priority.createQuote },
   { method: 'POST', path: '/api/priority/orders', handle: priority.createOrder },
+  { method: 'GET', path: '/api/priority/sync/status', handle: psync.syncStatus, access: 'session' },
+  { method: 'POST', path: '/api/priority/sync/run', handle: psync.syncRun, access: 'session' },
+  { method: 'POST', path: '/api/priority/webhook', handle: psync.syncWebhook, access: 'public' },
   { method: 'POST', path: '/api/ai/messages', handle: aiMessages },
   { method: 'POST', path: '/api/whatsapp/send', handle: whatsapp.sendWhatsapp },
   { method: 'GET', path: '/api/whatsapp/webhook', handle: whatsapp.webhookVerify, access: 'public' },

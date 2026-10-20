@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { BadgeCheck, FolderPlus, MessageCircle, Pencil, RefreshCw, ShieldCheck, Wrench } from 'lucide-react'
-import { useApp } from '../../lib/store'
+import { useApp, useMe } from '../../lib/store'
 import { Badge, Card, Empty, Field, Modal, toast } from '../../components/ui'
 import { AlertTriangle } from 'lucide-react'
 import { QuickContact } from '../../components/extras'
@@ -16,6 +16,8 @@ import { convertToPermanent, missingDetails } from './customerUtil'
 import './customers.css'
 
 export default function CustomerPage() {
+  const me = useMe()
+  const seeMoney = me.role === 'admin' || me.role === 'office'
   const { id } = useParams()
   const nav = useNavigate()
   const db = useApp((s) => s.db)
@@ -70,6 +72,11 @@ export default function CustomerPage() {
         <div className="card stat"><div className="grow"><div className="lbl">הכנסה מאושרת</div><div className="val">{money(revenue)}</div></div></div>
         <div className="card stat"><div className="grow"><div className="lbl">יחידות מותקנות</div><div className="val">{units.length}</div></div></div>
         <div className="card stat"><div className="grow"><div className="lbl">קריאות שירות</div><div className="val">{calls.length}</div></div></div>
+        {c.balance && seeMoney && (
+          <div className="card stat" title={`חשבוניות פתוחות ${money(c.balance.invoices)} · בכרטסת ${money(c.balance.account)} · הזמנות פתוחות ${money(c.balance.orders)}`}>
+            <div className="grow"><div className="lbl">יתרה ב-Priority</div><div className={`val ${c.balance.account > 0 ? 'txt-warning' : ''}`}>{money(c.balance.account)}</div><div className="tiny muted">אובליגו {money(c.balance.obligo)} · {relative(c.balance.at)}</div></div>
+          </div>
+        )}
       </div>
 
       <div className="grid g-side">

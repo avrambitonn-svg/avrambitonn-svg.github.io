@@ -65,6 +65,33 @@ export function priorityConfig(env = process.env) {
   return { mode, configured, allowWrite, serviceRoot, user, password, appId, appKey };
 }
 
+// Automatic two-way sync with Priority (server-side worker, needs the shared database).
+// PRIORITY_SYNC=on starts it. Streams can be narrowed with PRIORITY_SYNC_STREAMS (comma list).
+export const SYNC_STREAMS = ['customers', 'contacts', 'quotes', 'orders', 'suppliers', 'purchasing', 'service', 'invoices', 'receipts', 'items', 'balances', 'stock'];
+
+export function prioritySyncConfig(env = process.env) {
+  const num = (v, d, min) => (Number(v) >= min ? Number(v) : d);
+  const streams = list(env.PRIORITY_SYNC_STREAMS, SYNC_STREAMS.join(',')).filter((s) => SYNC_STREAMS.includes(s));
+  // "Main=מחסן ראשי,V12=רכב — רון": which Priority warehouses feed which stock location in the app
+  const warehouses = Object.fromEntries(
+    list(env.PRIORITY_WAREHOUSES, '')
+      .map((pair) => pair.split('=').map((s) => s.trim()))
+      .filter(([k, v]) => k && v),
+  );
+  return {
+    enabled: bool(env.PRIORITY_SYNC),
+    streams: new Set(streams),
+    hotSec: num(env.PRIORITY_SYNC_HOT_SEC, 60, 15),
+    warmSec: num(env.PRIORITY_SYNC_WARM_SEC, 600, 60),
+    pushDebounceMs: num(env.PRIORITY_SYNC_DEBOUNCE_MS, 1500, 0),
+    webhookSecret: str(env.PRIORITY_WEBHOOK_SECRET),
+    genericPart: str(env.PRIORITY_GENERIC_PART) || '000',
+    importCustomers: str(env.PRIORITY_IMPORT_CUSTOMERS).toLowerCase() || 'new', // new | all | off
+    importItems: bool(env.PRIORITY_IMPORT_ITEMS),
+    warehouses,
+  };
+}
+
 // Shared database (users, login, sync). file = JSON file under DATA_DIR, memory = in-process only
 // (tests), off = integration-only server (the default on Vercel, where the file system is read-only).
 export function dbConfig(env = process.env) {
@@ -90,6 +117,7 @@ export function loadConfig(env = process.env) {
     appToken: str(env.APP_TOKEN),
     db: dbConfig(env),
     priority,
+    prioritySync: prioritySyncConfig(env),
     ai: {
       apiKey: str(env.ANTHROPIC_API_KEY),
       allowedModels: list(env.AI_ALLOWED_MODELS, DEFAULT_AI_MODELS),

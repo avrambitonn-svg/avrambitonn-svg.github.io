@@ -5,6 +5,8 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { handler } from './app.js';
 import { flushAll } from './db/index.js';
+import { loadConfig } from './config.js';
+import { startPrioritySync, stopPrioritySync } from './psync/index.js';
 
 // Load genair/server/.env if present (real environment variables win).
 const envFile = fileURLToPath(new URL('../.env', import.meta.url));
@@ -38,11 +40,15 @@ if (needsProxyRespawn()) {
   });
   server.requestTimeout = 330_000; // AI calls may legitimately take minutes.
   server.keepAliveTimeout = 65_000; // longer than the load balancers in front (Render, Fly, nginx)
-  server.listen(port, host, () => console.log(`genair-server listening on http://localhost:${port}`));
+  server.listen(port, host, () => {
+    console.log(`genair-server listening on http://localhost:${port}`);
+    startPrioritySync(loadConfig()).catch((e) => console.error('[priority-sync] did not start:', e?.message ?? e));
+  });
   // Write the shared database before exiting; open SSE / long-poll connections are cut.
   const stop = async () => {
     server.close();
     server.closeAllConnections?.();
+    await stopPrioritySync();
     await flushAll();
     process.exit(0);
   };

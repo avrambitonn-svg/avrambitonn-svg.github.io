@@ -15,6 +15,7 @@ test('GET /api/health reports version and features', async (t) => {
   assert.deepEqual(r.json.features, {
     priority: 'demo',
     priorityWrite: false,
+    prioritySync: false,
     ai: false,
     whatsapp: false,
     google: { calendar: false, drive: false },

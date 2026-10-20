@@ -140,7 +140,7 @@ export default function QuoteEditor() {
           <div className="qe-sub">
             <Badge tone={expired && !locked ? 'warning' : quoteStatusTone[q.status]} dot>{expired && !locked ? 'פג תוקף' : quoteStatusLabel[q.status]}</Badge>
             <Badge tone="muted">גרסה {q.version}</Badge>
-            <PrioritySyncBadge sync={q.sync} />
+            <PrioritySyncBadge sync={q.sync} order={q.priorityOrder} />
             <span className="sep">|</span>
             {customer && <Link to={`/customers/${customer.id}`}>{customer.name}</Link>}
             {address && <span className="small muted">{addressText(address)}</span>}

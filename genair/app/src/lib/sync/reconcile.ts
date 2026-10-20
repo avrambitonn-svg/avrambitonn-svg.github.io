@@ -6,7 +6,7 @@ import type { Case, Quote } from '../types'
 import { nowIso, uid, ymd } from '../format'
 import { totals } from '../quote'
 import { commissionFor } from '../commission'
-import { pushCustomer, pushOrder } from '../integrations/priority'
+import { pushCustomer, pushOrder, serverSync } from '../integrations/priority'
 import { createDriveFolder } from '../integrations/google'
 import { onCaseCreated, onStageChanged } from '../../features/flow/engine'
 import { bridge } from './bridge'
@@ -40,6 +40,7 @@ function quoteFollowups(q: Quote) {
   }
   onStageChanged(k, (q.approvedFromStage ?? 'quote') as Case['stage'], 'approved')
   const cust = s.db.customers.find((c) => c.id === k.customerId)
+  if (serverSync()) return
   if (cust?.sync.priorityId) void pushOrder(q, cust.sync.priorityId)
   else s.patch('quotes', q.id, { sync: { status: 'pending' } })
 }

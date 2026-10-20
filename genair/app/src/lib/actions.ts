@@ -4,7 +4,7 @@ import type { Appointment, AppointmentType, Case, CaseStage, Contract, Customer,
 import { addDays, addMonths, nowIso, token, uid, ymd } from './format'
 import { stageLabel } from './labels'
 import { defaultTerms, totals } from './quote'
-import { pushCustomer, pushOrder } from './integrations/priority'
+import { pushCustomer, pushOrder, serverSync } from './integrations/priority'
 import { createDriveFolder, pushAppointment } from './integrations/google'
 import { nextCaseNumber } from './numbering'
 import { commissionFor } from './commission'
@@ -135,6 +135,8 @@ export function approveQuote(quoteId: ID, signature: Signature, deposit?: Quote[
     })
   }
   const cust = s.db.customers.find((c) => c.id === k?.customerId)
+  // כשמנוע הסנכרון בשרת פועל, הוא פותח את ההזמנה בעצמו
+  if (serverSync()) return
   if (cust?.sync.priorityId) void pushOrder(approved, cust.sync.priorityId)
   else s.patch('quotes', q.id, { sync: { status: 'pending' } })
 }

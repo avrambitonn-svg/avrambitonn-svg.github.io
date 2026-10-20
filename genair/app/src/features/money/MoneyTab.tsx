@@ -1,7 +1,7 @@
 // כספי התיק ("ניהול פיננסי"): תקציב מול הוצאות, עמלות ותשלומים, מול ההצעה המאושרת
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { BadgePercent, Banknote, Calculator, Coins, Download, LayoutGrid, List, Pencil, PiggyBank, Plus, Receipt, Scale, Trash2, TrendingUp, Wallet } from 'lucide-react'
+import { BadgePercent, Banknote, Calculator, Coins, Download, FileText, LayoutGrid, List, Pencil, PiggyBank, Plus, Receipt, RefreshCw, Scale, Trash2, TrendingUp, Wallet } from 'lucide-react'
 import { useApp } from '../../lib/store'
 import { Badge, Callout, Card, Confirm, Empty, Field, Modal, Progress, Stat, toast } from '../../components/ui'
 import { Dot } from '../case/controls'
@@ -15,11 +15,14 @@ import '../../features/ops/ops.css'
 import './money.css'
 
 type Kind = MoneyLine['kind']
-const kindLabel: Record<Kind, string> = { budget: 'סעיף תקציב', expense: 'הוצאה', commission: 'עמלה', payment: 'תשלום מהלקוח' }
-const sectionTitle: Record<Kind, string> = { budget: 'סעיפי תקציב', expense: 'הוצאות', commission: 'עמלות', payment: 'תשלומים מהלקוח' }
-const sectionIcon: Record<Kind, ReactNode> = { budget: <PiggyBank size={17} />, expense: <Receipt size={17} />, commission: <BadgePercent size={17} />, payment: <Banknote size={17} /> }
+const kindLabel: Record<Kind, string> = { budget: 'סעיף תקציב', expense: 'הוצאה', commission: 'עמלה', payment: 'תשלום מהלקוח', invoice: 'חשבונית' }
+const sectionTitle: Record<Kind, string> = { budget: 'סעיפי תקציב', expense: 'הוצאות', commission: 'עמלות', payment: 'תשלומים מהלקוח', invoice: 'חשבוניות מ-Priority' }
+const sectionIcon: Record<Kind, ReactNode> = { budget: <PiggyBank size={17} />, expense: <Receipt size={17} />, commission: <BadgePercent size={17} />, payment: <Banknote size={17} />, invoice: <FileText size={17} /> }
 const VIEW_KEY = 'genair-money-view'
 const isPaid = (l: MoneyLine) => l.status === 'paid'
+// חשבוניות וקבלות שהגיעו מ-Priority משתנות שם בלבד
+const fromPriority = (l: MoneyLine) => l.source === 'priority'
+const PriorityTag = () => <span className="badge brand nowrap" title="הגיע מ-Priority ומתעדכן משם"><RefreshCw size={11} /> Priority</span>
 
 function readView(): 'table' | 'cards' {
   try {
@@ -64,6 +67,7 @@ export function MoneyTab({ caseId }: { caseId: ID }) {
   const commissions = sum(by('commission'))
   const pending = sum(by('commission').filter((l) => !isPaid(l)))
   const paid = sum(by('payment'))
+  const invoiced = sum(by('invoice'))
   const util = budget ? (expenses / budget) * 100 : 0
   const left = budget - expenses
   // רווח: מההצעה המאושרת פחות הוצאות (או התקציב, אם עוד אין הוצאות) ועמלות
@@ -95,6 +99,7 @@ export function MoneyTab({ caseId }: { caseId: ID }) {
         <Stat icon={<TrendingUp size={20} />} tone={profit >= 0 ? 'success' : 'danger'} label={expenses ? 'רווח' : 'רווח צפוי'} value={<span className="mv">{qt ? pct(profitPct) : '—'}</span>} delta={qt ? money(profit) : 'אין הצעה מאושרת'} />
         <Stat icon={<BadgePercent size={20} />} tone="violet" label="עמלות ממתינות" value={<span className="mv">{money(pending)}</span>} delta={commissions ? `מתוך ${money(commissions)}` : 'אין עמלות'} />
         <Stat icon={<Wallet size={20} />} tone={due > 0 ? 'warning' : 'success'} label="שולם / יתרה לגבייה" value={<span className="mv">{money(paid)}</span>} delta={qt ? (due > 0 ? `נשאר לגבות ${money(due)}` : 'שולם במלואו') : 'אין הצעה מאושרת'} />
+        {invoiced > 0 && <Stat icon={<FileText size={20} />} tone="brand" label="חויב ב-Priority" value={<span className="mv">{money(invoiced)}</span>} delta={`${by('invoice').length} חשבוניות`} />}
       </div>
 
       <div className="row between wrap money-bar">
@@ -113,13 +118,14 @@ export function MoneyTab({ caseId }: { caseId: ID }) {
         </div>
       </div>
 
-      {(['budget', 'expense', 'commission', 'payment'] as Kind[]).map((kind) => {
+      {(['budget', 'expense', 'commission', 'payment', 'invoice'] as Kind[]).map((kind) => {
         const list = by(kind)
+        if (kind === 'invoice' && !list.length) return null
         return (
           <Card
             key={kind}
             title={<div className="row" style={{ gap: 8 }}><span className="money-ico">{sectionIcon[kind]}</span><h2>{sectionTitle[kind]}</h2><Badge tone="muted">{list.length}</Badge><span className="small strong num">{money(sum(list))}</span></div>}
-            actions={<button className="btn sm" onClick={() => setEdit({ kind })}><Plus size={15} /> {kind === 'budget' ? 'סעיף' : kind === 'expense' ? 'הוצאה' : kind === 'commission' ? 'עמלה' : 'תשלום'}</button>}
+            actions={kind === 'invoice' ? <span className="tiny muted">מתעדכן אוטומטית מ-Priority</span> : <button className="btn sm" onClick={() => setEdit({ kind })}><Plus size={15} /> {kind === 'budget' ? 'סעיף' : kind === 'expense' ? 'הוצאה' : kind === 'commission' ? 'עמלה' : 'תשלום'}</button>}
           >
             {kind === 'commission' && suggested && !hasRuleCommission && (
               <div className="card-body" style={{ paddingBottom: 0 }}>
@@ -197,17 +203,19 @@ function LinesTable({ kind, list, total, budget, ctx, onEdit, onDelete, onToggle
                 {kind === 'commission' && <td className="small nowrap">{agent?.name ?? '—'}</td>}
                 <td className="small">{l.description}{po && <> <Link to={`/suppliers?po=${po.id}`} className="badge brand ltr">{po.number}</Link></>}</td>
                 {(kind === 'expense' || kind === 'payment') && <td className="small hide-mobile">{optLabel(cfg.paymentMethods, l.method) || '—'}</td>}
-                {kind === 'commission' && <td><button className={`badge ${isPaid(l) ? 'success' : 'warning'} money-status`} onClick={() => onTogglePaid(l)} title="החלפת סטטוס">{isPaid(l) ? 'שולם' : 'ממתין'}</button></td>}
+                {kind === 'commission' && <td><button className={`badge ${isPaid(l) ? 'success' : 'warning'} money-status`} onClick={() => onTogglePaid(l)} disabled={fromPriority(l)} title="החלפת סטטוס">{isPaid(l) ? 'שולם' : 'ממתין'}</button></td>}
                 {kind === 'budget' && <td className="small hide-mobile num" style={{ minWidth: 120 }}><span className="row" style={{ gap: 6 }}><span className="grow"><Progress value={budget ? (l.amount / budget) * 100 : 0} /></span>{budget ? pct((l.amount / budget) * 100) : ''}</span></td>}
                 <td className="end num small strong nowrap">{money(l.amount)}</td>
                 <td className="end nowrap">
-                  <button className="icon-btn sm" onClick={() => onEdit(l)} aria-label="עריכה"><Pencil size={15} /></button>
-                  <button className="icon-btn sm" onClick={() => onDelete(l)} aria-label="מחיקה"><Trash2 size={15} /></button>
+                  {fromPriority(l) ? <PriorityTag /> : <>
+                    <button className="icon-btn sm" onClick={() => onEdit(l)} aria-label="עריכה"><Pencil size={15} /></button>
+                    <button className="icon-btn sm" onClick={() => onDelete(l)} aria-label="מחיקה"><Trash2 size={15} /></button>
+                  </>}
                 </td>
               </tr>
             )
           })}
-          <tr className="money-total"><td colSpan={kind === 'expense' ? 5 : kind === 'budget' ? 3 : kind === 'commission' ? 4 : 3} className="small strong">סה״כ</td><td className="end num strong nowrap">{money(total)}</td><td /></tr>
+          <tr className="money-total"><td colSpan={kind === 'expense' ? 5 : kind === 'budget' ? 3 : kind === 'commission' ? 4 : kind === 'invoice' ? 2 : 3} className="small strong">סה״כ</td><td className="end num strong nowrap">{money(total)}</td><td /></tr>
         </tbody>
       </table>
     </div>
@@ -229,10 +237,12 @@ function LineCard({ l, ctx, onEdit, onDelete, onTogglePaid }: { l: MoneyLine; ct
       </div>
       <div className="row between mt8">
         {l.kind === 'commission' ? <button className={`badge ${isPaid(l) ? 'success' : 'warning'} money-status`} onClick={onTogglePaid}>{isPaid(l) ? 'שולם' : 'ממתין'}</button> : <span />}
-        <span className="row" style={{ gap: 2 }}>
-          <button className="icon-btn sm" onClick={onEdit} aria-label="עריכה"><Pencil size={15} /></button>
-          <button className="icon-btn sm" onClick={onDelete} aria-label="מחיקה"><Trash2 size={15} /></button>
-        </span>
+        {fromPriority(l) ? <PriorityTag /> : (
+          <span className="row" style={{ gap: 2 }}>
+            <button className="icon-btn sm" onClick={onEdit} aria-label="עריכה"><Pencil size={15} /></button>
+            <button className="icon-btn sm" onClick={onDelete} aria-label="מחיקה"><Trash2 size={15} /></button>
+          </span>
+        )}
       </div>
     </div>
   )

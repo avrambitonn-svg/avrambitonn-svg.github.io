@@ -3,6 +3,7 @@
 // installer: field work only (appointments, service calls, stock, docs, messages, chat, tasks,
 // notifications, leaves, units, activity log), plus the few case / contract fields that closing a job updates.
 import { ROLES } from './auth.js';
+import { SYSTEM } from './db/store.js';
 
 const MANAGERS = new Set(['admin', 'office']);
 const MANAGER_ONLY = new Set(['users', 'config', 'settings']);
@@ -20,7 +21,10 @@ export function checkOp(op, current, user, store) {
   const role = user?.role;
   const c = op.collection;
   const manager = MANAGERS.has(role);
+  if (SYSTEM.has(c)) return 'server_only';
   if (MANAGER_ONLY.has(c) && !manager) return 'manager_only';
+  // invoices and receipts that came from Priority are Priority's: they change there, not here
+  if (c === 'money' && current?.source === 'priority') return 'priority_owned';
 
   if (c === 'users') return checkUser(op, current, user, store);
 

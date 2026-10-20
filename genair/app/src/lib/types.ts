@@ -35,6 +35,28 @@ export interface SyncState {
   lastSync?: ISO
   error?: string
   attempts?: number // ניסיונות שנכשלו מאז הסנכרון האחרון שהצליח
+  hash?: string // [platform] מה נשלח ל-Priority בפעם האחרונה (מנוע הסנכרון בשרת)
+  remoteHash?: string // [platform] איך הרשומה נראתה ב-Priority בפעם האחרונה
+  key?: { NAME: string; FIRM?: number } // [platform] מפתח איש הקשר ב-Priority
+}
+
+// [platform] יתרת הלקוח ב-Priority (אובליגו), נמשכת אוטומטית
+export interface PriorityBalance {
+  obligo: number
+  invoices: number
+  account: number
+  orders: number
+  at: ISO
+}
+
+// [platform] מצב ההזמנה ב-Priority, נמשך אוטומטית
+export interface PriorityOrder {
+  number: string
+  status?: string
+  closed?: boolean
+  total?: number
+  statusAt?: ISO
+  at: ISO
 }
 
 export interface Address {
@@ -60,6 +82,7 @@ export interface Customer {
   addresses: Address[]
   temp?: boolean // לקוח זמני, עד שנפתח ב-Priority
   sync: SyncState
+  balance?: PriorityBalance // [platform]
   tags?: string[]
   notes?: string
   createdAt: ISO
@@ -74,6 +97,7 @@ export interface Contact {
   email?: string
   primary?: boolean
   fromCaseId?: ID // [admin] נוצר מתוך תיק (כרטיס הלקוח בתיק / אשף פתיחת תיק)
+  sync?: SyncState // [platform]
 }
 
 export type CaseStage =
@@ -241,7 +265,9 @@ export interface Quote {
   decidedAt?: ISO
   createdBy?: ID
   createdAt: ISO
-  sync: SyncState
+  sync: SyncState // ההזמנה ב-Priority
+  cprof?: SyncState // [platform] ההצעה עצמה ב-Priority (CPROF)
+  priorityOrder?: PriorityOrder // [platform]
   approvedVia?: 'portal' // [platform] אושרה באזור האישי מול השרת; מכשיר של המשרד משלים עמלה, פלואו ו-Priority
   approvedFromStage?: CaseStage // [platform] שלב התיק לפני האישור
   portalFollowupsAt?: ISO // [platform] מתי ההשלמות רצו (פעם אחת)
@@ -308,6 +334,7 @@ export interface ServiceCall {
   source: LeadSource
   createdAt: ISO
   closedAt?: ISO
+  sync?: SyncState // [platform]
 }
 
 export interface InstalledUnit {
@@ -469,7 +496,7 @@ export interface Doc {
 export interface MoneyLine {
   id: ID
   caseId: ID
-  kind: 'budget' | 'expense' | 'commission' | 'payment'
+  kind: 'budget' | 'expense' | 'commission' | 'payment' | 'invoice'
   category: string
   description: string
   amount: number
@@ -481,6 +508,9 @@ export interface MoneyLine {
   agentId?: ID // [admin] למי העמלה
   status?: 'planned' | 'pending' | 'paid' // [admin]
   purchaseOrderId?: ID // [admin] הוצאה שנוצרה מקבלת הזמנת רכש
+  source?: 'priority' // [platform] הגיע מ-Priority: קריאה בלבד
+  priorityId?: string // [platform] מספר החשבונית / הקבלה ב-Priority
+  priorityForm?: string // [platform]
 }
 
 export interface Notification {
@@ -631,6 +661,7 @@ export interface Supplier {
   active: boolean
   priorityId?: string // מספר ספק ב-Priority (SUPPLIERS)
   createdAt: ISO
+  sync?: SyncState // [platform]
 }
 
 export interface PurchaseOrder {
@@ -651,6 +682,20 @@ export interface PurchaseOrder {
   createdBy?: ID
   sentVia?: 'whatsapp' | 'email' | 'copy'
   moneyLineId?: ID // ההוצאה שנרשמה בתיק כשההזמנה התקבלה
+  sync?: SyncState // [platform]
+}
+
+// [platform] מצב מנוע הסנכרון עם Priority, כפי שהשרת כותב אותו
+export interface SyncRun { at: ISO; ms: number; ok: boolean; error?: string }
+export interface SyncStream { at: ISO; ok: boolean; error?: string | null; pausedUntil?: ISO; [count: string]: unknown }
+export interface IntegrationState {
+  id: string
+  engine?: { active: boolean; startedAt: ISO; mode: string; write: boolean; streams: string[] }
+  runs?: Partial<Record<'hot' | 'warm' | 'full', SyncRun>>
+  streams?: Record<string, SyncStream>
+  cursors?: Record<string, ISO>
+  lastError?: string | null
+  customersSince?: ISO
 }
 
 export interface DB {
@@ -676,9 +721,10 @@ export interface DB {
   leaves: LeaveRequest[] // [collab]
   suppliers: Supplier[] // [admin]
   purchaseOrders: PurchaseOrder[] // [admin]
+  integrations?: IntegrationState[] // [platform] רק השרת כותב
   config: Config // [admin]
   counters: Record<string, number>
 }
 
-export type Collection = Exclude<keyof DB, 'counters' | 'config'>
+export type Collection = Exclude<keyof DB, 'counters' | 'config' | 'integrations'>
 export type Entity<C extends Collection> = DB[C][number]

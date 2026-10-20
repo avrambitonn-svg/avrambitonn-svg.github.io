@@ -7,6 +7,8 @@ import { randomBytes } from 'node:crypto';
 // config and org-wide settings are singleton documents with the id 'org'
 export const SINGLETONS = new Set(['config', 'settings']);
 export const SINGLETON_ID = 'org';
+// written by the server itself (the Priority sync engine's state)
+export const SYSTEM = new Set(['integrations']);
 export const COLLECTION_RE = /^[a-z][A-Za-z0-9]{0,39}$/;
 export const ID_RE = /^[A-Za-z0-9_.:-]{1,128}$/;
 export const COUNTER_RE = /^[A-Za-z0-9_.-]{1,40}$/;
@@ -83,8 +85,12 @@ export class DocStore extends EventEmitter {
 
   // ------------------------------------------------------------ reads
 
+  /** No business data yet (first run). The server's own bookkeeping (SYSTEM) does not count. */
   isEmpty() {
-    for (const col of this.cols.values()) for (const r of col.values()) if (!r.del) return false;
+    for (const [c, col] of this.cols) {
+      if (SYSTEM.has(c)) continue;
+      for (const r of col.values()) if (!r.del) return false;
+    }
     return true;
   }
 

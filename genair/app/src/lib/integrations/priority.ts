@@ -1,7 +1,9 @@
 // סנכרון מול Priority דרך שרת האינטגרציות. כל שינוי נכנס לתור ("ממתין") ונשלח כשהשרת זמין.
+// במסד המשותף, כשמנוע הסנכרון רץ בשרת, השרת שולח ומושך הכול בעצמו והמכשיר לא שולח כלום.
 import { app } from '../store'
 import { api, serverConfigured, ServerError } from './server'
-import type { Customer, Quote, SyncState } from '../types'
+import { bridge } from '../sync/bridge'
+import type { Customer, IntegrationState, Quote, SyncState } from '../types'
 import { nowIso } from '../format'
 import { addressText } from './links'
 
@@ -24,6 +26,16 @@ export interface PItem {
 
 export const priorityEnabled = () => app().settings.priorityMode === 'server' && serverConfigured()
 
+/** מצב מנוע הסנכרון בשרת, כשהוא פועל (במסד המשותף בלבד) */
+export function serverSync(): IntegrationState | undefined {
+  if (bridge.mode !== 'server') return undefined
+  const st = app().db.integrations?.find((x) => x.id === 'priority')
+  return st?.engine?.active ? st : undefined
+}
+
+/** "סנכרן עכשיו": סבב מיידי בשרת (hot = הזמנות וכספים, warm = לקוחות, מחירים ומלאי, full = הכול) */
+export const runServerSync = (kind: 'hot' | 'warm' | 'full' = 'full') => api<{ ok: boolean }>('/api/priority/sync/run', { method: 'POST', json: { kind } })
+
 export const testConnection = () => api<{ ok: boolean; latencyMs: number; mode: string; serviceRoot: string; sample: { customers: number } }>('/api/priority/test')
 export const listCustomers = (search = '', top = 50) =>
   api<{ items: PCustomer[] }>(`/api/priority/customers?search=${encodeURIComponent(search)}&top=${top}`)
@@ -40,6 +52,10 @@ const BLOCKED = 'הכתיבה ל-Priority חסומה בשרת'
 
 // לקוח חדש: נפתח ב-Priority ומקבל מספר קבוע. עד אז הוא "לקוח זמני".
 export async function pushCustomer(c: Customer): Promise<SyncState> {
+  if (serverSync()) {
+    void runServerSync('hot').catch(() => {})
+    return c.sync
+  }
   if (!priorityEnabled()) {
     const s: SyncState = { ...c.sync, status: 'pending' }
     setSync('customers', c.id, s)
@@ -65,6 +81,7 @@ export async function pushCustomer(c: Customer): Promise<SyncState> {
 
 // הצעה שאושרה הופכת להזמנה ב-Priority (בלי הקלדה כפולה)
 export async function pushOrder(q: Quote, custname: string): Promise<SyncState> {
+  if (serverSync()) return q.sync
   if (!priorityEnabled()) {
     const s: SyncState = { ...q.sync, status: 'pending' }
     setSync('quotes', q.id, s)
@@ -98,7 +115,11 @@ export async function pushOrder(q: Quote, custname: string): Promise<SyncState> 
 }
 
 // עיבוד התור: כל מה שממתין או נכשל
-export async function processQueue(): Promise<{ done: number; failed: number; writeBlocked?: boolean }> {
+export async function processQueue(): Promise<{ done: number; failed: number; writeBlocked?: boolean; server?: boolean }> {
+  if (serverSync()) {
+    await runServerSync('full')
+    return { done: 0, failed: 0, server: true }
+  }
   let done = 0
   let failed = 0
   const { db } = app()
@@ -122,7 +143,11 @@ export async function processQueue(): Promise<{ done: number; failed: number; wr
 }
 
 // משיכת מחירים מ-Priority לקטלוג (לפי מק״ט)
-export async function pullPrices(): Promise<{ updated: number; scanned: number; matched: number }> {
+export async function pullPrices(): Promise<{ updated: number; scanned: number; matched: number; server?: boolean }> {
+  if (serverSync()) {
+    await runServerSync('warm')
+    return { updated: 0, scanned: 0, matched: 0, server: true }
+  }
   const { db, patch } = app()
   let updated = 0
   // השרת מחזיר עד 200 פריטים לקריאה; כל עמוד הוא טרנזקציה אחת מהחבילה החודשית
