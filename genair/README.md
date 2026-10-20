@@ -84,6 +84,7 @@ npm test
 
 - **האפליקציה** היא אתר סטטי: `npm run build` יוצר את `app/dist`, שאפשר להעלות לכל אחסון סטטי (Vercel, Netlify, Cloudflare Pages, GitHub Pages). עם שרת: לבנות עם `VITE_SERVER_URL=https://<השרת>`.
 - **קובץ אחד**: `npm run build:single` יוצר את `app/dist-single/index.html`, כל המערכת בקובץ אחד שנפתח בלחיצה כפולה, בלי שרת. נוח לשלוח ללקוח לצפייה.
+- **תוכנה במחשב (Windows)**: `desktop/windows` מתקין את המערכת עם אייקון בשולחן העבודה ובתפריט התחל, בחלון משלה (Edge במצב אפליקציה). אורזים כך: תיקייה עם `install.ps1`, `uninstall.ps1`, `Install.cmd`, `Uninstall.cmd`, `README.txt`, ובתוכה `app/genair.html` (מ-`npm run build:single`) ו-`app/genair.ico`.
 - **הדגמה בלי שם החברה**: `VITE_BRAND=demo npx vite build` בונה את אותה מערכת עם מותג ניטרלי (בלי שם, טלפון וכתובת של ג'נאייר), והתפריט של ההדגמה נפתח מיד.
 - **השרת** (אינטגרציות, מסד נתונים משותף והתחברות): Docker, Render, Railway/Fly.io או כל שרת Node. פירוט ב-[server/README.md](server/README.md).
 
