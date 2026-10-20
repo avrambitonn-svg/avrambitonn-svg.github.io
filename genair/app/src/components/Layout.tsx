@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   Bell, Boxes, Building2, CalendarDays, ClipboardList, FileSignature, FolderKanban, HardHat, LayoutDashboard, Menu, RefreshCw, Search, Settings, Users, Wrench, BarChart3, Eye,
-  ListChecks, Palmtree, Truck, UserCog, ChevronsLeft, ChevronsRight, PlayCircle,
+  ListChecks, Palmtree, Truck, UserCog, ChevronsLeft, ChevronsRight, PlayCircle, Home,
 } from 'lucide-react'
 import { brand } from '../brand'
 import { useApp, useMe } from '../lib/store'
@@ -25,11 +25,13 @@ const nav: { group: string; items: NavItem[] }[] = [
   {
     group: 'עבודה שוטפת',
     items: [
-      { to: '/', label: 'דשבורד', icon: <LayoutDashboard size={18} />, roles: ['admin', 'office', 'agent', 'engineer'] },
+      { to: '/', label: 'דשבורד', icon: <LayoutDashboard size={18} />, roles: ['admin'] },
+      { to: '/', label: 'ראשי', icon: <Home size={18} />, roles: ['office', 'agent', 'engineer'] },
+      { to: '/field', label: 'היום שלי', icon: <HardHat size={18} />, roles: ['installer'] },
       { to: '/cases', label: 'תיקים ופרויקטים', icon: <FolderKanban size={18} />, roles: ['admin', 'office', 'agent', 'engineer'] },
       { to: '/calendar', label: 'לוח זמנים', icon: <CalendarDays size={18} /> },
       { to: '/tasks', label: 'משימות', icon: <ListChecks size={18} />, count: (s) => s.db.tasks.filter((t) => !t.done && (t.assigneeId === s.currentUserId || t.sharedWith?.includes(s.currentUserId)) && !!t.due && t.due <= new Date().toISOString().slice(0, 10)).length },
-      { to: '/field', label: 'אפליקציית שטח', icon: <HardHat size={18} /> },
+      { to: '/field', label: 'אפליקציית שטח', icon: <HardHat size={18} />, roles: ['admin', 'office', 'agent', 'engineer'] },
       { to: '/leave', label: 'אישורי חופשה', icon: <Palmtree size={18} />, count: (s) => (['admin', 'office'].includes(s.db.users.find((u) => u.id === s.currentUserId)?.role ?? '') ? s.db.leaves.filter((l) => l.status === 'pending').length : 0) },
     ],
   },
@@ -56,7 +58,7 @@ const nav: { group: string; items: NavItem[] }[] = [
 ]
 
 const titles: [RegExp, string][] = [
-  [/^\/$/, 'דשבורד'],
+  [/^\/$/, 'ראשי'],
   [/^\/cases\/new/, 'תיק חדש'],
   [/^\/cases/, 'תיקים ופרויקטים'],
   [/^\/quotes/, 'הצעת מחיר'],
@@ -235,7 +237,7 @@ export function Layout() {
   // תפריט מכווץ במחשב: נשמר בדפדפן
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('genair-nav') === 'min' } catch { return false } })
   const toggleNav = () => setCollapsed((c) => { try { localStorage.setItem('genair-nav', c ? 'full' : 'min') } catch { /* פרטי */ } return !c })
-  const title = titles.find(([re]) => re.test(loc.pathname))?.[1] ?? ''
+  const title = loc.pathname === '/' && me.role === 'admin' ? 'דשבורד' : titles.find(([re]) => re.test(loc.pathname))?.[1] ?? ''
 
   return (
     <div className={`shell ${collapsed ? 'collapsed' : ''}`}>
@@ -294,7 +296,7 @@ export function Layout() {
           </>
         ) : (
           <>
-            <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}><LayoutDashboard size={20} />ראשי</NavLink>
+            <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}>{me.role === 'admin' ? <><LayoutDashboard size={20} />דשבורד</> : <><Home size={20} />ראשי</>}</NavLink>
             <NavLink to="/cases" className={({ isActive }) => (isActive ? 'active' : '')}><FolderKanban size={20} />תיקים</NavLink>
           </>
         )}

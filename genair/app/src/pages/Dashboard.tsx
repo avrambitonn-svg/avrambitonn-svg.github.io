@@ -29,19 +29,230 @@ function greeting() {
 
 interface Alert { key: string; icon: React.ReactNode; text: string; sub?: string; to: string; tone: 'danger' | 'warning' | 'info' }
 
-// מתקין לא רואה את מספרי החברה: המסך הראשי שלו הוא "היום שלי"
+// רק המנהל רואה את מספרי החברה. מתקין נכנס ל"היום שלי", ושאר העובדים למסך העבודה שלהם
 export default function Dashboard() {
   const me = useMe()
   if (me.role === 'installer') return <Navigate to="/field" replace />
+  if (me.role !== 'admin') return <WorkHome />
   return <CompanyDashboard />
 }
 
-function CompanyDashboard() {
+const toneColor = { danger: 'var(--danger)', warning: 'var(--warning)', info: 'var(--info)' }
+const isOpen = (k: Case) => !['closed', 'lost'].includes(k.stage)
+
+// סוכן ומהנדס רואים רק את התיקים שלהם. מנהל ומשרד רואים הכל
+function useMyCases() {
   const me = useMe()
+  const all = useApp((s) => s.db.cases)
+  return useMemo(() => all.filter((k) => (me.role === 'agent' ? k.agentId === me.id : me.role === 'engineer' ? k.engineerId === me.id : true)), [all, me.role, me.id])
+}
+
+// מה דורש טיפול עכשיו: נגזר מהנתונים, בלי הגדרה ידנית.
+// companyWide: גם קריאות שירות, חוזים, אישורים, סנכרון ומלאי (מנהל ומשרד בלבד)
+function useAlerts(cases: Case[], companyWide: boolean) {
+  const db = useApp((s) => s.db)
+  return useMemo(() => {
+    const out: Alert[] = []
+    const ids = new Set(cases.map((k) => k.id))
+    for (const q of db.quotes) {
+      if (!ids.has(q.caseId)) continue
+      const k = cases.find((x) => x.id === q.caseId)!
+      if (q.status === 'viewed' && q.viewedAt && daysBetween(q.viewedAt, new Date()) >= 0)
+        out.push({ key: 'v' + q.id, icon: <Eye size={17} />, text: `${k.title}: הלקוח צפה בהצעה ועוד לא אישר`, sub: `נצפתה ${relative(q.viewedAt)} · זה הזמן להתקשר`, to: `/cases/${k.id}`, tone: 'warning' })
+      if (q.status === 'sent' && q.sentAt && daysBetween(q.sentAt, new Date()) >= 3)
+        out.push({ key: 's' + q.id, icon: <FileText size={17} />, text: `${k.title}: ההצעה נשלחה ולא נפתחה`, sub: `נשלחה ${relative(q.sentAt)} · לשלוח תזכורת`, to: `/cases/${k.id}`, tone: 'info' })
+    }
+    for (const k of cases.filter(isOpen)) {
+      if (k.stage === 'approved' && !db.appointments.some((a) => a.caseId === k.id && a.type === 'installation' && a.status !== 'cancelled'))
+        out.push({ key: 'a' + k.id, icon: <CalendarClock size={17} />, text: `${k.title}: אושר וממתין לתיאום התקנה`, to: `/cases/${k.id}`, tone: 'danger' })
+      if (k.stage === 'lead' && daysBetween(k.createdAt, new Date()) >= 0 && !db.messages.some((m) => m.caseId === k.id && m.direction === 'out'))
+        out.push({ key: 'l' + k.id, icon: <PhoneCall size={17} />, text: `ליד חדש: ${k.title}`, sub: `נכנס ${relative(k.createdAt)} · עוד לא חזרו אליו`, to: `/cases/${k.id}`, tone: 'warning' })
+      if (companyWide && k.stage === 'completed') out.push({ key: 'c' + k.id, icon: <CircleDollarSign size={17} />, text: `${k.title}: הותקן, לסגור חשבון ולבקש חוות דעת`, to: `/cases/${k.id}`, tone: 'info' })
+    }
+    if (companyWide) {
+      for (const s of db.serviceCalls.filter((x) => x.status === 'new'))
+        out.push({ key: 'sc' + s.id, icon: <Wrench size={17} />, text: `קריאת שירות חדשה: ${s.description}`, sub: `${db.customers.find((c) => c.id === s.customerId)?.name ?? ''} · ${relative(s.createdAt)}`, to: `/service/${s.id}`, tone: s.urgency === 'urgent' || s.urgency === 'high' ? 'danger' : 'warning' })
+      for (const c of db.contracts.filter((x) => x.status === 'expiring'))
+        out.push({ key: 'ct' + c.id, icon: <ShieldAlert size={17} />, text: `חוזה מסתיים: ${c.title}`, sub: `${db.customers.find((x) => x.id === c.customerId)?.name ?? ''} · עד ${c.endDate.split('-').reverse().join('.')}`, to: '/contracts', tone: c.type === 'smoke_annual' ? 'danger' : 'warning' })
+      for (const u of db.users)
+        for (const cert of u.certifications ?? [])
+          if (daysBetween(new Date(), cert.expires) <= 30)
+            out.push({ key: 'cert' + u.id + cert.type, icon: <HardHat size={17} />, text: `אישור "${cert.type}" של ${u.name} פג בעוד ${Math.max(0, daysBetween(new Date(), cert.expires))} ימים`, to: '/settings', tone: 'warning' })
+      const errs = db.customers.filter((c) => c.sync.status === 'error').length + db.quotes.filter((q) => q.sync.status === 'error').length
+      if (errs) out.push({ key: 'sync', icon: <RefreshCw size={17} />, text: `${errs} רשומות לא הסתנכרנו ל-Priority`, to: '/settings/priority', tone: 'danger' })
+      const low = db.stock.filter((s) => s.qty < s.min).length
+      if (low) out.push({ key: 'stock', icon: <Boxes size={17} />, text: `${low} פריטים במלאי מתחת למינימום`, to: '/inventory', tone: 'info' })
+    }
+    const order = { danger: 0, warning: 1, info: 2 }
+    return out.sort((a, b) => order[a.tone] - order[b.tone])
+  }, [db, cases, companyWide])
+}
+
+function Greeting({ today }: { today: Date }) {
+  const me = useMe()
+  return (
+    <div className="page-head" style={{ marginBottom: 0 }}>
+      <div>
+        <h1>{greeting()}, {me.name.split(' ')[0]}</h1>
+        <div className="sub">{gregDate.format(today)} · {hebDate.format(today)}</div>
+      </div>
+      <div className="row wrap">
+        <Link className="btn primary" to="/cases/new"><Plus size={17} /> תיק חדש</Link>
+        <button className="btn" onClick={() => startDemo()}><PlayCircle size={17} /> הדגמה מודרכת</button>
+        <Link className="btn" to="/service"><Wrench size={17} /> קריאת שירות</Link>
+      </div>
+    </div>
+  )
+}
+
+function AlertsCard({ alerts }: { alerts: Alert[] }) {
+  return (
+    <Card title={<div className="row"><AlertTriangle size={17} color="var(--warning)" /><h2>דורש טיפול עכשיו</h2></div>} actions={<span className="badge muted">{alerts.length}</span>}>
+      {alerts.length === 0 ? (
+        <Empty icon={<CheckCircle2 size={34} />} title="הכל מטופל">אין כרגע משהו שמחכה לך</Empty>
+      ) : (
+        <div className="list">
+          {alerts.slice(0, 8).map((a) => (
+            <Link key={a.key} to={a.to} className="list-item">
+              <span style={{ color: toneColor[a.tone] }}>{a.icon}</span>
+              <div className="grow">
+                <div className="small strong">{a.text}</div>
+                {a.sub && <div className="tiny muted">{a.sub}</div>}
+              </div>
+              <ArrowLeft size={16} className="muted" />
+            </Link>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function TodayCard({ today }: { today: Date }) {
+  const db = useApp((s) => s.db)
+  const todays = useMemo(
+    () => db.appointments.filter((a) => sameDay(a.start, today) && a.status !== 'cancelled').sort((a, b) => a.start.localeCompare(b.start)),
+    [db.appointments, today],
+  )
+  return (
+    <Card title="היום בשטח" actions={<Link className="btn sm ghost" to="/calendar">ללוח הזמנים</Link>}>
+      {todays.length === 0 ? (
+        <Empty title="אין משימות היום" />
+      ) : (
+        <div className="list">
+          {todays.map((a) => {
+            const c = db.customers.find((x) => x.id === a.customerId)
+            return (
+              <Link key={a.id} to={`/field/${a.id}`} className="list-item">
+                <div style={{ width: 4, alignSelf: 'stretch', borderRadius: 4, background: appointmentTypeColor[a.type] }} />
+                <div className="grow">
+                  <div className="tiny num strong"><span className="ltr">{time(a.start)}–{time(a.end)}</span></div>
+                  <div className="small strong clamp2">{a.title}</div>
+                  <div className="tiny muted">{appointmentTypeLabel[a.type]} · {c?.name}</div>
+                </div>
+                <div className="col-end">
+                  <Avatars users={a.userIds.map((u) => db.users.find((x) => x.id === u))} />
+                  <Badge tone={a.status === 'in_progress' ? 'warning' : a.status === 'done' ? 'success' : a.status === 'on_the_way' ? 'brand' : 'muted'}>{appointmentStatusLabel[a.status]}</Badge>
+                </div>
+              </Link>
+            )
+          })}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function RecentCasesCard({ cases }: { cases: Case[] }) {
+  const customers = useApp((s) => s.db.customers)
+  const nav = useNavigate()
+  const recent = useMemo(() => [...cases].sort((x, y) => y.createdAt.localeCompare(x.createdAt)).slice(0, 5), [cases])
+  return (
+    <Card title="תיקים אחרונים" actions={<Link className="btn sm ghost" to="/cases">לכל התיקים</Link>}>
+      {recent.length === 0 ? (
+        <Empty title="אין תיקים עדיין" />
+      ) : (
+        <div className="table-wrap">
+          <table className="table">
+            <thead><tr><th>מספר</th><th>שם</th><th className="hide-mobile">לקוח</th><th>סטטוס</th></tr></thead>
+            <tbody>
+              {recent.map((k) => (
+                <tr key={k.id} className="click" onClick={() => nav(`/cases/${k.id}`)}>
+                  <td className="num small nowrap">{k.number}</td>
+                  <td className="small strong">{k.title}</td>
+                  <td className="small hide-mobile">{customers.find((c) => c.id === k.customerId)?.name ?? <span className="muted">ללא לקוח</span>}</td>
+                  <td><Badge tone={stageTone[k.stage]} dot>{stageLabel[k.stage]}</Badge></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+// all: כל הפעילות בחברה. אחרת רק מה שקשור לתיקים שהועברו. noMoney: בלי שורות עם סכומים
+function ActivityCard({ cases, all, noMoney }: { cases: Case[]; all: boolean; noMoney?: boolean }) {
+  const activities = useApp((s) => s.db.activities)
+  const feed = useMemo(() => {
+    const ids = new Set(cases.map((k) => k.id))
+    return activities.filter((a) => (all || (!!a.caseId && ids.has(a.caseId))) && !(noMoney && a.text.includes('₪'))).slice(0, 9)
+  }, [activities, cases, all, noMoney])
+  return (
+    <Card title="פעילות אחרונה">
+      {feed.length === 0 ? (
+        <Empty title="אין פעילות עדיין" />
+      ) : (
+        <div className="card-body">
+          <div className="timeline">
+            {feed.map((a) => {
+              const k = cases.find((x) => x.id === a.caseId)
+              return (
+                <div key={a.id} className="tl-item">
+                  <div className="small">{a.text}</div>
+                  <div className="when">
+                    {relative(a.at)}
+                    {k && <> · <Link to={`/cases/${k.id}`}>{k.number}</Link></>}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+// מסך הבית של משרד, סוכן ומהנדס: העבודה של היום, בלי כסף ובלי מספרי החברה
+function WorkHome() {
+  const me = useMe()
+  const cases = useMyCases()
+  const office = me.role === 'office'
+  const alerts = useAlerts(cases, office)
+  const today = useMemo(() => new Date(), [])
+  return (
+    <div className="col enter dash" style={{ gap: 18 }}>
+      <Greeting today={today} />
+      <div className="grid g-side stagger" style={{ '--r': 1 } as React.CSSProperties}>
+        <div className="col" style={{ gap: 16 }}>
+          <AlertsCard alerts={alerts} />
+          <TodayCard today={today} />
+          <RecentCasesCard cases={cases} />
+        </div>
+        <div className="col" style={{ gap: 16 }}>
+          <TasksCard />
+          <ActivityCard cases={cases} all={office} noMoney />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CompanyDashboard() {
   const db = useApp((s) => s.db)
   const nav = useNavigate()
-
-  const recent = useMemo(() => [...db.cases].sort((x, y) => y.createdAt.localeCompare(x.createdAt)).slice(0, 5), [db.cases])
   const latestQuote = useMemo(() => {
     const m = new Map<string, Quote>()
     for (const q of db.quotes) {
@@ -56,10 +267,9 @@ function CompanyDashboard() {
     return q ? totals(q).net : 0
   }
 
-  const mineOnly = me.role === 'agent'
-  const cases = useMemo(() => db.cases.filter((k) => !mineOnly || k.agentId === me.id), [db.cases, mineOnly, me.id])
-  const open = cases.filter((k) => !['closed', 'lost'].includes(k.stage))
-  const today = new Date()
+  const cases = db.cases
+  const open = cases.filter(isOpen)
+  const today = useMemo(() => new Date(), [])
   const monthStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString()
 
   // מגמות: 12 חודשים אחורה, ומספרים להשוואה מול התקופה הקודמת
@@ -118,47 +328,7 @@ function CompanyDashboard() {
     }
   }, [open, db.quotes, db.appointments, db.serviceCalls, cases, monthStart])
 
-  // מה דורש טיפול עכשיו: נגזר מהנתונים, בלי הגדרה ידנית
-  const alerts = useMemo(() => {
-    const out: Alert[] = []
-    for (const q of db.quotes) {
-      const k = cases.find((x) => x.id === q.caseId)
-      if (!k) continue
-      if (q.status === 'viewed' && q.viewedAt && daysBetween(q.viewedAt, new Date()) >= 0)
-        out.push({ key: 'v' + q.id, icon: <Eye size={17} />, text: `${k.title}: הלקוח צפה בהצעה ועוד לא אישר`, sub: `נצפתה ${relative(q.viewedAt)} · זה הזמן להתקשר`, to: `/cases/${k.id}`, tone: 'warning' })
-      if (q.status === 'sent' && q.sentAt && daysBetween(q.sentAt, new Date()) >= 3)
-        out.push({ key: 's' + q.id, icon: <FileText size={17} />, text: `${k.title}: ההצעה נשלחה ולא נפתחה`, sub: `נשלחה ${relative(q.sentAt)} · לשלוח תזכורת`, to: `/cases/${k.id}`, tone: 'info' })
-    }
-    for (const k of open) {
-      if (k.stage === 'approved' && !db.appointments.some((a) => a.caseId === k.id && a.type === 'installation' && a.status !== 'cancelled'))
-        out.push({ key: 'a' + k.id, icon: <CalendarClock size={17} />, text: `${k.title}: אושר וממתין לתיאום התקנה`, to: `/cases/${k.id}`, tone: 'danger' })
-      if (k.stage === 'lead' && daysBetween(k.createdAt, new Date()) >= 0 && !db.messages.some((m) => m.caseId === k.id && m.direction === 'out'))
-        out.push({ key: 'l' + k.id, icon: <PhoneCall size={17} />, text: `ליד חדש: ${k.title}`, sub: `נכנס ${relative(k.createdAt)} · עוד לא חזרו אליו`, to: `/cases/${k.id}`, tone: 'warning' })
-      if (k.stage === 'completed') out.push({ key: 'c' + k.id, icon: <CircleDollarSign size={17} />, text: `${k.title}: הותקן, לסגור חשבון ולבקש חוות דעת`, to: `/cases/${k.id}`, tone: 'info' })
-    }
-    if (!mineOnly) {
-      for (const s of db.serviceCalls.filter((x) => x.status === 'new'))
-        out.push({ key: 'sc' + s.id, icon: <Wrench size={17} />, text: `קריאת שירות חדשה: ${s.description}`, sub: `${db.customers.find((c) => c.id === s.customerId)?.name ?? ''} · ${relative(s.createdAt)}`, to: `/service/${s.id}`, tone: s.urgency === 'urgent' || s.urgency === 'high' ? 'danger' : 'warning' })
-      for (const c of db.contracts.filter((x) => x.status === 'expiring'))
-        out.push({ key: 'ct' + c.id, icon: <ShieldAlert size={17} />, text: `חוזה מסתיים: ${c.title}`, sub: `${db.customers.find((x) => x.id === c.customerId)?.name ?? ''} · עד ${c.endDate.split('-').reverse().join('.')}`, to: '/contracts', tone: c.type === 'smoke_annual' ? 'danger' : 'warning' })
-      for (const u of db.users)
-        for (const cert of u.certifications ?? [])
-          if (daysBetween(new Date(), cert.expires) <= 30)
-            out.push({ key: 'cert' + u.id + cert.type, icon: <HardHat size={17} />, text: `אישור "${cert.type}" של ${u.name} פג בעוד ${Math.max(0, daysBetween(new Date(), cert.expires))} ימים`, to: '/settings', tone: 'warning' })
-      const errs = db.customers.filter((c) => c.sync.status === 'error').length + db.quotes.filter((q) => q.sync.status === 'error').length
-      if (errs) out.push({ key: 'sync', icon: <RefreshCw size={17} />, text: `${errs} רשומות לא הסתנכרנו ל-Priority`, to: '/settings/priority', tone: 'danger' })
-      const low = db.stock.filter((s) => s.qty < s.min).length
-      if (low) out.push({ key: 'stock', icon: <Boxes size={17} />, text: `${low} פריטים במלאי מתחת למינימום`, to: '/inventory', tone: 'info' })
-    }
-    const order = { danger: 0, warning: 1, info: 2 }
-    return out.sort((a, b) => order[a.tone] - order[b.tone])
-  }, [db, cases, open, mineOnly])
-
-  const todays = useMemo(
-    () => db.appointments.filter((a) => sameDay(a.start, today) && a.status !== 'cancelled').sort((a, b) => a.start.localeCompare(b.start)),
-    [db.appointments],
-  )
-
+  const alerts = useAlerts(cases, true)
 
   const funnel = useMemo(() => {
     const stages = pipeline.slice(0, 7)
@@ -169,23 +339,9 @@ function CompanyDashboard() {
   }, [open, latestQuote])
   const pipeValue = funnel.reduce((s, f) => s + f.v, 0)
 
-  const feed = useMemo(() => db.activities.filter((a) => !mineOnly || cases.some((k) => k.id === a.caseId)).slice(0, 9), [db.activities, mineOnly, cases])
-
-  const toneColor = { danger: 'var(--danger)', warning: 'var(--warning)', info: 'var(--info)' }
-
   return (
     <div className="col enter dash" style={{ gap: 18 }}>
-      <div className="page-head" style={{ marginBottom: 0 }}>
-        <div>
-          <h1>{greeting()}, {me.name.split(' ')[0]}</h1>
-          <div className="sub">{gregDate.format(today)} · {hebDate.format(today)}</div>
-        </div>
-        <div className="row wrap">
-          <Link className="btn primary" to="/cases/new"><Plus size={17} /> תיק חדש</Link>
-          <button className="btn" onClick={() => startDemo()}><PlayCircle size={17} /> הדגמה מודרכת</button>
-          <Link className="btn" to="/service"><Wrench size={17} /> קריאת שירות</Link>
-        </div>
-      </div>
+      <Greeting today={today} />
 
       <div className="grid g4 stagger" style={{ '--r': 1 } as React.CSSProperties}>
         <KpiTile icon={<BadgeCheck size={18} />} tone="success" label="הכנסות החודש" value={trends.monthNow} format={money}
@@ -224,69 +380,9 @@ function CompanyDashboard() {
 
       <div className="grid g-side stagger" style={{ '--r': 3 } as React.CSSProperties}>
         <div className="col" style={{ gap: 16 }}>
-          <Card title={<div className="row"><AlertTriangle size={17} color="var(--warning)" /><h2>דורש טיפול עכשיו</h2></div>} actions={<span className="badge muted">{alerts.length}</span>}>
-            {alerts.length === 0 ? (
-              <Empty icon={<CheckCircle2 size={34} />} title="הכל מטופל">אין כרגע משהו שמחכה לך</Empty>
-            ) : (
-              <div className="list">
-                {alerts.slice(0, 8).map((a) => (
-                  <Link key={a.key} to={a.to} className="list-item">
-                    <span style={{ color: toneColor[a.tone] }}>{a.icon}</span>
-                    <div className="grow">
-                      <div className="small strong">{a.text}</div>
-                      {a.sub && <div className="tiny muted">{a.sub}</div>}
-                    </div>
-                    <ArrowLeft size={16} className="muted" />
-                  </Link>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          <Card title="היום בשטח" actions={<Link className="btn sm ghost" to="/calendar">ללוח הזמנים</Link>}>
-            {todays.length === 0 ? (
-              <Empty title="אין משימות היום" />
-            ) : (
-              <div className="list">
-                {todays.map((a) => {
-                  const c = db.customers.find((x) => x.id === a.customerId)
-                  return (
-                    <Link key={a.id} to={`/field/${a.id}`} className="list-item">
-                      <div style={{ width: 4, alignSelf: 'stretch', borderRadius: 4, background: appointmentTypeColor[a.type] }} />
-                      <div className="grow">
-                        <div className="tiny num strong"><span className="ltr">{time(a.start)}–{time(a.end)}</span></div>
-                        <div className="small strong clamp2">{a.title}</div>
-                        <div className="tiny muted">{appointmentTypeLabel[a.type]} · {c?.name}</div>
-                      </div>
-                      <div className="col-end">
-                        <Avatars users={a.userIds.map((u) => db.users.find((x) => x.id === u))} />
-                        <Badge tone={a.status === 'in_progress' ? 'warning' : a.status === 'done' ? 'success' : a.status === 'on_the_way' ? 'brand' : 'muted'}>{appointmentStatusLabel[a.status]}</Badge>
-                      </div>
-                    </Link>
-                  )
-                })}
-              </div>
-            )}
-          </Card>
-
-          <Card title="תיקים אחרונים" actions={<Link className="btn sm ghost" to="/cases">לכל התיקים</Link>}>
-            <div className="table-wrap">
-              <table className="table">
-                <thead><tr><th>מספר</th><th>שם</th><th className="hide-mobile">לקוח</th><th>סטטוס</th></tr></thead>
-                <tbody>
-                  {recent.map((k) => (
-                    <tr key={k.id} className="click" onClick={() => nav(`/cases/${k.id}`)}>
-                      <td className="num small nowrap">{k.number}</td>
-                      <td className="small strong">{k.title}</td>
-                      <td className="small hide-mobile">{db.customers.find((c) => c.id === k.customerId)?.name ?? <span className="muted">ללא לקוח</span>}</td>
-                      <td><Badge tone={stageTone[k.stage]} dot>{stageLabel[k.stage]}</Badge></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-
+          <AlertsCard alerts={alerts} />
+          <TodayCard today={today} />
+          <RecentCasesCard cases={cases} />
         </div>
 
         <div className="col" style={{ gap: 16 }}>
@@ -298,24 +394,7 @@ function CompanyDashboard() {
             </Card>
           )}
 
-          <Card title="פעילות אחרונה">
-            <div className="card-body">
-              <div className="timeline">
-                {feed.map((a) => {
-                  const k = db.cases.find((x) => x.id === a.caseId)
-                  return (
-                    <div key={a.id} className="tl-item">
-                      <div className="small">{a.text}</div>
-                      <div className="when">
-                        {relative(a.at)}
-                        {k && <> · <Link to={`/cases/${k.id}`}>{k.number}</Link></>}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          </Card>
+          <ActivityCard cases={cases} all />
         </div>
       </div>
     </div>
