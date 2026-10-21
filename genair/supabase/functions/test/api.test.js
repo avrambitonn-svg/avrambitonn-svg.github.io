@@ -557,3 +557,13 @@ test('security log: a wrong cron key and a password set by the admin are recorde
   assert.ok(rows.some((r) => r.action === 'password_set' && r.actor === 'u-admin' && r.detail.target === 'u-agent'));
   assert.ok(rows.some((r) => r.action === 'bootstrap'));
 });
+
+test('rate limits are counted in the database, so every instance of the function shares them', async () => {
+  const token = s.office;
+  await fake.pool.query(`insert into app.rate (key, reset_at, count) values ('route.ai|u:u-office', now() + interval '1 hour', 60)
+    on conflict (key) do update set reset_at = excluded.reset_at, count = excluded.count`);
+  const r = await call('POST', '/api/ai/messages', { token, body: {} });
+  assert.equal(r.status, 429);
+  assert.ok(Number(r.headers.get('retry-after')) > 0);
+  await fake.pool.query(`delete from app.rate where key = 'route.ai|u:u-office'`);
+});

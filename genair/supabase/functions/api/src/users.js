@@ -2,7 +2,7 @@
 // Each employee's account email is derived, not typed (CONTRACT.md "Logins"): the phone as
 // <05...>@phone.genair.app, else the email. The link account <-> app user is app.members (sys_set_member).
 import { HttpError, clientIp, readJson, safeEqual } from '../../../../server/src/http.js';
-import { createWindowLimiter } from '../../../../server/src/limiter.js';
+import { createWindowLimiter } from './limiter.js';
 import { passwordProblem, temporaryPassword, validSnapshot } from '../../../../server/src/auth.js';
 import { requireStore } from './db.js';
 import { isManager } from './access.js';
@@ -100,7 +100,7 @@ export async function setUserPassword({ req, cfg, params, caller }) {
 
 // ------------------------------------------------------------ first setup
 
-const failuresByIp = createWindowLimiter({ max: 30, windowMs: 15 * 60_000 });
+const failuresByIp = createWindowLimiter({ max: 30, windowMs: 15 * 60_000, name: 'bootstrap.ip' });
 export const resetBootstrapLimits = () => failuresByIp.clear();
 
 function tooMany(retryMs) {
@@ -119,7 +119,7 @@ const already = () => new HttpError(409, 'already_bootstrapped', 'המערכת �
 export async function bootstrap({ req, cfg }) {
   const secret = String(cfg.edge.env.BOOTSTRAP_TOKEN ?? '').trim();
   const ip = clientIp(req, 0);
-  const peek = failuresByIp.peek(ip);
+  const peek = await failuresByIp.peek(ip);
   if (!peek.allowed) throw tooMany(peek.retryAfterMs);
   if (!secret) throw new HttpError(403, 'bootstrap_token_required', 'כדי להקים את המערכת צריך להגדיר בפונקציה קוד הקמה (BOOTSTRAP_TOKEN) ולהזין אותו כאן');
   const { rpc, sb } = cfg.edge;
@@ -129,7 +129,7 @@ export async function bootstrap({ req, cfg }) {
   const body = await readJson(req);
   if (!String(body.bootstrapToken ?? '').trim()) throw new HttpError(403, 'bootstrap_token_required', 'צריך להזין את קוד ההקמה (BOOTSTRAP_TOKEN)');
   if (!safeEqual(String(body.bootstrapToken ?? ''), secret)) {
-    failuresByIp.hit(ip);
+    await failuresByIp.hit(ip);
     throw new HttpError(401, 'invalid_bootstrap_token', 'קוד ההקמה (BOOTSTRAP_TOKEN) שגוי');
   }
   const problem = passwordProblem(body.password);

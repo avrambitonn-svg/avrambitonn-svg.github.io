@@ -1,6 +1,7 @@
 // Bundles the Edge Function "api" (api/index.ts + the server's modules it reuses) into one file,
 // api/dist/index.js, so deploying is a single file. node:* stays external (Deno provides it).
-// Two server modules are swapped for their Supabase versions: db/index.js (the store) and files.js (Storage).
+// Three server modules are swapped for their Supabase versions: db/index.js (the store), files.js (Storage) and
+// limiter.js (fixed-window counters in the database, shared by every instance).
 import { build } from 'esbuild';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +11,7 @@ const SERVER = resolve(here, '../../server/src');
 const SWAP = new Map([
   [join(SERVER, 'db/index.js'), join(here, 'api/src/db.js')],
   [join(SERVER, 'files.js'), join(here, 'api/src/files.js')],
+  [join(SERVER, 'limiter.js'), join(here, 'api/src/limiter.js')],
 ]);
 
 const swapServerModules = {

@@ -16,8 +16,8 @@ const LONG_POLL_MAX_SEC = 25;
 const HEARTBEAT_MS = 20_000;
 const MAX_STREAMS_PER_USER = 8; // open SSE connections (tabs and devices) per user
 
-const opsByUser = createWindowLimiter({ max: 1200, windowMs: 10 * 60_000 });
-const reserveByUser = createWindowLimiter({ max: 300, windowMs: 10 * 60_000 });
+const opsByUser = createWindowLimiter({ max: 1200, windowMs: 10 * 60_000, name: 'db.ops' });
+const reserveByUser = createWindowLimiter({ max: 300, windowMs: 10 * 60_000, name: 'db.reserve' });
 const streams = new Map(); // userId -> open SSE connections
 export const resetDbLimits = () => {
   opsByUser.clear();

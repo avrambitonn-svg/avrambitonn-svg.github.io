@@ -50,7 +50,7 @@ async function checkQuota(cfg, dir, bytes) {
 const addUsed = (dir, bytes) => used.set(dir, (used.get(dir) ?? 0) + bytes);
 
 // uploads per signed-in user (the portal and the lead form have their own limits)
-const uploadsByUser = createWindowLimiter({ max: 120, windowMs: 10 * 60_000 });
+const uploadsByUser = createWindowLimiter({ max: 120, windowMs: 10 * 60_000, name: 'files.upload' });
 export const resetUploadLimits = () => uploadsByUser.clear();
 
 const tooLarge = (limit) =>

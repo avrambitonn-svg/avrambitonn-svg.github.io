@@ -8,7 +8,7 @@ import { aiMessages } from '../../../../server/src/anthropic.js';
 import * as whatsapp from '../../../../server/src/whatsapp.js';
 import * as google from '../../../../server/src/google.js';
 import * as portal from '../../../../server/src/portal.js';
-import { createWindowLimiter } from '../../../../server/src/limiter.js';
+import { createWindowLimiter, setLimiterRpc } from './limiter.js';
 import * as files from './files.js';
 import * as inbox from './inbox.js';
 import * as psync from './psync.js';
@@ -21,18 +21,18 @@ import { EdgeResponse, nodeRequest, readRequestBody } from './nodehttp.js';
 export const CORS_ALLOW_HEADERS =
   'authorization, apikey, x-client-info, content-type, x-file-name, x-case-id, x-folder, x-drive-folder-id, anthropic-beta, x-client-id';
 
-// per signed-in user: things that cost money or reach outside (per instance of the function)
+// per signed-in user: things that cost money or reach outside (counted in the database, shared by every instance)
 const LIMITS = {
-  ai: createWindowLimiter({ max: 60, windowMs: 60 * 60_000 }),
-  whatsapp: createWindowLimiter({ max: 100, windowMs: 60 * 60_000 }),
-  google: createWindowLimiter({ max: 300, windowMs: 10 * 60_000 }),
-  priority: createWindowLimiter({ max: 300, windowMs: 10 * 60_000 }),
+  ai: createWindowLimiter({ max: 60, windowMs: 60 * 60_000, name: 'route.ai' }),
+  whatsapp: createWindowLimiter({ max: 100, windowMs: 60 * 60_000, name: 'route.whatsapp' }),
+  google: createWindowLimiter({ max: 300, windowMs: 10 * 60_000, name: 'route.google' }),
+  priority: createWindowLimiter({ max: 300, windowMs: 10 * 60_000, name: 'route.priority' }),
 };
 
-function rateLimit(route, caller, ip) {
+async function rateLimit(route, caller, ip) {
   const lim = route.limit && LIMITS[route.limit];
   if (!lim) return;
-  const v = lim.hit(caller?.user ? `u:${caller.user.id}` : `ip:${ip}`);
+  const v = await lim.hit(caller?.user ? `u:${caller.user.id}` : `ip:${ip}`);
   if (!v.allowed) {
     const e = new HttpError(429, 'too_many_requests', 'יותר מדי בקשות בזמן קצר. אפשר לנסות שוב מאוחר יותר');
     e.retryAfter = Math.ceil(v.retryAfterMs / 1000);
@@ -213,6 +213,7 @@ async function serve(request, res, env, opts) {
   securityHeaders(res);
   try {
     cfg = edgeConfig(env, opts);
+    setLimiterRpc(cfg.edge.rpc);
     const u = new URL(request.url);
     const path = routePath(u.pathname);
     const req = nodeRequest(request, `${path}${u.search}`);
@@ -232,7 +233,7 @@ async function serve(request, res, env, opts) {
     const caller = route.access === 'member' ? await requireMember(cfg, req) : undefined;
     const ip = clientIp(req, 0);
     if (route.noInstaller && caller?.user?.role === 'installer') throw new HttpError(403, 'forbidden', 'אין הרשאה לפעולה הזו');
-    rateLimit(route, caller, ip);
+    await rateLimit(route, caller, ip);
 
     const url = new URL(req.url, 'http://localhost');
     const result = await route.handle({ req, res, url, cfg, params, caller, ip });

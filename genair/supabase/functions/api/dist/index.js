@@ -359,36 +359,29 @@ function parseRetryAfter(value, now = Date.now) {
 function backoffDelay(attempt, { baseMs = 500, maxMs = 8e3 } = {}) {
   return Math.min(maxMs, baseMs * 2 ** (attempt - 1));
 }
-function createWindowLimiter({ max, windowMs, now = Date.now }) {
-  const buckets = /* @__PURE__ */ new Map();
-  const bucket = (key) => {
-    const t = now();
-    let b = buckets.get(key);
-    if (!b || b.resetAt <= t) {
-      b = { count: 0, resetAt: t + windowMs };
-      buckets.set(key, b);
-      if (buckets.size > 1e4) {
-        for (const [k2, v] of buckets) if (v.resetAt <= t) buckets.delete(k2);
-      }
+
+// api/src/limiter.js
+var rpc = null;
+var setLimiterRpc = (fn) => {
+  rpc = fn;
+};
+function createWindowLimiter({ max, windowMs, name }) {
+  if (!name) throw new Error("createWindowLimiter: name is required in the Edge Function");
+  const call = async (key, peek) => {
+    if (!rpc) throw new Error("limiter used before setLimiterRpc");
+    try {
+      return await rpc("sys_hit", { p_key: `${name}|${key}`, p_max: max, p_window_ms: windowMs, p_peek: peek });
+    } catch (e) {
+      console.error("[genair-api] rate limit check failed:", e?.message ?? e);
+      return { allowed: true, retryAfterMs: 0 };
     }
-    return b;
   };
-  const verdict = (b) => ({ allowed: b.count <= max, retryAfterMs: Math.max(0, b.resetAt - now()) });
   return {
-    hit(key) {
-      const b = bucket(key);
-      b.count++;
-      return verdict(b);
-    },
-    peek(key) {
-      const b = bucket(key);
-      return { allowed: b.count < max, retryAfterMs: Math.max(0, b.resetAt - now()) };
-    },
-    reset(key) {
-      buckets.delete(key);
+    hit: (key) => call(key, false),
+    peek: (key) => call(key, true),
+    reset() {
     },
     clear() {
-      buckets.clear();
     }
   };
 }
@@ -1341,7 +1334,7 @@ function looksLike(mime, head) {
 // api/src/files.js
 var FILE_ID_RE = /^f[a-f0-9]{24}$/;
 var INLINE = /^(image\/(png|jpe?g|gif|webp|avif|bmp|heic|heif)|application\/pdf|text\/plain|video\/[a-z0-9.+-]+|audio\/[a-z0-9.+-]+)$/;
-var uploadsByUser = createWindowLimiter({ max: 120, windowMs: 10 * 6e4 });
+var uploadsByUser = createWindowLimiter({ max: 120, windowMs: 10 * 6e4, name: "files.upload" });
 var tooLarge = (limit2) => new HttpError(413, "payload_too_large", `\u05D4\u05E7\u05D5\u05D1\u05E5 \u05D2\u05D3\u05D5\u05DC \u05DE\u05D3\u05D9 (\u05DE\u05E7\u05E1\u05D9\u05DE\u05D5\u05DD ${Math.round(limit2 / 1024 / 1024)}MB)`, { limitBytes: limit2 });
 var asciiName = (name) => String(name).replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^[._]+/, "").slice(-80) || "file";
 var segment = (s2) => String(s2 ?? "").replace(/[^A-Za-z0-9_.:-]/g, "").slice(0, 128);
@@ -1398,7 +1391,7 @@ async function sendStoredFile(res, cfg, id, { download = false } = {}) {
 }
 async function uploadFile({ req, cfg, caller }) {
   const user = caller.user;
-  const v = uploadsByUser.hit(user.id);
+  const v = await uploadsByUser.hit(user.id);
   if (!v.allowed) {
     const e = new HttpError(429, "too_many_requests", "\u05D9\u05D5\u05EA\u05E8 \u05DE\u05D3\u05D9 \u05D4\u05E2\u05DC\u05D0\u05D5\u05EA \u05D1\u05D6\u05DE\u05DF \u05E7\u05E6\u05E8. \u05D0\u05E4\u05E9\u05E8 \u05DC\u05E0\u05E1\u05D5\u05EA \u05E9\u05D5\u05D1 \u05D1\u05E2\u05D5\u05D3 \u05DB\u05DE\u05D4 \u05D3\u05E7\u05D5\u05EA");
     e.retryAfter = Math.ceil(v.retryAfterMs / 1e3);
@@ -1439,20 +1432,20 @@ var firstName = (name) => {
 };
 var limiters2 = {
   // every portal request, counted per address before the link is even looked up
-  visit: createWindowLimiter({ max: 300, windowMs: 10 * 6e4 }),
+  visit: createWindowLimiter({ max: 300, windowMs: 10 * 6e4, name: "portal.visit" }),
   // links that matched no case: someone guessing
-  miss: createWindowLimiter({ max: 20, windowMs: 10 * 6e4 }),
-  read: createWindowLimiter({ max: 120, windowMs: 10 * 6e4 }),
-  write: createWindowLimiter({ max: 30, windowMs: 10 * 6e4 }),
-  message: createWindowLimiter({ max: 20, windowMs: 10 * 6e4 }),
-  upload: createWindowLimiter({ max: 10, windowMs: 10 * 6e4 }),
-  lead: createWindowLimiter({ max: 5, windowMs: 10 * 6e4 }),
-  leadPhone: createWindowLimiter({ max: 3, windowMs: 60 * 6e4 }),
+  miss: createWindowLimiter({ max: 20, windowMs: 10 * 6e4, name: "portal.miss" }),
+  read: createWindowLimiter({ max: 120, windowMs: 10 * 6e4, name: "portal.read" }),
+  write: createWindowLimiter({ max: 30, windowMs: 10 * 6e4, name: "portal.write" }),
+  message: createWindowLimiter({ max: 20, windowMs: 10 * 6e4, name: "portal.message" }),
+  upload: createWindowLimiter({ max: 10, windowMs: 10 * 6e4, name: "portal.upload" }),
+  lead: createWindowLimiter({ max: 5, windowMs: 10 * 6e4, name: "portal.lead" }),
+  leadPhone: createWindowLimiter({ max: 3, windowMs: 60 * 6e4, name: "portal.leadPhone" }),
   // a ceiling for the whole form, counted only for valid leads, so junk requests cannot use it up
-  leadGlobal: createWindowLimiter({ max: 1e3, windowMs: 60 * 6e4 })
+  leadGlobal: createWindowLimiter({ max: 1e3, windowMs: 60 * 6e4, name: "portal.leadGlobal" })
 };
-function limit(kind, key, { peek = false } = {}) {
-  const v = peek ? limiters2[kind].peek(key) : limiters2[kind].hit(key);
+async function limit(kind, key, { peek = false } = {}) {
+  const v = await (peek ? limiters2[kind].peek(key) : limiters2[kind].hit(key));
   if (!v.allowed) {
     const e = new HttpError(429, "too_many_requests", "\u05D9\u05D5\u05EA\u05E8 \u05DE\u05D3\u05D9 \u05D1\u05E7\u05E9\u05D5\u05EA. \u05E0\u05E1\u05D5 \u05E9\u05D5\u05D1 \u05D1\u05E2\u05D5\u05D3 \u05DB\u05DE\u05D4 \u05D3\u05E7\u05D5\u05EA");
     e.retryAfter = Math.ceil(v.retryAfterMs / 1e3);
@@ -1483,12 +1476,12 @@ function portalOpen(k2) {
 async function caseByToken(ctx) {
   const store = await requireStore(ctx.cfg);
   const ip = clientIp(ctx.req, ctx.cfg.db.trustProxy);
-  limit("visit", ip);
-  limit("miss", ip, { peek: true });
+  await limit("visit", ip);
+  await limit("miss", ip, { peek: true });
   const token = String(ctx.params.token ?? "");
   const k2 = TOKEN_RE.test(token) ? store.get("cases", caseIdByToken(store, token) ?? "") : void 0;
   if (!k2 || k2.portal?.token !== token || !portalOpen(k2)) {
-    limiters2.miss.hit(ip);
+    await limiters2.miss.hit(ip);
     throw notFound();
   }
   return { store, k: k2, ip };
@@ -1579,12 +1572,12 @@ function portalData(store, k2) {
 }
 async function getPortal(ctx) {
   const { store, k: k2, ip } = await caseByToken(ctx);
-  limit("read", ip);
+  await limit("read", ip);
   return { status: 200, body: portalData(store, k2) };
 }
 async function viewPortal(ctx) {
   const { store, k: k2, ip } = await caseByToken(ctx);
-  limit("write", `${ip}|${k2.id}`);
+  await limit("write", `${ip}|${k2.id}`);
   const ops = [];
   const last = Date.parse(k2.portal?.lastViewedAt ?? "") || 0;
   if (Date.now() - last > 30 * 6e4) {
@@ -1611,7 +1604,7 @@ var SIG_RE = /^data:image\/png;base64,[A-Za-z0-9+/=]+$/;
 var DEPOSIT_METHODS = { credit: "\u05DB\u05E8\u05D8\u05D9\u05E1 \u05D0\u05E9\u05E8\u05D0\u05D9", bit: "\u05D1\u05D9\u05D8", transfer: "\u05D4\u05E2\u05D1\u05E8\u05D4 \u05D1\u05E0\u05E7\u05D0\u05D9\u05EA" };
 async function approveQuote(ctx) {
   const { store, k: k2, ip } = await caseByToken(ctx);
-  limit("write", `${ip}|${k2.id}`);
+  await limit("write", `${ip}|${k2.id}`);
   const body = await readJson(ctx.req);
   const q2 = openQuote(store, k2, body.quoteId);
   const name = typeof body.signature?.name === "string" ? body.signature.name.trim() : "";
@@ -1649,7 +1642,7 @@ async function approveQuote(ctx) {
 }
 async function rejectQuote(ctx) {
   const { store, k: k2, ip } = await caseByToken(ctx);
-  limit("write", `${ip}|${k2.id}`);
+  await limit("write", `${ip}|${k2.id}`);
   const body = await readJson(ctx.req);
   const q2 = openQuote(store, k2, body.quoteId);
   const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 500) : "";
@@ -1664,7 +1657,7 @@ async function rejectQuote(ctx) {
 var SYMPTOMS = { not_cooling: "\u05DC\u05D0 \u05DE\u05E7\u05E8\u05E8 / \u05DC\u05D0 \u05DE\u05D7\u05DE\u05DD", leak: "\u05E0\u05D6\u05D9\u05DC\u05EA \u05DE\u05D9\u05DD", noise: "\u05E8\u05E2\u05E9 \u05D7\u05E8\u05D9\u05D2", error_code: "\u05E7\u05D5\u05D3 \u05E9\u05D2\u05D9\u05D0\u05D4", no_power: "\u05DC\u05D0 \u05E0\u05D3\u05DC\u05E7", remote: "\u05E9\u05DC\u05D8", smell: "\u05E8\u05D9\u05D7", other: "\u05DE\u05E9\u05D4\u05D5 \u05D0\u05D7\u05E8" };
 async function serviceRequest(ctx) {
   const { store, k: k2, ip } = await caseByToken(ctx);
-  limit("write", `${ip}|${k2.id}`);
+  await limit("write", `${ip}|${k2.id}`);
   const body = await readJson(ctx.req);
   const symptom = body.symptom ? String(body.symptom) : void 0;
   if (symptom && !SYMPTOMS[symptom]) throw new HttpError(400, "validation_error", "\u05E1\u05D5\u05D2 \u05D4\u05EA\u05E7\u05DC\u05D4 \u05DC\u05D0 \u05EA\u05E7\u05D9\u05DF", { fields: [{ field: "symptom" }] });
@@ -1702,7 +1695,7 @@ async function serviceRequest(ctx) {
 }
 async function uploadFromPortal(ctx) {
   const { store, k: k2, ip } = await caseByToken(ctx);
-  limit("upload", `${ip}|${k2.id}`);
+  await limit("upload", `${ip}|${k2.id}`);
   const mime = String(ctx.req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
   if (!/^image\/(jpeg|png|webp|heic|heif|gif)$/.test(mime) && mime !== "application/pdf") {
     throw new HttpError(415, "unsupported_type", "\u05D0\u05E4\u05E9\u05E8 \u05DC\u05D4\u05E2\u05DC\u05D5\u05EA \u05EA\u05DE\u05D5\u05E0\u05D4 \u05D0\u05D5 PDF");
@@ -1728,7 +1721,7 @@ async function uploadFromPortal(ctx) {
 }
 async function postMessage(ctx) {
   const { store, k: k2, ip } = await caseByToken(ctx);
-  limit("message", `${ip}|${k2.id}`);
+  await limit("message", `${ip}|${k2.id}`);
   const body = await readJson(ctx.req);
   const text = typeof body.body === "string" ? body.body.trim() : "";
   if (!text || text.length > 2e3) throw new HttpError(400, "validation_error", "\u05D4\u05D4\u05D5\u05D3\u05E2\u05D4 \u05E8\u05D9\u05E7\u05D4 \u05D0\u05D5 \u05D0\u05E8\u05D5\u05DB\u05D4 \u05DE\u05D3\u05D9", { fields: [{ field: "body" }] });
@@ -1740,7 +1733,7 @@ async function postMessage(ctx) {
 }
 async function portalFile(ctx) {
   const { store, k: k2, ip } = await caseByToken(ctx);
-  limit("read", ip);
+  await limit("read", ip);
   const doc = caseDocs(store, k2).find((d) => d.id === ctx.params.docId);
   if (!doc?.fileId) throw new HttpError(404, "not_found", "\u05D4\u05E7\u05D5\u05D1\u05E5 \u05DC\u05D0 \u05E0\u05DE\u05E6\u05D0");
   return sendStoredFile(ctx.res, ctx.cfg, doc.fileId, { download: ctx.url.searchParams.get("download") === "1" });
@@ -1771,8 +1764,8 @@ function portalToken(len = 18) {
 async function createLead(ctx) {
   const store = await requireStore(ctx.cfg);
   const ip = clientIp(ctx.req, ctx.cfg.db.trustProxy);
-  limit("lead", ip);
-  limit("leadGlobal", "all", { peek: true });
+  await limit("lead", ip);
+  await limit("leadGlobal", "all", { peek: true });
   const body = await readJson(ctx.req);
   if (typeof body.website === "string" && body.website.trim()) return { status: 201, body: { ok: true, number: null, portalToken: null } };
   const name = typeof body.name === "string" ? body.name.trim().replace(/\s+/g, " ") : "";
@@ -1788,8 +1781,8 @@ async function createLead(ctx) {
   if (!type) fields.push({ field: "type", message: "\u05D1\u05D7\u05E8\u05D5 \u05D0\u05EA \u05E1\u05D5\u05D2 \u05D4\u05E4\u05E8\u05D5\u05D9\u05E7\u05D8" });
   if (photos.length > 6 || photos.some((p) => typeof p !== "string" || !PHOTO_RE.test(p) || p.length > 2e6)) fields.push({ field: "photos", message: "\u05E2\u05D3 6 \u05EA\u05DE\u05D5\u05E0\u05D5\u05EA" });
   if (fields.length) throw new HttpError(400, "validation_error", "\u05E0\u05EA\u05D5\u05E0\u05D9\u05DD \u05D7\u05E1\u05E8\u05D9\u05DD \u05D0\u05D5 \u05E9\u05D2\u05D5\u05D9\u05D9\u05DD", { fields });
-  limit("leadPhone", phone);
-  limit("leadGlobal", "all");
+  await limit("leadPhone", phone);
+  await limit("leadGlobal", "all");
   const source = SOURCES.includes(body.source) ? body.source : "website";
   const at = nowIso();
   const addressId = uid("ad");
@@ -3888,10 +3881,10 @@ function passwordProblem(pw) {
 }
 var b64 = (v) => Buffer.from(typeof v === "string" ? v : JSON.stringify(v)).toString("base64url");
 var HEADER = b64({ alg: "HS256", typ: "JWT" });
-var failuresByIp = createWindowLimiter({ max: 30, windowMs: 15 * 6e4 });
-var failuresByLogin = createWindowLimiter({ max: 8, windowMs: 15 * 6e4 });
-var failuresByAccount = createWindowLimiter({ max: 100, windowMs: 15 * 6e4 });
-var failuresByPasswordChange = createWindowLimiter({ max: 5, windowMs: 15 * 6e4 });
+var failuresByIp = createWindowLimiter({ max: 30, windowMs: 15 * 6e4, name: "auth.ip" });
+var failuresByLogin = createWindowLimiter({ max: 8, windowMs: 15 * 6e4, name: "auth.login" });
+var failuresByAccount = createWindowLimiter({ max: 100, windowMs: 15 * 6e4, name: "auth.account" });
+var failuresByPasswordChange = createWindowLimiter({ max: 5, windowMs: 15 * 6e4, name: "auth.password" });
 function cleanUser(u) {
   const out = { ...u };
   for (const k2 of SECRET_FIELDS) delete out[k2];
@@ -3972,7 +3965,7 @@ function createSupabase(env, fetchImpl = (...a) => globalThis.fetch(...a)) {
       throw dbDown();
     }
   }
-  async function rpc(name, args = {}) {
+  async function rpc2(name, args = {}) {
     const res = await call(`/rest/v1/rpc/${name}`, {
       method: "POST",
       headers: { ...service, "content-type": "application/json", accept: "application/json" },
@@ -4061,7 +4054,7 @@ function createSupabase(env, fetchImpl = (...a) => globalThis.fetch(...a)) {
     if (res.status === 400 || res.status === 404) return null;
     throw new HttpError(502, "storage_failed", "\u05E7\u05E8\u05D9\u05D0\u05EA \u05D4\u05E7\u05D5\u05D1\u05E5 \u05DE\u05D4\u05D0\u05D7\u05E1\u05D5\u05DF \u05E0\u05DB\u05E9\u05DC\u05D4");
   }
-  return { rpc, getUser, listUsers, upsertUser, updateUser, signIn, upload, download };
+  return { rpc: rpc2, getUser, listUsers, upsertUser, updateUser, signIn, upload, download };
 }
 
 // api/src/users.js
@@ -4136,7 +4129,7 @@ async function setUserPassword({ req, cfg, params, caller }) {
   await cfg.edge.rpc("sys_set_member", { p_auth_id: account?.id ?? mine.authId, p_user_id: target.id, p_login_email: email, p_must_change: mustChange });
   return { status: 200, body: temporary ? { ok: true, temporaryPassword: temporary, login } : { ok: true, login } };
 }
-var failuresByIp2 = createWindowLimiter({ max: 30, windowMs: 15 * 6e4 });
+var failuresByIp2 = createWindowLimiter({ max: 30, windowMs: 15 * 6e4, name: "bootstrap.ip" });
 function tooMany(retryMs) {
   const e = new HttpError(429, "too_many_attempts", `\u05D9\u05D5\u05EA\u05E8 \u05DE\u05D3\u05D9 \u05E0\u05D9\u05E1\u05D9\u05D5\u05E0\u05D5\u05EA. \u05D0\u05E4\u05E9\u05E8 \u05DC\u05E0\u05E1\u05D5\u05EA \u05E9\u05D5\u05D1 \u05D1\u05E2\u05D5\u05D3 ${Math.ceil(retryMs / 6e4)} \u05D3\u05E7\u05D5\u05EA`);
   e.retryAfter = Math.ceil(retryMs / 1e3);
@@ -4146,17 +4139,17 @@ var already = () => new HttpError(409, "already_bootstrapped", "\u05D4\u05DE\u05
 async function bootstrap({ req, cfg }) {
   const secret = String(cfg.edge.env.BOOTSTRAP_TOKEN ?? "").trim();
   const ip = clientIp(req, 0);
-  const peek = failuresByIp2.peek(ip);
+  const peek = await failuresByIp2.peek(ip);
   if (!peek.allowed) throw tooMany(peek.retryAfterMs);
   if (!secret) throw new HttpError(403, "bootstrap_token_required", "\u05DB\u05D3\u05D9 \u05DC\u05D4\u05E7\u05D9\u05DD \u05D0\u05EA \u05D4\u05DE\u05E2\u05E8\u05DB\u05EA \u05E6\u05E8\u05D9\u05DA \u05DC\u05D4\u05D2\u05D3\u05D9\u05E8 \u05D1\u05E4\u05D5\u05E0\u05E7\u05E6\u05D9\u05D4 \u05E7\u05D5\u05D3 \u05D4\u05E7\u05DE\u05D4 (BOOTSTRAP_TOKEN) \u05D5\u05DC\u05D4\u05D6\u05D9\u05DF \u05D0\u05D5\u05EA\u05D5 \u05DB\u05D0\u05DF");
-  const { rpc, sb } = cfg.edge;
-  const empty = await rpc("sys_is_empty");
-  const resume = !empty && !(await rpc("sys_members") ?? []).length;
+  const { rpc: rpc2, sb } = cfg.edge;
+  const empty = await rpc2("sys_is_empty");
+  const resume = !empty && !(await rpc2("sys_members") ?? []).length;
   if (!empty && !resume) throw already();
   const body = await readJson(req);
   if (!String(body.bootstrapToken ?? "").trim()) throw new HttpError(403, "bootstrap_token_required", "\u05E6\u05E8\u05D9\u05DA \u05DC\u05D4\u05D6\u05D9\u05DF \u05D0\u05EA \u05E7\u05D5\u05D3 \u05D4\u05D4\u05E7\u05DE\u05D4 (BOOTSTRAP_TOKEN)");
   if (!safeEqual(String(body.bootstrapToken ?? ""), secret)) {
-    failuresByIp2.hit(ip);
+    await failuresByIp2.hit(ip);
     throw new HttpError(401, "invalid_bootstrap_token", "\u05E7\u05D5\u05D3 \u05D4\u05D4\u05E7\u05DE\u05D4 (BOOTSTRAP_TOKEN) \u05E9\u05D2\u05D5\u05D9");
   }
   const problem = passwordProblem(body.password);
@@ -4169,7 +4162,7 @@ async function bootstrap({ req, cfg }) {
     if (problem) throw new HttpError(400, "validation_error", problem, { fields: [{ field: "password", message: problem }] });
     if (!loginEmail(userLogin(admin))) throw noLogin();
     try {
-      seq = (await rpc("sys_import", { snapshot: snap })).seq;
+      seq = (await rpc2("sys_import", { snapshot: snap })).seq;
     } catch (e) {
       if (e instanceof RpcError && /already_bootstrapped/.test(e.message)) throw already();
       throw e;
@@ -4184,7 +4177,7 @@ async function bootstrap({ req, cfg }) {
   }
   const email = loginEmail(userLogin(admin));
   const account = await sb.upsertUser(email, body.password);
-  await rpc("sys_set_member", { p_auth_id: account.id, p_user_id: admin.id, p_login_email: email, p_must_change: false });
+  await rpc2("sys_set_member", { p_auth_id: account.id, p_user_id: admin.id, p_login_email: email, p_must_change: false });
   const s2 = await sb.signIn(email, body.password);
   const session = s2 ? { access_token: s2.access_token, refresh_token: s2.refresh_token, expires_in: s2.expires_in, expires_at: s2.expires_at } : null;
   return { status: 201, body: { session, user: admin, seq, login: userLogin(admin) } };
@@ -4200,9 +4193,9 @@ function toState(dump) {
 }
 var PgStore = class extends DocStore {
   /** rpc(name, args) -> JSON, as the service role */
-  constructor(rpc) {
-    super({ adapter: { load: async () => toState(await rpc("sys_dump")) } });
-    this.rpc = rpc;
+  constructor(rpc2) {
+    super({ adapter: { load: async () => toState(await rpc2("sys_dump")) } });
+    this.rpc = rpc2;
     this.pending = [];
     this.persisting = Promise.resolve();
   }
@@ -4395,15 +4388,15 @@ var EdgeResponse = class extends Writable {
 // api/src/router.js
 var CORS_ALLOW_HEADERS2 = "authorization, apikey, x-client-info, content-type, x-file-name, x-case-id, x-folder, x-drive-folder-id, anthropic-beta, x-client-id";
 var LIMITS3 = {
-  ai: createWindowLimiter({ max: 60, windowMs: 60 * 6e4 }),
-  whatsapp: createWindowLimiter({ max: 100, windowMs: 60 * 6e4 }),
-  google: createWindowLimiter({ max: 300, windowMs: 10 * 6e4 }),
-  priority: createWindowLimiter({ max: 300, windowMs: 10 * 6e4 })
+  ai: createWindowLimiter({ max: 60, windowMs: 60 * 6e4, name: "route.ai" }),
+  whatsapp: createWindowLimiter({ max: 100, windowMs: 60 * 6e4, name: "route.whatsapp" }),
+  google: createWindowLimiter({ max: 300, windowMs: 10 * 6e4, name: "route.google" }),
+  priority: createWindowLimiter({ max: 300, windowMs: 10 * 6e4, name: "route.priority" })
 };
-function rateLimit(route, caller, ip) {
+async function rateLimit(route, caller, ip) {
   const lim = route.limit && LIMITS3[route.limit];
   if (!lim) return;
-  const v = lim.hit(caller?.user ? `u:${caller.user.id}` : `ip:${ip}`);
+  const v = await lim.hit(caller?.user ? `u:${caller.user.id}` : `ip:${ip}`);
   if (!v.allowed) {
     const e = new HttpError(429, "too_many_requests", "\u05D9\u05D5\u05EA\u05E8 \u05DE\u05D3\u05D9 \u05D1\u05E7\u05E9\u05D5\u05EA \u05D1\u05D6\u05DE\u05DF \u05E7\u05E6\u05E8. \u05D0\u05E4\u05E9\u05E8 \u05DC\u05E0\u05E1\u05D5\u05EA \u05E9\u05D5\u05D1 \u05DE\u05D0\u05D5\u05D7\u05E8 \u05D9\u05D5\u05EA\u05E8");
     e.retryAfter = Math.ceil(v.retryAfterMs / 1e3);
@@ -4560,6 +4553,7 @@ async function serve(request, res, env, opts) {
   securityHeaders(res);
   try {
     cfg = edgeConfig(env, opts);
+    setLimiterRpc(cfg.edge.rpc);
     const u = new URL(request.url);
     const path = routePath(u.pathname);
     const req = nodeRequest(request, `${path}${u.search}`);
@@ -4577,7 +4571,7 @@ async function serve(request, res, env, opts) {
     const caller = route.access === "member" ? await requireMember(cfg, req) : void 0;
     const ip = clientIp(req, 0);
     if (route.noInstaller && caller?.user?.role === "installer") throw new HttpError(403, "forbidden", "\u05D0\u05D9\u05DF \u05D4\u05E8\u05E9\u05D0\u05D4 \u05DC\u05E4\u05E2\u05D5\u05DC\u05D4 \u05D4\u05D6\u05D5");
-    rateLimit(route, caller, ip);
+    await rateLimit(route, caller, ip);
     const url = new URL(req.url, "http://localhost");
     const result = await route.handle({ req, res, url, cfg, params, caller, ip });
     await cfg.edge.persist();

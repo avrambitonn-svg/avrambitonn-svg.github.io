@@ -8,7 +8,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { HttpError } from '../../../../server/src/http.js';
 import { googleFeatures, knownDriveFolder, safeFileName, safeMime, uploadBufferToDrive } from '../../../../server/src/google.js';
-import { createWindowLimiter } from '../../../../server/src/limiter.js';
+import { createWindowLimiter } from './limiter.js';
 import { looksLike } from '../../../../server/src/filetype.js';
 import { getStore } from './db.js';
 
@@ -16,7 +16,7 @@ const FILE_ID_RE = /^f[a-f0-9]{24}$/;
 const INLINE = /^(image\/(png|jpe?g|gif|webp|avif|bmp|heic|heif)|application\/pdf|text\/plain|video\/[a-z0-9.+-]+|audio\/[a-z0-9.+-]+)$/;
 
 // uploads per signed-in user (the portal and the lead form have their own limits)
-const uploadsByUser = createWindowLimiter({ max: 120, windowMs: 10 * 60_000 });
+const uploadsByUser = createWindowLimiter({ max: 120, windowMs: 10 * 60_000, name: 'files.upload' });
 export const resetUploadLimits = () => uploadsByUser.clear();
 export const resetFileQuota = () => {};
 export const filesDir = () => 'storage:files';
@@ -93,7 +93,7 @@ export async function sendStoredFile(res, cfg, id, { download = false } = {}) {
 /** POST /api/files - raw body. Headers: content-type, x-file-name (URI-encoded), optional x-case-id, x-folder, x-drive-folder-id. */
 export async function uploadFile({ req, cfg, caller }) {
   const user = caller.user;
-  const v = uploadsByUser.hit(user.id);
+  const v = await uploadsByUser.hit(user.id);
   if (!v.allowed) {
     const e = new HttpError(429, 'too_many_requests', 'יותר מדי העלאות בזמן קצר. אפשר לנסות שוב בעוד כמה דקות');
     e.retryAfter = Math.ceil(v.retryAfterMs / 1000);

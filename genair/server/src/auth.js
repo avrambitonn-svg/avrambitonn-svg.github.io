@@ -144,10 +144,10 @@ export const isManager = (user) => user?.role === 'admin' || user?.role === 'off
 
 // Wrong passwords: per address; per account from one address (so a stranger cannot lock a user out from their
 // own network); and a high ceiling per account from everywhere together, against a spread-out attack.
-const failuresByIp = createWindowLimiter({ max: 30, windowMs: 15 * 60_000 });
-const failuresByLogin = createWindowLimiter({ max: 8, windowMs: 15 * 60_000 });
-const failuresByAccount = createWindowLimiter({ max: 100, windowMs: 15 * 60_000 });
-const failuresByPasswordChange = createWindowLimiter({ max: 5, windowMs: 15 * 60_000 });
+const failuresByIp = createWindowLimiter({ max: 30, windowMs: 15 * 60_000, name: 'auth.ip' });
+const failuresByLogin = createWindowLimiter({ max: 8, windowMs: 15 * 60_000, name: 'auth.login' });
+const failuresByAccount = createWindowLimiter({ max: 100, windowMs: 15 * 60_000, name: 'auth.account' });
+const failuresByPasswordChange = createWindowLimiter({ max: 5, windowMs: 15 * 60_000, name: 'auth.password' });
 export const resetLoginLimits = () => {
   failuresByIp.clear();
   failuresByLogin.clear();

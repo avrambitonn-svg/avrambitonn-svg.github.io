@@ -15,10 +15,10 @@ import { createWindowLimiter } from './limiter.js';
 
 // per signed-in user (or per address for APP_TOKEN callers): things that cost money or reach outside
 const LIMITS = {
-  ai: createWindowLimiter({ max: 60, windowMs: 60 * 60_000 }),
-  whatsapp: createWindowLimiter({ max: 100, windowMs: 60 * 60_000 }),
-  google: createWindowLimiter({ max: 300, windowMs: 10 * 60_000 }),
-  priority: createWindowLimiter({ max: 300, windowMs: 10 * 60_000 }),
+  ai: createWindowLimiter({ max: 60, windowMs: 60 * 60_000, name: 'route.ai' }),
+  whatsapp: createWindowLimiter({ max: 100, windowMs: 60 * 60_000, name: 'route.whatsapp' }),
+  google: createWindowLimiter({ max: 300, windowMs: 10 * 60_000, name: 'route.google' }),
+  priority: createWindowLimiter({ max: 300, windowMs: 10 * 60_000, name: 'route.priority' }),
 };
 export const resetRouteLimits = () => Object.values(LIMITS).forEach((l) => l.clear());
 

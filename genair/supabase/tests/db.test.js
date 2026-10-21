@@ -378,3 +378,19 @@ test('security log: denied writes are recorded; managers read the log', async ()
   await pool.query(`select public.sys_audit('bootstrap', 'u-admin', '{"ok":true}')`);
   assert.equal((await as(U.admin, 'select public.db_audit(1)'))[0].action, 'bootstrap');
 });
+
+test('rate limits: one counter per key for every caller, a peek does not count, the window resets', async () => {
+  const hit = async (key, peek = false, windowMs = 60_000) =>
+    (await pool.query('select public.sys_hit($1, 2, $2, $3) r', [key, windowMs, peek])).rows[0].r;
+  assert.equal((await hit('t|a', true)).allowed, true);
+  assert.equal((await hit('t|a')).allowed, true);
+  assert.equal((await hit('t|a')).allowed, true);
+  const third = await hit('t|a');
+  assert.equal(third.allowed, false);
+  assert.ok(third.retryAfterMs > 0 && third.retryAfterMs <= 60_000);
+  assert.equal((await hit('t|a', true)).allowed, false);
+  assert.equal((await hit('t|b')).allowed, true, 'another key has its own counter');
+  await pool.query(`update app.rate set reset_at = now() - interval '1 second' where key = 't|a'`);
+  assert.equal((await hit('t|a')).allowed, true, 'a new window starts from zero');
+  await assert.rejects(as(U.admin, `select public.sys_hit('t|a', 2, 1000)`), /server_only|permission denied/);
+});

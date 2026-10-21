@@ -21,22 +21,22 @@ export const firstName = (name) => {
 
 const limiters = {
   // every portal request, counted per address before the link is even looked up
-  visit: createWindowLimiter({ max: 300, windowMs: 10 * 60_000 }),
+  visit: createWindowLimiter({ max: 300, windowMs: 10 * 60_000, name: 'portal.visit' }),
   // links that matched no case: someone guessing
-  miss: createWindowLimiter({ max: 20, windowMs: 10 * 60_000 }),
-  read: createWindowLimiter({ max: 120, windowMs: 10 * 60_000 }),
-  write: createWindowLimiter({ max: 30, windowMs: 10 * 60_000 }),
-  message: createWindowLimiter({ max: 20, windowMs: 10 * 60_000 }),
-  upload: createWindowLimiter({ max: 10, windowMs: 10 * 60_000 }),
-  lead: createWindowLimiter({ max: 5, windowMs: 10 * 60_000 }),
-  leadPhone: createWindowLimiter({ max: 3, windowMs: 60 * 60_000 }),
+  miss: createWindowLimiter({ max: 20, windowMs: 10 * 60_000, name: 'portal.miss' }),
+  read: createWindowLimiter({ max: 120, windowMs: 10 * 60_000, name: 'portal.read' }),
+  write: createWindowLimiter({ max: 30, windowMs: 10 * 60_000, name: 'portal.write' }),
+  message: createWindowLimiter({ max: 20, windowMs: 10 * 60_000, name: 'portal.message' }),
+  upload: createWindowLimiter({ max: 10, windowMs: 10 * 60_000, name: 'portal.upload' }),
+  lead: createWindowLimiter({ max: 5, windowMs: 10 * 60_000, name: 'portal.lead' }),
+  leadPhone: createWindowLimiter({ max: 3, windowMs: 60 * 60_000, name: 'portal.leadPhone' }),
   // a ceiling for the whole form, counted only for valid leads, so junk requests cannot use it up
-  leadGlobal: createWindowLimiter({ max: 1000, windowMs: 60 * 60_000 }),
+  leadGlobal: createWindowLimiter({ max: 1000, windowMs: 60 * 60_000, name: 'portal.leadGlobal' }),
 };
 export const resetPortalLimits = () => Object.values(limiters).forEach((l) => l.clear());
 
-function limit(kind, key, { peek = false } = {}) {
-  const v = peek ? limiters[kind].peek(key) : limiters[kind].hit(key);
+async function limit(kind, key, { peek = false } = {}) {
+  const v = await (peek ? limiters[kind].peek(key) : limiters[kind].hit(key));
   if (!v.allowed) {
     const e = new HttpError(429, 'too_many_requests', 'יותר מדי בקשות. נסו שוב בעוד כמה דקות');
     e.retryAfter = Math.ceil(v.retryAfterMs / 1000);
@@ -73,12 +73,12 @@ function portalOpen(k) {
 async function caseByToken(ctx) {
   const store = await requireStore(ctx.cfg);
   const ip = clientIp(ctx.req, ctx.cfg.db.trustProxy);
-  limit('visit', ip);
-  limit('miss', ip, { peek: true });
+  await limit('visit', ip);
+  await limit('miss', ip, { peek: true });
   const token = String(ctx.params.token ?? '');
   const k = TOKEN_RE.test(token) ? store.get('cases', caseIdByToken(store, token) ?? '') : undefined;
   if (!k || k.portal?.token !== token || !portalOpen(k)) {
-    limiters.miss.hit(ip);
+    await limiters.miss.hit(ip);
     throw notFound();
   }
   return { store, k, ip };
@@ -179,14 +179,14 @@ export function portalData(store, k) {
 
 export async function getPortal(ctx) {
   const { store, k, ip } = await caseByToken(ctx);
-  limit('read', ip);
+  await limit('read', ip);
   return { status: 200, body: portalData(store, k) };
 }
 
 /** A visit: "last viewed", one activity line per half hour, and the first look at a sent quote. */
 export async function viewPortal(ctx) {
   const { store, k, ip } = await caseByToken(ctx);
-  limit('write', `${ip}|${k.id}`);
+  await limit('write', `${ip}|${k.id}`);
   const ops = [];
   const last = Date.parse(k.portal?.lastViewedAt ?? '') || 0;
   if (Date.now() - last > 30 * 60_000) {
@@ -217,7 +217,7 @@ const DEPOSIT_METHODS = { credit: 'כרטיס אשראי', bit: 'ביט', transf
 /** Signature + deposit method. The server sets the quote and case fields; a staff device finishes the rest once (approvedVia). */
 export async function approveQuote(ctx) {
   const { store, k, ip } = await caseByToken(ctx);
-  limit('write', `${ip}|${k.id}`);
+  await limit('write', `${ip}|${k.id}`);
   const body = await readJson(ctx.req);
   const q = openQuote(store, k, body.quoteId);
   const name = typeof body.signature?.name === 'string' ? body.signature.name.trim() : '';
@@ -260,7 +260,7 @@ export async function approveQuote(ctx) {
 
 export async function rejectQuote(ctx) {
   const { store, k, ip } = await caseByToken(ctx);
-  limit('write', `${ip}|${k.id}`);
+  await limit('write', `${ip}|${k.id}`);
   const body = await readJson(ctx.req);
   const q = openQuote(store, k, body.quoteId);
   const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) : '';
@@ -277,7 +277,7 @@ const SYMPTOMS = { not_cooling: 'לא מקרר / לא מחמם', leak: 'נזיל
 
 export async function serviceRequest(ctx) {
   const { store, k, ip } = await caseByToken(ctx);
-  limit('write', `${ip}|${k.id}`);
+  await limit('write', `${ip}|${k.id}`);
   const body = await readJson(ctx.req);
   const symptom = body.symptom ? String(body.symptom) : undefined;
   if (symptom && !SYMPTOMS[symptom]) throw new HttpError(400, 'validation_error', 'סוג התקלה לא תקין', { fields: [{ field: 'symptom' }] });
@@ -317,7 +317,7 @@ export async function serviceRequest(ctx) {
 /** A photo or PDF from the customer: stored, filed under the case's "customer" folder, staff notified. */
 export async function uploadFromPortal(ctx) {
   const { store, k, ip } = await caseByToken(ctx);
-  limit('upload', `${ip}|${k.id}`);
+  await limit('upload', `${ip}|${k.id}`);
   const mime = String(ctx.req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
   if (!/^image\/(jpeg|png|webp|heic|heif|gif)$/.test(mime) && mime !== 'application/pdf') {
     throw new HttpError(415, 'unsupported_type', 'אפשר להעלות תמונה או PDF');
@@ -346,7 +346,7 @@ export async function uploadFromPortal(ctx) {
 /** Chat from the customer: Message { channel: 'portal', direction: 'in' }. Staff answer with direction 'out'. */
 export async function postMessage(ctx) {
   const { store, k, ip } = await caseByToken(ctx);
-  limit('message', `${ip}|${k.id}`);
+  await limit('message', `${ip}|${k.id}`);
   const body = await readJson(ctx.req);
   const text = typeof body.body === 'string' ? body.body.trim() : '';
   if (!text || text.length > 2000) throw new HttpError(400, 'validation_error', 'ההודעה ריקה או ארוכה מדי', { fields: [{ field: 'body' }] });
@@ -359,7 +359,7 @@ export async function postMessage(ctx) {
 
 export async function portalFile(ctx) {
   const { store, k, ip } = await caseByToken(ctx);
-  limit('read', ip);
+  await limit('read', ip);
   const doc = caseDocs(store, k).find((d) => d.id === ctx.params.docId);
   if (!doc?.fileId) throw new HttpError(404, 'not_found', 'הקובץ לא נמצא');
   return sendStoredFile(ctx.res, ctx.cfg, doc.fileId, { download: ctx.url.searchParams.get('download') === '1' });
@@ -390,8 +390,8 @@ function portalToken(len = 18) {
 export async function createLead(ctx) {
   const store = await requireStore(ctx.cfg);
   const ip = clientIp(ctx.req, ctx.cfg.db.trustProxy);
-  limit('lead', ip);
-  limit('leadGlobal', 'all', { peek: true });
+  await limit('lead', ip);
+  await limit('leadGlobal', 'all', { peek: true });
   const body = await readJson(ctx.req);
   if (typeof body.website === 'string' && body.website.trim()) return { status: 201, body: { ok: true, number: null, portalToken: null } };
   const name = typeof body.name === 'string' ? body.name.trim().replace(/\s+/g, ' ') : '';
@@ -407,8 +407,8 @@ export async function createLead(ctx) {
   if (!type) fields.push({ field: 'type', message: 'בחרו את סוג הפרויקט' });
   if (photos.length > 6 || photos.some((p) => typeof p !== 'string' || !PHOTO_RE.test(p) || p.length > 2_000_000)) fields.push({ field: 'photos', message: 'עד 6 תמונות' });
   if (fields.length) throw new HttpError(400, 'validation_error', 'נתונים חסרים או שגויים', { fields });
-  limit('leadPhone', phone);
-  limit('leadGlobal', 'all');
+  await limit('leadPhone', phone);
+  await limit('leadGlobal', 'all');
 
   const source = SOURCES.includes(body.source) ? body.source : 'website';
   const at = nowIso();
