@@ -64,7 +64,16 @@ export function dueKinds(state, sync, now = Date.now()) {
   const ago = (k) => now - (Date.parse(state.runs?.[k]?.at ?? '') || 0);
   const full = state.runs?.full;
   if (ago('full') >= 6 * HOUR || (full?.error === STOPPED && ago('full') >= HOUR / 2)) return ['full'];
-  return ago('warm') >= sync.warmSec * 1000 ? ['hot', 'warm'] : ['hot'];
+  // a full round did the warm streams too
+  return Math.min(ago('warm'), ago('full')) >= sync.warmSec * 1000 ? ['hot', 'warm'] : ['hot'];
+}
+
+/** Waits for what the round queued behind itself (a new customer's quotes and contacts go out at once). */
+async function settle(engine) {
+  for (let c = null; c !== engine.chain; ) {
+    c = engine.chain;
+    await c;
+  }
 }
 
 // ------------------------------------------------------------ one round at a time
@@ -113,6 +122,7 @@ export async function runRound(cfg, { kinds } = {}) {
     for (const kind of todo) {
       if (Date.now() > until) break;
       await engine.run(kind); // never throws: errors land in the engine's state
+      await settle(engine);
       done.push(kind);
       await store.persist();
     }

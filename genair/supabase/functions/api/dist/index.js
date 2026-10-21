@@ -3395,7 +3395,13 @@ function dueKinds(state, sync, now = Date.now()) {
   const ago = (k2) => now - (Date.parse(state.runs?.[k2]?.at ?? "") || 0);
   const full = state.runs?.full;
   if (ago("full") >= 6 * HOUR2 || full?.error === STOPPED && ago("full") >= HOUR2 / 2) return ["full"];
-  return ago("warm") >= sync.warmSec * 1e3 ? ["hot", "warm"] : ["hot"];
+  return Math.min(ago("warm"), ago("full")) >= sync.warmSec * 1e3 ? ["hot", "warm"] : ["hot"];
+}
+async function settle(engine) {
+  for (let c = null; c !== engine.chain; ) {
+    c = engine.chain;
+    await c;
+  }
 }
 async function applyLock(cfg, op) {
   const r = await cfg.edge.rpc("sys_apply", { ops: [{ collection: LOCK.c, id: LOCK.id, at: Date.now(), ...op }], origin: ORIGIN });
@@ -3431,6 +3437,7 @@ async function runRound(cfg, { kinds } = {}) {
     for (const kind of todo) {
       if (Date.now() > until) break;
       await engine.run(kind);
+      await settle(engine);
       done.push(kind);
       await store.persist();
     }

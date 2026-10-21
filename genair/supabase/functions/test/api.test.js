@@ -389,6 +389,7 @@ test('cron: one round of the engine pushes to Priority and persists through sys_
   assert.deepEqual(r.json.kinds, ['full'], 'the first round is a full one');
   assert.equal(r.json.runs.full.ok, true, JSON.stringify(r.json));
 
+  assert.deepEqual(priority.writes().map((w) => w[1]), ['CUSTOMERS', 'ORDERS'], 'the customer, then (queued behind it) the quote approved in the portal as an order');
   assert.equal(priority.t.CUSTOMERS.length, 1, 'the reviewed customer was opened in Priority; the lead waits for review');
   assert.equal(priority.t.CUSTOMERS[0].CUSTNAME, 'GN000001', 'numbered from the database counter');
   const c1 = await fake.get('customers', 'c1');
@@ -397,6 +398,9 @@ test('cron: one round of the engine pushes to Priority and persists through sys_
   assert.equal(c1.temp, false);
   const by = (await fake.pool.query("select by from app.entities where collection = 'customers' and id = 'c1'")).rows[0].by;
   assert.equal(by, 'priority-sync');
+  const q1 = await fake.get('quotes', 'q1');
+  assert.equal(q1.sync.status, 'synced');
+  assert.equal(q1.sync.priorityId, priority.t.ORDERS[0].ORDNAME);
   const lead = await fake.get('customers', s.leadCustomer);
   assert.equal(lead.sync.status, 'pending');
   assert.match(lead.sync.error, /ממתין לאישור/);
@@ -410,7 +414,7 @@ test('cron: one round of the engine pushes to Priority and persists through sys_
 
   const next = await call('POST', '/api/priority/cron', { env: syncEnv(), opts: { priorityClient: priority }, headers: { 'x-cron-key': 'cron-secret' } });
   assert.deepEqual(next.json.kinds, ['hot'], 'then hot rounds; warm when PRIORITY_SYNC_WARM_SEC passed');
-  assert.equal(priority.writes().length, 1, 'nothing new to send');
+  assert.equal(priority.writes().length, 2, 'nothing new to send');
 });
 
 test('cron: one round at a time (lease), an expired lease is taken over', async () => {
@@ -446,4 +450,57 @@ test('Priority webhook: secret key', async () => {
   const r = await call('POST', '/api/priority/webhook?key=hook-secret', { env: e, opts: { priorityClient: new FakePriority() }, body: { form: 'ORDERS' } });
   assert.equal(r.status, 202);
   assert.deepEqual(r.json, { ok: true, queued: 'hot' });
+});
+
+// ------------------------------------------------------------ AI proxy (streaming) and portal upload
+
+test('AI proxy: the server\'s module streams Anthropic\'s server-sent events through', async () => {
+  const realFetch = globalThis.fetch;
+  let seen;
+  globalThis.fetch = async (url, init) => {
+    if (!String(url).startsWith('https://api.anthropic.com/')) return realFetch(url, init);
+    seen = { url: String(url), headers: init.headers, body: Buffer.from(init.body).toString('utf8') };
+    const enc = new TextEncoder();
+    const body = new ReadableStream({
+      async start(c) {
+        c.enqueue(enc.encode('event: message_start\ndata: {"type":"message_start"}\n\n'));
+        await new Promise((r) => setTimeout(r, 20));
+        c.enqueue(enc.encode('event: message_stop\ndata: {"type":"message_stop"}\n\n'));
+        c.close();
+      },
+    });
+    return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream', 'request-id': 'req_1' } });
+  };
+  try {
+    const e = { ...env, ANTHROPIC_API_KEY: 'sk-test' };
+    const req = { model: 'claude-opus-5-5', max_tokens: 100, stream: true, messages: [{ role: 'user', content: 'שלום' }] };
+    const r = await call('POST', '/api/ai/messages', { token: s.office, env: e, body: req });
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get('content-type'), 'text/event-stream');
+    assert.equal(r.headers.get('request-id'), 'req_1');
+    assert.equal(r.buf.toString('utf8'), 'event: message_start\ndata: {"type":"message_start"}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n');
+    assert.equal(seen.headers['x-api-key'], 'sk-test');
+    assert.deepEqual(JSON.parse(seen.body), req, 'the original bytes are forwarded');
+    const bad = await call('POST', '/api/ai/messages', { token: s.office, env: e, body: { ...req, model: 'other' } });
+    assert.equal(bad.status, 400);
+    assert.equal((await call('POST', '/api/ai/messages', { env: e, body: req })).status, 401);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('portal upload: a photo from the customer, filed under the case', async () => {
+  const data = Buffer.from(PNG, 'base64');
+  const r = await call('POST', `/api/portal/${s.portalToken}/upload`, { raw: data, headers: { 'content-type': 'image/png', 'x-file-name': encodeURIComponent('נזילה.png') } });
+  assert.equal(r.status, 201, JSON.stringify(r.json));
+  const doc = await fake.get('docs', r.json.id);
+  assert.equal(doc.caseId, 'k1');
+  assert.equal(doc.source, 'portal');
+  const meta = await fake.rpc('sys_file', { p_id: doc.fileId });
+  assert.match(meta.path, new RegExp(`^portal/k1/${doc.fileId}-`));
+  assert.equal(meta.name, 'נזילה.png');
+  const back = await call('GET', r.json.url);
+  assert.deepEqual(back.buf, data);
+  const exe = await call('POST', `/api/portal/${s.portalToken}/upload`, { raw: Buffer.from('MZ'), headers: { 'content-type': 'application/x-msdownload' } });
+  assert.equal(exe.status, 415);
 });

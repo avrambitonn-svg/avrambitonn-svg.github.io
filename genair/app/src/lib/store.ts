@@ -252,8 +252,9 @@ export const useApp = create<AppState>()(
       }
     },
     {
-      // לכל מצב עותק משלו: נתוני ההדגמה לא מתערבבים עם המסד המשותף
-      name: serverMode ? 'genair-ops-shared-v1' : 'genair-ops-v1',
+      // לכל מצב עותק משלו: נתוני ההדגמה לא מתערבבים עם המסד המשותף. העותק של Supabase חדש (לא של השרת הקודם),
+      // כדי שמספרי הסנכרון של השרת הקודם לא יתערבבו עם אלה של Supabase
+      name: serverMode ? 'genair-ops-supabase-v1' : 'genair-ops-v1',
       version: 1,
       storage: createJSONStorage(() => idbStorage),
       // מפתח ה-AI לא נשמר במאגר (רק ב-sessionStorage); במסד המשותף גם לא אסימון הגישה
