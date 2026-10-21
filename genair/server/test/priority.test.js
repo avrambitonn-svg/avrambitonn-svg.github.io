@@ -148,7 +148,7 @@ test('priorityConfig: demo, live user/password, live PAT, off, invalid mode', ()
 // ---------------------------------------------------------------- routes
 
 test('writes are blocked (403) unless PRIORITY_ALLOW_WRITE=true, without any network call', async (t) => {
-  useEnv(t, { PRIORITY_MODE: 'demo' });
+  useEnv(t, { PRIORITY_MODE: 'live', PRIORITY_URL: 'https://p.example/odata/Priority/tabula.ini/demo', PRIORITY_USER: 'u', PRIORITY_PASSWORD: 'p' });
   const calls = forbidFetch(t);
   const s = await startServer(t);
   for (const path of ['/api/priority/customers', '/api/priority/quotes', '/api/priority/orders']) {
@@ -156,6 +156,18 @@ test('writes are blocked (403) unless PRIORITY_ALLOW_WRITE=true, without any net
     assert.equal(r.status, 403, path);
     assert.equal(r.json.error.code, 'priority_write_disabled');
     assert.match(r.json.error.message, /PRIORITY_ALLOW_WRITE/);
+  }
+  assert.equal(calls.length, 0);
+});
+
+test('the shared public demo is never written to, even with PRIORITY_ALLOW_WRITE=true', async (t) => {
+  useEnv(t, { PRIORITY_MODE: 'demo', PRIORITY_ALLOW_WRITE: 'true' });
+  const calls = forbidFetch(t);
+  const s = await startServer(t);
+  for (const path of ['/api/priority/customers', '/api/priority/quotes', '/api/priority/orders']) {
+    const r = await s.request('POST', path, { body: { custname: 'C', name: 'n', phone: '0501234567', lines: [{ partname: 'P', qty: 1 }] } });
+    assert.equal(r.status, 403, path);
+    assert.equal(r.json.error.code, 'priority_write_disabled');
   }
   assert.equal(calls.length, 0);
 });

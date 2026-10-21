@@ -35,6 +35,10 @@ export async function aiMessages({ req, res, cfg }) {
     throw new HttpError(400, 'invalid_json', 'גוף הבקשה חייב להיות אובייקט JSON');
   }
   checkModel(body.model, ai.allowedModels);
+  // a ceiling per request, so one call cannot run up the bill (AI_MAX_TOKENS)
+  if (!Number.isInteger(body.max_tokens) || body.max_tokens < 1 || body.max_tokens > ai.maxTokens) {
+    throw new HttpError(400, 'max_tokens_not_allowed', `max_tokens חייב להיות בין 1 ל-${ai.maxTokens}`, { max: ai.maxTokens });
+  }
   const beta = checkBetaHeader(req.headers['anthropic-beta'], ai.allowedBetas);
 
   const headers = {

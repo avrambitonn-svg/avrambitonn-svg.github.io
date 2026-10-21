@@ -15,7 +15,7 @@ export function getStore(cfg) {
   const key = storeKey(cfg);
   let p = stores.get(key);
   if (!p) {
-    const adapter = cfg.db.mode === 'file' ? new JsonFileAdapter(cfg.db.dataDir) : new MemoryAdapter();
+    const adapter = cfg.db.mode === 'file' ? new JsonFileAdapter(cfg.db.dataDir, { encryptionKey: cfg.db.encryptionKey }) : new MemoryAdapter();
     p = new DocStore({ adapter, flushMs: cfg.db.flushMs }).init();
     p.catch(() => stores.delete(key));
     stores.set(key, p);

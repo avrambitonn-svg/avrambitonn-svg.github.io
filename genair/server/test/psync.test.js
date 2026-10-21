@@ -468,7 +468,7 @@ test('sync routes: managers only; the webhook needs its key', async (t) => {
   assert.equal((await s.request('POST', '/api/priority/webhook?key=wrong', { body: {} })).status, 401);
   assert.equal((await s.request('POST', '/api/priority/webhook?key=hook-secret', { body: { form: 'ORDERS' } })).status, 202);
 
-  const health = await s.request('GET', '/api/health');
+  const health = await s.request('GET', '/api/health', { headers: bearer(admin) });
   assert.equal(health.json.features.prioritySync, true);
 
   // clients never write the engine's state or money lines that came from Priority

@@ -7,7 +7,7 @@ import { createPriorityClient } from '../priority.js';
 import { PrioritySync } from './engine.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { filesDir } from '../files.js';
+import { filesDir, readFileMeta } from '../files.js';
 
 let engine = null;
 
@@ -18,7 +18,7 @@ export async function startPrioritySync(cfg, opts = {}) {
   const store = await getStore(cfg);
   if (!store) return null;
   const read = (id) => readFile(join(filesDir(cfg), String(id).replace(/[^A-Za-z0-9_.-]/g, ''))).catch(() => null);
-  engine = new PrioritySync({ store, client: opts.client ?? createPriorityClient(cfg.priority), priority: cfg.priority, sync: cfg.prioritySync, readFile: read, ...opts }).start(opts);
+  engine = new PrioritySync({ store, client: opts.client ?? createPriorityClient(cfg.priority), priority: cfg.priority, sync: cfg.prioritySync, readFile: read, readFileMeta: (id) => readFileMeta(cfg, id), ...opts }).start(opts);
   console.log(`[priority-sync] running (${cfg.priority.mode}, ${engine.canWrite ? 'read + write' : 'read only'})`);
   return engine;
 }

@@ -101,6 +101,13 @@ export async function pushDoc(e, d, now) {
   const sync = d.sync ?? {};
   if (sync.status === 'synced' || sync.status === 'disabled' || !e.due(sync, now)) return;
   if (!d.dataUrl && !d.fileId) return; // a Drive-only link has no bytes here
+  // a doc may point only at a file uploaded for its own case (checked on write too, see permissions.js)
+  if (d.fileId && e.readFileMeta) {
+    const meta = await e.readFileMeta(d.fileId);
+    if (!meta || (meta.caseId && meta.caseId !== d.caseId)) {
+      return e.patch('docs', d.id, { sync: { ...sync, status: 'disabled', error: 'הקובץ לא שייך לתיק הזה, ולכן לא נשלח ל-Priority' } });
+    }
+  }
   const target = fileTarget(e, d);
   if (!target) return e.holdPending('docs', d, 'ממתין לפתיחת הלקוח או הספק ב-Priority');
   if (!e.writeGate('docs', d)) return;

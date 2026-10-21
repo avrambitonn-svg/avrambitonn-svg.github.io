@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { forbidFetch, startServer, useEnv } from './helpers.js';
 import { ADMIN_PASSWORD, bearer, bootstrapOrg, loginAs, orgSnapshot } from './fixtures.js';
 import { hashPassword, signToken, verifyPassword, verifyToken } from '../src/auth.js';
+import { clientIp } from '../src/http.js';
 
 test('scrypt hashes verify and differ per salt', async () => {
   const a = await hashPassword('סיסמה-ארוכה');
@@ -154,16 +155,67 @@ test('deactivating a user ends their session at once', async (t) => {
   assert.equal((await s.request('GET', '/api/auth/me', { headers: bearer(agent) })).status, 401);
 });
 
-test('integration routes: open before setup, then session or APP_TOKEN', async (t) => {
+test('integration routes: only this machine before setup; then a session (APP_TOKEN alone is not enough)', async (t) => {
   useEnv(t, { ANTHROPIC_API_KEY: '' });
   forbidFetch(t);
   const s = await startServer(t);
-  // nothing configured: open as before (503 = AI not configured, not 401)
+  const remote = { 'x-forwarded-for': '203.0.113.9' };
+  // nothing configured: open to local development only (503 = AI not configured, not 401)
   assert.equal((await s.request('POST', '/api/ai/messages', { body: {} })).status, 503);
+  assert.equal((await s.request('POST', '/api/ai/messages', { headers: remote, body: {} })).status, 401, 'never open to the internet');
+  process.env.APP_TOKEN = 'shared';
+  assert.equal((await s.request('POST', '/api/ai/messages', { headers: { ...remote, 'x-app-token': 'shared' }, body: {} })).status, 503, 'APP_TOKEN before setup');
+  delete process.env.APP_TOKEN;
   const { token } = await bootstrapOrg(s);
   assert.equal((await s.request('POST', '/api/ai/messages', { body: {} })).status, 401, 'after bootstrap a session is needed');
   assert.equal((await s.request('POST', '/api/ai/messages', { headers: bearer(token), body: {} })).status, 503);
   process.env.APP_TOKEN = 'shared';
-  assert.equal((await s.request('POST', '/api/ai/messages', { headers: { 'x-app-token': 'shared' }, body: {} })).status, 503);
+  assert.equal((await s.request('POST', '/api/ai/messages', { headers: { 'x-app-token': 'shared' }, body: {} })).status, 401, 'the shared token does not identify a user');
   assert.equal((await s.request('POST', '/api/ai/messages', { headers: { 'x-app-token': 'bad' }, body: {} })).status, 401);
+});
+
+test('integration-only server (DB_MODE=off): APP_TOKEN, or this machine when none is set', async (t) => {
+  useEnv(t, { ANTHROPIC_API_KEY: '', DB_MODE: 'off' });
+  forbidFetch(t);
+  const s = await startServer(t);
+  const remote = { 'x-forwarded-for': '203.0.113.9' };
+  assert.equal((await s.request('POST', '/api/ai/messages', { body: {} })).status, 503);
+  assert.equal((await s.request('POST', '/api/ai/messages', { headers: remote, body: {} })).status, 401);
+  process.env.APP_TOKEN = 'shared';
+  assert.equal((await s.request('POST', '/api/ai/messages', { body: {} })).status, 401, 'a configured token is needed even locally');
+  assert.equal((await s.request('POST', '/api/ai/messages', { headers: { ...remote, 'x-app-token': 'shared' }, body: {} })).status, 503);
+});
+
+test('health: no version or integrations without credentials', async (t) => {
+  useEnv(t, {});
+  const s = await startServer(t);
+  const remote = { 'x-forwarded-for': '203.0.113.9' };
+  const open = await s.request('GET', '/api/health', { headers: remote });
+  assert.equal(open.status, 200);
+  assert.deepEqual(Object.keys(open.json).sort(), ['db', 'ok']);
+  assert.equal(open.json.db.bootstrapToken, true, 'setup from outside needs the code');
+  const { token } = await bootstrapOrg(s);
+  const full = await s.request('GET', '/api/health', { headers: { ...remote, ...bearer(token) } });
+  assert.ok(full.json.version && full.json.features);
+});
+
+test('bootstrap: from outside the server machine only with BOOTSTRAP_TOKEN', async (t) => {
+  useEnv(t, {});
+  const s = await startServer(t);
+  const remote = { 'x-forwarded-for': '203.0.113.9' };
+  const body = { snapshot: { collections: { users: [{ id: 'u1', name: 'מנהל', role: 'admin', phone: '0501111111' }] } }, adminUserId: 'u1', password: 'long-password-1' };
+  const r = await s.request('POST', '/api/auth/bootstrap', { headers: remote, body });
+  assert.equal(r.status, 403);
+  assert.equal(r.json.error.code, 'bootstrap_token_required');
+  process.env.BOOTSTRAP_TOKEN = 'setup-code';
+  assert.equal((await s.request('POST', '/api/auth/bootstrap', { headers: remote, body })).status, 401);
+  assert.equal((await s.request('POST', '/api/auth/bootstrap', { headers: remote, body: { ...body, bootstrapToken: 'setup-code' } })).status, 201);
+});
+
+test('clientIp: only the entries added by trusted proxies count', () => {
+  const req = (fwd) => ({ headers: { 'x-forwarded-for': fwd }, socket: { remoteAddress: '10.0.0.2' } });
+  assert.equal(clientIp(req('6.6.6.6, 1.2.3.4'), 1), '1.2.3.4', 'the client-written first entry is ignored');
+  assert.equal(clientIp(req('6.6.6.6, 1.2.3.4, 10.0.0.1'), 2), '1.2.3.4');
+  assert.equal(clientIp(req('1.2.3.4'), true), '1.2.3.4');
+  assert.equal(clientIp(req('6.6.6.6'), 0), '10.0.0.2', 'without TRUST_PROXY the header is ignored');
 });

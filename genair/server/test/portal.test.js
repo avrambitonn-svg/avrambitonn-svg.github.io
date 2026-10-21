@@ -56,7 +56,7 @@ test('view marks the quote viewed and notifies the agent once', async (t) => {
   assert.equal(d.collections.activities.filter((a) => a.text === 'הלקוח נכנס לאזור האישי').length, 1);
 });
 
-test('approve: server sets quote + case, money and notifications; marks approvedVia for the staff follow-up', async (t) => {
+test('approve: server sets quote + case and notifications; the deposit waits for the office to confirm it', async (t) => {
   const { s, db } = await org(t);
   const wrongCase = await s.request('POST', '/api/portal/TokenK1abcdefgh/approve', { body: { quoteId: 'q2', signature: { name: 'יעל לוי', dataUrl: SIG }, deposit: { method: 'credit' } } });
   assert.equal(wrongCase.status, 404, 'a quote of another case cannot be approved through this link');
@@ -76,12 +76,14 @@ test('approve: server sets quote + case, money and notifications; marks approved
   assert.equal(q.approvedVia, 'portal');
   assert.equal(q.approvedFromStage, 'quote');
   assert.equal(q.signature.name, 'יעל לוי');
-  assert.ok(q.deposit.paidAt);
+  assert.equal(q.deposit.paidAt, undefined, 'no payment provider: nothing is marked paid');
+  assert.equal(q.deposit.status, 'pending');
   assert.equal(d.collections.quotes.find((x) => x.id === 'q0').status, 'rejected', 'other open quotes of the case close');
   assert.equal(d.collections.cases.find((k) => k.id === 'k1').stage, 'approved');
   assert.equal(d.collections.cases.find((k) => k.id === 'k2').stage, 'quote', 'other cases untouched');
-  assert.equal(d.collections.money.filter((m) => m.caseId === 'k1' && m.kind === 'payment').length, 1);
+  assert.equal((d.collections.money ?? []).filter((m) => m.caseId === 'k1' && m.kind === 'payment').length, 0, 'no payment line until it is confirmed');
   const notes = d.collections.notifications.map((n) => `${n.userId}:${n.text}`);
+  assert.ok(notes.some((n) => n.startsWith('u-office:לאמת את תשלום המקדמה')));
   assert.ok(notes.some((n) => n.startsWith('u-office:הצעה אושרה')));
   assert.ok(notes.some((n) => n.startsWith('u-admin:הצעה אושרה')));
   assert.ok(notes.some((n) => n.startsWith('u-agent1:') && n.includes('אושר')));
@@ -162,14 +164,43 @@ test('leads: validation, honeypot, customer + contact + case on the server', asy
   const k = d.collections.cases.find((c) => c.number === r.json.number);
   assert.equal(k.createdVia, 'lead');
   assert.equal(k.source, 'facebook');
-  assert.equal(k.survey.photos.length, 1);
+  assert.equal(k.survey.photos.length, 0, 'photos are files, not data inside the case');
+  const docs = d.collections.docs.filter((x) => x.caseId === k.id);
+  assert.equal(docs.length, 1);
+  assert.match(docs[0].fileId, /^f[a-f0-9]{24}$/);
+  assert.equal(docs[0].folder, 'customer');
   assert.equal(k.portal.token, r.json.portalToken);
   const c = d.collections.customers.find((x) => x.id === k.customerId);
   assert.equal(c.phone, '0541234567');
+  assert.equal(c.pendingReview, true, 'not sent to Priority before the office checks it');
   assert.equal(d.collections.contacts.find((x) => x.customerId === c.id).name, 'נועה כהן');
   assert.ok(d.collections.notifications.some((n) => n.userId === 'u-office' && n.text.includes('נועה כהן')));
   assert.equal(d.collections.customers.filter((x) => x.name === 'בוט').length, 0);
   assert.equal((await s.request('GET', `/api/portal/${r.json.portalToken}`)).json.case.number, r.json.number, 'the new lead can follow up in the portal');
+});
+
+test('portal: guessing links is limited per address', async (t) => {
+  const { s } = await org(t);
+  let last;
+  for (let i = 0; i < 22; i++) last = await s.request('GET', `/api/portal/Guess${String(i).padStart(10, '0')}`);
+  assert.equal(last.status, 429, 'too many links that match nothing');
+  assert.equal((await s.request('GET', '/api/portal/TokenK1abcdefgh')).status, 429, 'the same address stays blocked for a while');
+});
+
+test('portal: a case closed long ago no longer opens', async (t) => {
+  const { s, admin: token } = await org(t);
+  const old = new Date(Date.now() - 400 * 86400_000).toISOString();
+  await s.request('POST', '/api/db/ops', { headers: bearer(token), body: { ops: [{ op: 'patch', collection: 'cases', id: 'k2', data: { stage: 'closed', closedAt: old }, at: Date.now() }] } });
+  assert.equal((await s.request('GET', '/api/portal/TokenK2abcdefgh')).status, 404);
+  assert.equal((await s.request('GET', '/api/portal/TokenK1abcdefgh')).status, 200);
+});
+
+test('leads: the same phone at most 3 times an hour', async (t) => {
+  const { s } = await org(t);
+  const send = (ip) => s.request('POST', '/api/public/leads', { headers: { 'x-forwarded-for': ip }, body: { name: 'לקוח', phone: '0541234500', type: 'apartment' } });
+  process.env.TRUST_PROXY = 'true';
+  for (let i = 0; i < 3; i++) assert.equal((await send(`198.51.100.${i}`)).status, 201);
+  assert.equal((await send('198.51.100.9')).status, 429);
 });
 
 test('leads are rate limited per IP', async (t) => {

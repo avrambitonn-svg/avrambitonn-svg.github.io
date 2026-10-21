@@ -50,9 +50,10 @@ const apiClosed = (e) => e instanceof HttpError && e.code === 'priority_rejected
 const fatal = (e) => e instanceof HttpError && (e.code === 'priority_auth_failed' || e.code === 'priority_rate_limited' || e.code === 'priority_unavailable' || /_timeout$|_unreachable$/.test(e.code));
 
 export class PrioritySync {
-  constructor({ store, client, priority, sync, now = Date.now, log = console, readFile }) {
+  constructor({ store, client, priority, sync, now = Date.now, log = console, readFile, readFileMeta }) {
     this.store = store;
     this.readFile = readFile;
+    this.readFileMeta = readFileMeta;
     this.client = client;
     this.p = priority;
     this.cfg = sync;
@@ -318,6 +319,8 @@ export class PrioritySync {
     const sync = c.sync ?? {};
     if (sync.priorityId && sync.hash === hash && sync.status === 'synced') return this.canWrite ? X.pushSites(this, c, sync.priorityId) : undefined;
     if (sync.status === 'disabled' || !this.due(sync, now)) return;
+    // from the public lead form: anyone could have typed this phone number, so a person checks it first
+    if (c.pendingReview) return this.holdPending('customers', c, 'פנייה מהאתר: ממתין לאישור במשרד');
     if (!payload.CUSTDES || !payload.PHONE) return this.holdPending('customers', c, 'חסר שם או טלפון');
     // linked before the engine ran: no baseline yet, so nothing is overwritten; the next pull decides
     if (sync.priorityId && !sync.hash) return this.patch('customers', c.id, { sync: { ...sync, hash } });
@@ -780,11 +783,15 @@ export class PrioritySync {
           if (known.has(`${kind}|${row.IVNUM}`)) continue;
           const line = M.moneyFromDoc(form, row, caseId, kind);
           known.add(`${kind}|${row.IVNUM}`);
-          // a payment the office already typed in (or the portal deposit) is linked, not doubled
-          const twin = kind === 'payment' && money.find((m) => m.kind === 'payment' && m.caseId === caseId && !m.priorityId && Math.abs(Number(m.amount) - line.amount) < 1 && Math.abs(Date.parse(m.at) - Date.parse(line.at)) <= 10 * DAY);
-          if (twin) {
+          // A payment the office already typed in (e.g. a confirmed deposit) is linked, not doubled - but only when
+          // exactly one line of that case has the same amount to the agora within a few days. Anything less certain
+          // comes in as its own line for the office to reconcile, rather than marking the wrong line as paid.
+          const twins = kind === 'payment' ? money.filter((m) => m.kind === 'payment' && m.caseId === caseId && !m.priorityId && Math.abs(Number(m.amount) - line.amount) < 0.01 && Math.abs(Date.parse(m.at) - Date.parse(line.at)) <= 3 * DAY) : [];
+          if (twins.length === 1) {
+            const twin = twins[0];
             twin.priorityId = line.priorityId;
             this.patch('money', twin.id, { priorityId: line.priorityId, priorityForm: form, source: 'priority', status: 'paid' });
+            this.activity(`התשלום שהוקלד (₪${line.amount.toLocaleString('he-IL')}) קושר לקבלה ${row.IVNUM} ב-Priority`, { caseId });
             linked++;
             continue;
           }

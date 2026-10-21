@@ -115,7 +115,11 @@ export function dbConfig(env = process.env) {
     tokenTtlHours: num(env.AUTH_TTL_HOURS, 12),
     bootstrapToken: str(env.BOOTSTRAP_TOKEN),
     filesMaxBytes: num(env.FILES_MAX_MB, 25) * 1024 * 1024,
-    trustProxy: bool(env.TRUST_PROXY),
+    // true / 1 = one proxy in front of the server, 2 = two (e.g. CDN + load balancer)
+    trustProxy: /^\d+$/.test(str(env.TRUST_PROXY)) ? Math.min(Number(env.TRUST_PROXY), 5) : bool(env.TRUST_PROXY) ? 1 : 0,
+    maxSessionDays: num(env.AUTH_MAX_DAYS, 30),
+    encryptionKey: str(env.DB_ENCRYPTION_KEY),
+    filesQuotaBytes: num(env.FILES_QUOTA_MB, 5000) * 1024 * 1024,
   };
 }
 
@@ -132,6 +136,7 @@ export function loadConfig(env = process.env) {
       allowedModels: list(env.AI_ALLOWED_MODELS, DEFAULT_AI_MODELS),
       allowedBetas: list(env.AI_ALLOWED_BETAS, DEFAULT_AI_BETAS),
       timeoutMs: Number(env.AI_TIMEOUT_MS) > 0 ? Number(env.AI_TIMEOUT_MS) : 300_000,
+      maxTokens: Number(env.AI_MAX_TOKENS) > 0 ? Math.floor(Number(env.AI_MAX_TOKENS)) : 16000,
     },
     whatsapp: {
       token: str(env.WHATSAPP_TOKEN),

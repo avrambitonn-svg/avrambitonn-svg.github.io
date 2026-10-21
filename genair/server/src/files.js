@@ -2,7 +2,7 @@
 // signed-in users (or through a portal link when the doc is visible to the customer), and copied
 // into a Google Drive folder when the request names one and Drive is configured.
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
@@ -11,7 +11,8 @@ import { pipeline } from 'node:stream/promises';
 import { HttpError } from './http.js';
 import { requireStore } from './db/index.js';
 import { requireSession } from './auth.js';
-import { googleFeatures, safeFileName, safeMime, uploadBufferToDrive } from './google.js';
+import { googleFeatures, knownDriveFolder, safeFileName, safeMime, uploadBufferToDrive } from './google.js';
+import { createWindowLimiter } from './limiter.js';
 
 const FILE_ID_RE = /^f[a-f0-9]{24}$/;
 const INLINE = /^(image\/(png|jpe?g|gif|webp|avif|bmp|heic|heif)|application\/pdf|text\/plain|video\/[a-z0-9.+-]+|audio\/[a-z0-9.+-]+)$/;
@@ -19,6 +20,37 @@ const INLINE = /^(image\/(png|jpe?g|gif|webp|avif|bmp|heic|heif)|application\/pd
 export function filesDir(cfg) {
   return cfg.db.mode === 'file' ? resolve(cfg.db.dataDir, 'files') : join(tmpdir(), `genair-files-${process.pid}`);
 }
+
+// ------------------------------------------------------------ disk quota (FILES_QUOTA_MB for all uploads together)
+
+const used = new Map(); // files dir -> bytes, counted once from disk and kept up to date here
+async function usedBytes(dir) {
+  if (used.has(dir)) return used.get(dir);
+  let total = 0;
+  try {
+    for (const name of await readdir(dir)) {
+      if (name.endsWith('.json') || name.endsWith('.part')) continue;
+      total += (await stat(join(dir, name)).catch(() => ({ size: 0 }))).size;
+    }
+  } catch {
+    /* no files yet */
+  }
+  used.set(dir, total);
+  return total;
+}
+export const resetFileQuota = () => used.clear();
+
+async function checkQuota(cfg, dir, bytes) {
+  const limit = cfg.db.filesQuotaBytes;
+  if (limit && (await usedBytes(dir)) + bytes > limit) {
+    throw new HttpError(507, 'storage_full', 'נגמר המקום לקבצים בשרת. צריך לפנות מקום או להגדיל את FILES_QUOTA_MB');
+  }
+}
+const addUsed = (dir, bytes) => used.set(dir, (used.get(dir) ?? 0) + bytes);
+
+// uploads per signed-in user (the portal and the lead form have their own limits)
+const uploadsByUser = createWindowLimiter({ max: 120, windowMs: 10 * 60_000 });
+export const resetUploadLimits = () => uploadsByUser.clear();
 
 const tooLarge = (limit) =>
   new HttpError(413, 'payload_too_large', `הקובץ גדול מדי (מקסימום ${Math.round(limit / 1024 / 1024)}MB)`, { limitBytes: limit });
@@ -28,7 +60,8 @@ export async function storeUpload(req, cfg, { maxBytes = cfg.db.filesMaxBytes, m
   const declared = Number(req.headers['content-length']);
   if (Number.isFinite(declared) && declared > maxBytes) throw tooLarge(maxBytes);
   const dir = filesDir(cfg);
-  await mkdir(dir, { recursive: true });
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  await checkQuota(cfg, dir, Number.isFinite(declared) ? declared : 0);
   const id = `f${randomBytes(12).toString('hex')}`;
   const tmp = join(dir, `${id}.part`);
   let size = 0;
@@ -43,9 +76,9 @@ export async function storeUpload(req, cfg, { maxBytes = cfg.db.filesMaxBytes, m
     if (Buffer.isBuffer(req.rawBody)) {
       if (req.rawBody.length > maxBytes) throw tooLarge(maxBytes);
       size = req.rawBody.length;
-      await writeFile(tmp, req.rawBody);
+      await writeFile(tmp, req.rawBody, { mode: 0o600 });
     } else {
-      await pipeline(req, counter, createWriteStream(tmp, { flags: 'wx' }));
+      await pipeline(req, counter, createWriteStream(tmp, { flags: 'wx', mode: 0o600 }));
     }
   } catch (err) {
     await rm(tmp, { force: true });
@@ -64,8 +97,23 @@ export async function storeUpload(req, cfg, { maxBytes = cfg.db.filesMaxBytes, m
     at: new Date().toISOString(),
     ...meta,
   };
-  await writeFile(join(dir, `${id}.json`), JSON.stringify(info));
+  await writeFile(join(dir, `${id}.json`), JSON.stringify(info), { mode: 0o600 });
   await rename(tmp, join(dir, id));
+  addUsed(dir, size);
+  return info;
+}
+
+/** Saves bytes the server already holds (e.g. a photo from the lead form) as a stored file. */
+export async function storeBuffer(cfg, data, { name, mime, meta = {} }) {
+  const dir = filesDir(cfg);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  await checkQuota(cfg, dir, data.length);
+  const id = `f${randomBytes(12).toString('hex')}`;
+  const info = { id, name: safeFileName(name), mime: safeMime(mime), size: data.length, at: new Date().toISOString(), ...meta };
+  await writeFile(join(dir, `${id}.part`), data, { mode: 0o600 });
+  await writeFile(join(dir, `${id}.json`), JSON.stringify(info), { mode: 0o600 });
+  await rename(join(dir, `${id}.part`), join(dir, id));
+  addUsed(dir, data.length);
   return info;
 }
 
@@ -100,12 +148,21 @@ export async function sendStoredFile(res, cfg, id, { download = false } = {}) {
 export async function uploadFile({ req, res, cfg }) {
   const store = await requireStore(cfg);
   const s = requireSession(req, res, store, cfg);
+  const v = uploadsByUser.hit(s.user.id);
+  if (!v.allowed) {
+    const e = new HttpError(429, 'too_many_requests', 'יותר מדי העלאות בזמן קצר. אפשר לנסות שוב בעוד כמה דקות');
+    e.retryAfter = Math.ceil(v.retryAfterMs / 1000);
+    throw e;
+  }
+  // the case may not have reached the server yet (opened offline); the doc that files it is checked on write
   const caseId = String(req.headers['x-case-id'] ?? '').slice(0, 128) || undefined;
   const folder = String(req.headers['x-folder'] ?? '').slice(0, 40) || undefined;
   const meta = await storeUpload(req, cfg, { meta: { by: s.user.id, caseId, folder } });
   const out = { fileId: meta.id, name: meta.name, mime: meta.mime, size: meta.size };
   const driveFolder = String(req.headers['x-drive-folder-id'] ?? '');
-  if (driveFolder && googleFeatures(cfg).drive) {
+  // only into a folder the system opened for a case (or the configured parent), never any folder by id
+  if (driveFolder && googleFeatures(cfg).drive && !knownDriveFolder(store, cfg, driveFolder)) out.driveError = 'תיקיית Drive לא מוכרת';
+  else if (driveFolder && googleFeatures(cfg).drive) {
     try {
       const data = await readFile(join(filesDir(cfg), meta.id));
       const d = await uploadBufferToDrive(cfg, { name: meta.name, mime: meta.mime, data, folderId: driveFolder });

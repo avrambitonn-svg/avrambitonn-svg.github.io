@@ -2,15 +2,37 @@
 // Every route needs a signed-in user. Writes are checked per op (permissions.js) and applied with
 // per-field last-write-wins by the op's `at` (store.js).
 import { HttpError, readJson } from './http.js';
+import { createWindowLimiter } from './limiter.js';
 import { requireStore } from './db/index.js';
 import { BAD_KEYS, COLLECTION_RE, COUNTER_RE, ID_RE, SINGLETONS, SINGLETON_ID } from './db/store.js';
 import { cleanSettings, cleanUser, readSession, requireSession } from './auth.js';
 import { checkOp } from './permissions.js';
+import { scopeChanges, scopeSnapshot } from './readscope.js';
+import { readFileMeta } from './files.js';
 
 const MAX_OPS = 500;
 const MAX_ENTITY_BYTES = 12 * 1024 * 1024;
 const LONG_POLL_MAX_SEC = 25;
 const HEARTBEAT_MS = 20_000;
+const MAX_STREAMS_PER_USER = 8; // open SSE connections (tabs and devices) per user
+
+const opsByUser = createWindowLimiter({ max: 1200, windowMs: 10 * 60_000 });
+const reserveByUser = createWindowLimiter({ max: 300, windowMs: 10 * 60_000 });
+const streams = new Map(); // userId -> open SSE connections
+export const resetDbLimits = () => {
+  opsByUser.clear();
+  reserveByUser.clear();
+  streams.clear();
+};
+
+function perUser(lim, user) {
+  const v = lim.hit(user.id);
+  if (!v.allowed) {
+    const e = new HttpError(429, 'too_many_requests', 'יותר מדי בקשות בזמן קצר. השינויים נשמרים במכשיר ויישלחו בעוד כמה דקות');
+    e.retryAfter = Math.ceil(v.retryAfterMs / 1000);
+    throw e;
+  }
+}
 
 async function session(ctx) {
   const store = await requireStore(ctx.cfg);
@@ -29,10 +51,19 @@ function toMs(at) {
   return NaN;
 }
 
+// fields the app turns into links: only web, mail and phone links (or a path inside the app) are kept, so a
+// stored value can never become a javascript: link in someone else's browser
+const LINK_FIELDS = new Set(['url', 'website', 'webViewLink', 'htmlLink', 'link']);
+const SAFE_LINK = /^(https?:\/\/|mailto:|tel:|\/(?!\/))/i;
+
 function cleanData(data, i) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw invalid(`ops[${i}].data חייב להיות אובייקט`);
   const out = {};
-  for (const [k, v] of Object.entries(data)) if (!BAD_KEYS.has(k) && v !== undefined) out[k] = v;
+  for (const [k, v] of Object.entries(data)) {
+    if (BAD_KEYS.has(k) || v === undefined) continue;
+    if (LINK_FIELDS.has(k) && typeof v === 'string' && v && !SAFE_LINK.test(v.trim())) continue;
+    out[k] = v;
+  }
   return out;
 }
 
@@ -73,31 +104,39 @@ export function parseOps(list) {
 
 export async function snapshot(ctx) {
   const { store, user } = await session(ctx);
-  return { status: 200, body: { ...store.snapshot(), serverTime: Date.now(), me: user } };
+  return { status: 200, body: { ...scopeSnapshot(store.snapshot(), user), serverTime: Date.now(), me: user } };
 }
 
 export async function ops(ctx) {
   const { store, user } = await session(ctx);
+  perUser(opsByUser, user);
   const body = await readJson(ctx.req);
   const list = parseOps(body.ops);
   const clientId = typeof body.clientId === 'string' ? body.clientId.slice(0, 64) : undefined;
-  const result = store.applyOps(list, { userId: user.id, clientId, check: (op, current) => checkOp(op, current, user, store) });
+  // the meta of every server file a doc points at, for the ownership check
+  const files = new Map();
+  for (const op of list) {
+    const id = op.collection === 'docs' ? op.data?.fileId : undefined;
+    if (typeof id === 'string' && !files.has(id)) files.set(id, await readFileMeta(ctx.cfg, id));
+  }
+  const result = store.applyOps(list, { userId: user.id, clientId, check: (op, current) => checkOp(op, current, user, store, files) });
   return { status: 200, body: { ...result, serverTime: Date.now() } };
 }
 
 /** Current state of specific entities (after a denied or stale write the client takes the server's copy). */
 export async function fetchEntities(ctx) {
-  const { store } = await session(ctx);
+  const { store, user } = await session(ctx);
   const body = await readJson(ctx.req);
   if (!Array.isArray(body.items) || body.items.length > 500) throw invalid('items חייב להיות מערך (עד 500)');
   const items = body.items
     .filter((x) => x && COLLECTION_RE.test(x.c ?? '') && ID_RE.test(x.id ?? ''))
     .map((x) => store.record(x.c, x.id) ?? { c: x.c, id: x.id, seq: 0, del: true });
-  return { status: 200, body: { seq: store.seq, items } };
+  return { status: 200, body: { seq: store.seq, items: scopeChanges(items, user) } };
 }
 
 export async function reserveCounter(ctx) {
-  const { store } = await session(ctx);
+  const { store, user } = await session(ctx);
+  perUser(reserveByUser, user);
   const body = await readJson(ctx.req);
   if (typeof body.key !== 'string' || !COUNTER_RE.test(body.key)) throw invalid('key לא תקין');
   const count = body.count === undefined ? 1 : Number(body.count);
@@ -112,13 +151,14 @@ const parseSince = (v) => {
 
 /** Long-poll: answers at once when there are changes after `since`, else waits up to `wait` seconds (max 25). */
 export async function changes(ctx) {
-  const { store } = await session(ctx);
+  const { store, user } = await session(ctx);
+  const scoped = (r) => (r.changes.length ? { ...r, changes: scopeChanges(r.changes, user) } : r);
   const since = parseSince(ctx.url.searchParams.get('since'));
   if (Number.isNaN(since)) throw invalid('since חייב להיות מספר');
   const waitRaw = Number(ctx.url.searchParams.get('wait') ?? LONG_POLL_MAX_SEC);
   const waitSec = Math.max(0, Math.min(LONG_POLL_MAX_SEC, Number.isFinite(waitRaw) ? waitRaw : LONG_POLL_MAX_SEC));
   const now = store.changesSince(since);
-  if (now.reset || now.changes.length || waitSec === 0) return { status: 200, body: now };
+  if (now.reset || now.changes.length || waitSec === 0) return { status: 200, body: scoped(now) };
   const { res } = ctx;
   await new Promise((resolve) => {
     const done = () => {
@@ -133,13 +173,21 @@ export async function changes(ctx) {
     res.on('close', done); // the client went away (req 'close' fires as soon as the body is read)
   });
   if (res.destroyed || res.writableEnded) return null;
-  return { status: 200, body: store.changesSince(since) };
+  return { status: 200, body: scoped(store.changesSince(since)) };
 }
 
 /** Server-sent events: `hello`, then `changes` batches (id = seq), `reset` when the client must reload; heartbeat comments. */
 export async function events(ctx) {
-  const { store, user } = await session(ctx);
+  const { store, user: first } = await session(ctx);
+  let user = first; // re-read on every heartbeat: a role change applies to the open stream too
   const { req, res, cfg } = ctx;
+  const open = streams.get(first.id) ?? 0;
+  if (open >= MAX_STREAMS_PER_USER) {
+    const e = new HttpError(429, 'too_many_streams', 'יותר מדי חיבורים פתוחים למשתמש הזה');
+    e.retryAfter = 30;
+    throw e;
+  }
+  streams.set(first.id, open + 1);
   const sinceQ = parseSince(ctx.url.searchParams.get('since'));
   const sinceH = parseSince(req.headers['last-event-id']);
   let since = Number.isNaN(sinceQ) ? (Number.isNaN(sinceH) ? store.seq : sinceH) : sinceQ;
@@ -160,7 +208,7 @@ export async function events(ctx) {
 
   const backlog = store.changesSince(since);
   if (backlog.reset) send('reset', { seq: store.seq });
-  else if (backlog.changes.length) send('changes', backlog, backlog.seq);
+  else if (backlog.changes.length) send('changes', { ...backlog, changes: scopeChanges(backlog.changes, user) }, backlog.seq);
   since = backlog.seq;
 
   const onChange = (e) => {
@@ -168,7 +216,7 @@ export async function events(ctx) {
     const list = e.changes.filter((c) => c.seq > since);
     if (!list.length) return;
     since = e.seq;
-    send('changes', { seq: e.seq, changes: list, origin: e.origin }, e.seq);
+    send('changes', { seq: e.seq, changes: scopeChanges(list, user), origin: e.origin }, e.seq);
   };
   store.on('change', onChange);
   const beat = setInterval(() => {
@@ -179,6 +227,7 @@ export async function events(ctx) {
       res.end();
       return;
     }
+    user = s.user;
     res.write(': ping\n\n');
   }, HEARTBEAT_MS);
   beat.unref?.();
@@ -186,6 +235,9 @@ export async function events(ctx) {
     const close = () => {
       clearInterval(beat);
       store.off('change', onChange);
+      const n = (streams.get(first.id) ?? 1) - 1;
+      if (n > 0) streams.set(first.id, n);
+      else streams.delete(first.id);
       resolve();
     };
     res.on('close', close);

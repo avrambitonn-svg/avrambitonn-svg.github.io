@@ -1,6 +1,7 @@
 // Google Calendar + Drive with a service account (JWT RS256 -> OAuth access token).
 import { createSign, randomBytes } from 'node:crypto';
 import { HttpError, fetchUpstream, readBody, readJson, readUpstream } from './http.js';
+import { getStore } from './db/index.js';
 
 const SERVICE = { code: 'google', label: 'Google', to: 'ל-Google' };
 export const TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -185,8 +186,7 @@ export function buildCalendarEvent(body) {
 export async function createCalendarEvent({ req, cfg }) {
   const sa = requireAccount(cfg);
   const body = await readJson(req);
-  const calendarId = (typeof body.calendarId === 'string' && body.calendarId.trim()) || cfg.google.calendarId;
-  if (!calendarId) throw new HttpError(503, 'calendar_not_configured', 'לא הוגדר יומן Google בשרת (חסר GOOGLE_CALENDAR_ID)');
+  const calendarId = await allowedCalendar(cfg, calendarFor(cfg, body.calendarId));
   const event = buildCalendarEvent(body);
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
   const data = await googleFetch(cfg, sa, url, event);
@@ -204,7 +204,7 @@ export async function updateCalendarEvent({ req, cfg, params }) {
   const sa = requireAccount(cfg);
   const id = requireId(params.id, 'id');
   const body = await readJson(req);
-  const calendarId = calendarFor(cfg, body.calendarId);
+  const calendarId = await allowedCalendar(cfg, calendarFor(cfg, body.calendarId));
   const event = buildCalendarEvent(body);
   const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(id)}`;
   const { data } = await googleCall(cfg, sa, 'PATCH', url, { json: event });
@@ -215,10 +215,47 @@ export async function updateCalendarEvent({ req, cfg, params }) {
 export async function deleteCalendarEvent({ cfg, params, url }) {
   const sa = requireAccount(cfg);
   const id = requireId(params.id, 'id');
-  const calendarId = calendarFor(cfg, url.searchParams.get('calendarId'));
+  const calendarId = await allowedCalendar(cfg, calendarFor(cfg, url.searchParams.get('calendarId')));
   const target = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(id)}`;
   const { status } = await googleCall(cfg, sa, 'DELETE', target, { okStatuses: [404, 410] });
   return { status: 200, body: { ok: true, gone: status === 404 || status === 410 } };
+}
+
+// ---------------------------------------------------------------- what a user may touch
+// With the shared database, a signed-in user reaches only the calendars of the company and its users, and only
+// Drive folders and files the system created (with GOOGLE_DRIVE_SCOPE=drive the service account could otherwise
+// reach anything shared with it). An integration-only server (no database) trusts its APP_TOKEN.
+
+const created = new Set(); // Drive folders and files created by this process, until the case or doc that holds them syncs
+const remember = (...ids) => {
+  for (const id of ids) if (id) created.add(id);
+  if (created.size > 5000) created.delete(created.values().next().value);
+};
+
+async function scopeStore(cfg) {
+  if (cfg.db.mode === 'off') return null;
+  const store = await getStore(cfg);
+  return store && !store.isEmpty() ? store : null;
+}
+
+export function knownDriveFolder(store, cfg, id) {
+  if (!store || id === cfg.google.driveParentId || created.has(id)) return true;
+  return store.list('cases').some((k) => k.driveFolderId === id || Object.values(k.driveFolders ?? {}).includes(id));
+}
+
+function knownDriveFile(store, id) {
+  return !store || created.has(id) || store.list('docs').some((d) => d.driveFileId === id);
+}
+
+async function allowedCalendar(cfg, calendarId) {
+  const store = await scopeStore(cfg);
+  if (!store || calendarId === cfg.google.calendarId || store.list('users').some((u) => u.googleCalendarId === calendarId)) return calendarId;
+  throw new HttpError(403, 'forbidden', 'היומן הזה לא שייך למערכת');
+}
+
+async function requireKnown(cfg, check, id, what) {
+  const store = await scopeStore(cfg);
+  if (!check(store, id)) throw new HttpError(403, 'forbidden', `${what} לא נוצר/ה דרך המערכת`);
 }
 
 // ---------------------------------------------------------------- drive
@@ -252,6 +289,7 @@ export async function createDriveFolder({ req, cfg }) {
   const parent = (typeof body.parentId === 'string' && body.parentId.trim()) || cfg.google.driveParentId;
   // Service accounts have no Drive storage of their own: always create inside a shared folder / shared drive.
   if (!parent) throw new HttpError(503, 'drive_not_configured', 'לא הוגדרה תיקיית אב ב-Google Drive (חסר GOOGLE_DRIVE_PARENT_ID)');
+  await requireKnown(cfg, (store, id) => knownDriveFolder(store, cfg, id), parent, 'תיקיית האב');
   const folder = buildDriveFolder(body, parent);
   const subs = parseSubfolders(body.subfolders);
   const url = 'https://www.googleapis.com/drive/v3/files?supportsAllDrives=true&fields=id,webViewLink';
@@ -264,6 +302,7 @@ export async function createDriveFolder({ req, cfg }) {
       out.subfolders[sub.key] = d?.id ?? null;
     }
   }
+  remember(out.id, ...Object.values(out.subfolders ?? {}));
   return { status: 201, body: out };
 }
 
@@ -280,6 +319,7 @@ export async function uploadBufferToDrive(cfg, { name, mime, data, folderId }) {
   ]);
   const url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink';
   const { data: res } = await googleCall(cfg, sa, 'POST', url, { body, headers: { 'content-type': `multipart/related; boundary=${boundary}` } });
+  remember(res?.id);
   return { id: res?.id ?? null, webViewLink: res?.webViewLink ?? null };
 }
 
@@ -303,6 +343,7 @@ export async function uploadDriveFile({ req, cfg, url }) {
   requireAccount(cfg);
   const folderId = url.searchParams.get('folderId') || req.headers['x-drive-folder-id'];
   if (!folderId) throw new HttpError(400, 'validation_error', 'חסרה תיקיית יעד', { fields: [{ field: 'folderId' }] });
+  await requireKnown(cfg, (store, id) => knownDriveFolder(store, cfg, id), String(folderId), 'התיקייה');
   const data = await readBody(req, cfg.db?.filesMaxBytes);
   if (!data.length) throw new HttpError(400, 'validation_error', 'הקובץ ריק');
   const out = await uploadBufferToDrive(cfg, { name: safeFileName(req.headers['x-file-name']), mime: safeMime(req.headers['content-type']), data, folderId: String(folderId) });
@@ -315,6 +356,8 @@ export async function moveDriveFile({ req, cfg, params }) {
   const id = requireId(params.id, 'id');
   const body = await readJson(req);
   const to = requireId(body.to, 'to');
+  await requireKnown(cfg, knownDriveFile, id, 'הקובץ');
+  for (const f of [to, body.from].filter(Boolean)) await requireKnown(cfg, (store, x) => knownDriveFolder(store, cfg, x), String(f), 'התיקייה');
   const q = new URLSearchParams({ addParents: to, supportsAllDrives: 'true', fields: 'id,parents,webViewLink' });
   if (body.from) q.set('removeParents', requireId(body.from, 'from'));
   const { data } = await googleCall(cfg, sa, 'PATCH', `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?${q}`, { json: {} });
@@ -325,6 +368,7 @@ export async function moveDriveFile({ req, cfg, params }) {
 export async function trashDriveFile({ cfg, params }) {
   const sa = requireAccount(cfg);
   const id = requireId(params.id, 'id');
+  await requireKnown(cfg, knownDriveFile, id, 'הקובץ');
   const { status } = await googleCall(cfg, sa, 'PATCH', `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?supportsAllDrives=true`, { json: { trashed: true }, okStatuses: [404] });
   return { status: 200, body: { ok: true, gone: status === 404 } };
 }

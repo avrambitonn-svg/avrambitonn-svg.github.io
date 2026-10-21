@@ -3,12 +3,30 @@
 // login rate limits and the one-time bootstrap that uploads the app's data to an empty store.
 import { createHmac, randomBytes, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
-import { HttpError, clientIp, readJson, safeEqual } from './http.js';
+import { HttpError, clientIp, isLocalRequest, readJson, safeEqual } from './http.js';
 import { createWindowLimiter } from './limiter.js';
 import { requireStore } from './db/index.js';
 import { BAD_KEYS, COLLECTION_RE, ID_RE, SINGLETONS } from './db/store.js';
 
-const scrypt = promisify(scryptCb);
+const scryptRaw = promisify(scryptCb);
+// scrypt takes ~50ms of CPU and 16MB per call: at most a few at a time, and refuse a flood instead of queueing it
+const SCRYPT_PARALLEL = 4;
+const SCRYPT_QUEUE = 64;
+let scryptActive = 0;
+const scryptWaiting = [];
+async function scrypt(...args) {
+  if (scryptActive >= SCRYPT_PARALLEL) {
+    if (scryptWaiting.length >= SCRYPT_QUEUE) throw new HttpError(503, 'busy', 'השרת עמוס כרגע. נסו שוב בעוד רגע');
+    await new Promise((resolve) => scryptWaiting.push(resolve));
+  }
+  scryptActive++;
+  try {
+    return await scryptRaw(...args);
+  } finally {
+    scryptActive--;
+    scryptWaiting.shift()?.();
+  }
+}
 const SCRYPT = { N: 16384, r: 8, p: 1, keylen: 64 };
 const REFRESH_AFTER_SEC = 15 * 60;
 export const ROLES = ['admin', 'office', 'agent', 'engineer', 'installer'];
@@ -76,12 +94,17 @@ export function verifyToken(token, secret, nowSec = Math.floor(Date.now() / 1000
 
 export const tokenSecret = (store, cfg) => cfg.db.authSecret || store.ensureSecret();
 
-export function issueToken(store, cfg, userId, { sid = randomBytes(12).toString('base64url'), pv } = {}) {
+// `auth` = when the user typed the password. Refreshing keeps it, so a session ends AUTH_MAX_DAYS after the login
+// however actively it is used.
+export function issueToken(store, cfg, userId, { sid = randomBytes(12).toString('base64url'), pv, auth } = {}) {
   const iat = Math.floor(Date.now() / 1000);
-  const exp = iat + Math.round(cfg.db.tokenTtlHours * 3600);
-  const claims = { sub: userId, sid, pv: pv ?? store.auth.credentials.get(userId)?.pv ?? 0, iat, exp };
+  const authAt = auth ?? iat;
+  const exp = Math.min(iat + Math.round(cfg.db.tokenTtlHours * 3600), sessionEnd(cfg, authAt));
+  const claims = { sub: userId, sid, pv: pv ?? store.auth.credentials.get(userId)?.pv ?? 0, iat, exp, auth: authAt };
   return { token: signToken(claims, tokenSecret(store, cfg)), expiresAt: new Date(exp * 1000).toISOString(), claims };
 }
+
+const sessionEnd = (cfg, authAt) => authAt + Math.round(cfg.db.maxSessionDays * 86400);
 
 function bearer(req) {
   const h = String(req.headers.authorization ?? '');
@@ -94,6 +117,7 @@ export function readSession(req, store, cfg) {
   if (!token) return null;
   const claims = verifyToken(token, tokenSecret(store, cfg));
   if (!claims) return { error: 'expired' };
+  if (Math.floor(Date.now() / 1000) >= sessionEnd(cfg, claims.auth ?? claims.iat)) return { error: 'expired' };
   if (store.auth.revoked.has(claims.sid)) return { error: 'revoked' };
   const cred = store.auth.credentials.get(claims.sub);
   const user = store.get('users', claims.sub);
@@ -107,7 +131,7 @@ export function requireSession(req, res, store, cfg) {
   if (!s || s.error) throw new HttpError(401, 'unauthorized', s?.error === 'expired' ? 'פג תוקף ההתחברות, צריך להתחבר שוב' : 'צריך להתחבר למערכת');
   const nowSec = Math.floor(Date.now() / 1000);
   if (nowSec - s.claims.iat > REFRESH_AFTER_SEC) {
-    const t = issueToken(store, cfg, s.user.id, { sid: s.claims.sid, pv: s.claims.pv });
+    const t = issueToken(store, cfg, s.user.id, { sid: s.claims.sid, pv: s.claims.pv, auth: s.claims.auth ?? s.claims.iat });
     res.setHeader('x-auth-token', t.token);
   }
   return s;
@@ -117,12 +141,25 @@ export const isManager = (user) => user?.role === 'admin' || user?.role === 'off
 
 // ------------------------------------------------------------ login
 
+// Wrong passwords: per address; per account from one address (so a stranger cannot lock a user out from their
+// own network); and a high ceiling per account from everywhere together, against a spread-out attack.
 const failuresByIp = createWindowLimiter({ max: 30, windowMs: 15 * 60_000 });
 const failuresByLogin = createWindowLimiter({ max: 8, windowMs: 15 * 60_000 });
+const failuresByAccount = createWindowLimiter({ max: 100, windowMs: 15 * 60_000 });
+const failuresByPasswordChange = createWindowLimiter({ max: 5, windowMs: 15 * 60_000 });
 export const resetLoginLimits = () => {
   failuresByIp.clear();
   failuresByLogin.clear();
+  failuresByAccount.clear();
+  failuresByPasswordChange.clear();
 };
+
+/** One key per account however it is typed: +972-50..., 050..., Name@Mail. */
+function loginKey(raw) {
+  if (raw.includes('@')) return `e:${raw.toLowerCase()}`;
+  const p = normPhone(raw);
+  return p.length >= 9 ? `p:${p}` : `x:${raw.toLowerCase()}`;
+}
 
 const normPhone = (p) => {
   const d = String(p ?? '').replace(/\D/g, '');
@@ -151,8 +188,9 @@ export async function login({ req, cfg }) {
   const password = typeof body.password === 'string' ? body.password : '';
   if (!loginId || !password) throw new HttpError(400, 'validation_error', 'צריך טלפון או אימייל וסיסמה', { fields: [!loginId && { field: 'login' }, !password && { field: 'password' }].filter(Boolean) });
   const ip = clientIp(req, cfg.db.trustProxy);
-  const lk = loginId.toLowerCase();
-  for (const [lim, key] of [[failuresByIp, ip], [failuresByLogin, lk]]) {
+  const account = loginKey(loginId);
+  const lk = `${account}|${ip}`;
+  for (const [lim, key] of [[failuresByIp, ip], [failuresByLogin, lk], [failuresByAccount, account]]) {
     const v = lim.peek(key);
     if (!v.allowed) throw tooMany(v.retryAfterMs);
   }
@@ -162,6 +200,7 @@ export async function login({ req, cfg }) {
   if (!user || !cred || !ok) {
     failuresByIp.hit(ip);
     failuresByLogin.hit(lk);
+    failuresByAccount.hit(account);
     throw new HttpError(401, 'invalid_credentials', 'הפרטים לא נכונים');
   }
   failuresByLogin.reset(lk);
@@ -173,7 +212,8 @@ export async function login({ req, cfg }) {
 export async function logout({ req, res, cfg }) {
   const store = await requireStore(cfg);
   const s = readSession(req, store, cfg);
-  if (s?.claims) store.revoke(s.claims.sid, s.claims.exp + 13 * 3600);
+  // kept until no token of this session can be valid any more, refreshed or not
+  if (s?.claims) store.revoke(s.claims.sid, Math.max(s.claims.exp, sessionEnd(cfg, s.claims.auth ?? s.claims.iat)) + 3600);
   res.removeHeader?.('x-auth-token');
   return { status: 200, body: { ok: true } };
 }
@@ -208,12 +248,18 @@ export async function changePassword({ req, res, cfg }) {
   const s = requireSession(req, res, store, cfg);
   const body = await readJson(req);
   const cred = store.auth.credentials.get(s.user.id);
-  if (!(await verifyPassword(String(body.current ?? ''), cred?.hash ?? DUMMY_HASH))) throw new HttpError(401, 'invalid_credentials', 'הסיסמה הנוכחית לא נכונה');
+  const v = failuresByPasswordChange.peek(s.user.id);
+  if (!v.allowed) throw tooMany(v.retryAfterMs);
+  if (!(await verifyPassword(String(body.current ?? ''), cred?.hash ?? DUMMY_HASH))) {
+    failuresByPasswordChange.hit(s.user.id);
+    throw new HttpError(401, 'invalid_credentials', 'הסיסמה הנוכחית לא נכונה');
+  }
+  failuresByPasswordChange.reset(s.user.id);
   const problem = passwordProblem(body.next);
   if (problem) throw new HttpError(400, 'validation_error', problem, { fields: [{ field: 'next', message: problem }] });
   const pv = (cred?.pv ?? 0) + 1;
   store.setCredential(s.user.id, { ...cred, hash: await hashPassword(body.next), pv, at: new Date().toISOString(), by: s.user.id, mustChange: false });
-  const t = issueToken(store, cfg, s.user.id, { sid: s.claims.sid, pv });
+  const t = issueToken(store, cfg, s.user.id, { sid: s.claims.sid, pv, auth: s.claims.auth ?? s.claims.iat });
   res.setHeader('x-auth-token', t.token);
   return { status: 200, body: { ok: true, token: t.token, expiresAt: t.expiresAt } };
 }
@@ -288,6 +334,11 @@ export async function bootstrap({ req, cfg }) {
   if (!failuresByIp.peek(ip).allowed) throw tooMany(failuresByIp.peek(ip).retryAfterMs);
   if (!store.isEmpty()) throw new HttpError(409, 'already_bootstrapped', 'המערכת כבר הוקמה. מתחברים עם משתמש וסיסמה');
   const body = await readJson(req);
+  // without a setup code, whoever reaches an empty server first would become its admin (also after a lost disk),
+  // so only a request from the server machine itself may set it up without one
+  if (!cfg.db.bootstrapToken && !isLocalRequest(req)) {
+    throw new HttpError(403, 'bootstrap_token_required', 'כדי להקים את המערכת מרחוק צריך להגדיר בשרת קוד הקמה (BOOTSTRAP_TOKEN) ולהזין אותו כאן');
+  }
   if (cfg.db.bootstrapToken && !safeEqual(String(body.bootstrapToken ?? ''), cfg.db.bootstrapToken)) {
     failuresByIp.hit(ip);
     throw new HttpError(401, 'invalid_bootstrap_token', 'קוד ההקמה (BOOTSTRAP_TOKEN) שגוי');

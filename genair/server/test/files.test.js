@@ -44,6 +44,10 @@ test('files: copied into the case folder in Drive when configured', async (t) =>
   const calls = mockFetch(t, (url) => (url.includes('oauth2') ? jsonResponse(200, { access_token: 'ya29', expires_in: 3600 }) : jsonResponse(200, { id: 'drv1', webViewLink: 'https://drive.google.com/file/d/drv1' })));
   const s = await startServer(t);
   const { token } = await bootstrapOrg(s);
+  const stranger = await s.request('POST', '/api/files', { headers: { ...bearer(token), 'content-type': 'image/jpeg', 'x-file-name': 'a.jpg', 'x-drive-folder-id': 'SOMEONE_ELSES' }, body: Buffer.from('jpegdata') });
+  assert.equal(stranger.status, 201, 'the file is kept on the server');
+  assert.ok(stranger.json.driveError && !stranger.json.driveFileId, 'but not copied into a folder the system did not open');
+  await s.request('POST', '/api/db/ops', { headers: bearer(token), body: { ops: [{ op: 'patch', collection: 'cases', id: 'k1', data: { driveFolders: { customer: 'SUB_CUSTOMER' } }, at: Date.now() }] } });
   const up = await s.request('POST', '/api/files', { headers: { ...bearer(token), 'content-type': 'image/jpeg', 'x-file-name': 'a.jpg', 'x-drive-folder-id': 'SUB_CUSTOMER' }, body: Buffer.from('jpegdata') });
   assert.equal(up.status, 201);
   assert.equal(up.json.driveFileId, 'drv1');

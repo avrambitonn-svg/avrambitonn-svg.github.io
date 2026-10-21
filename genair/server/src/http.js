@@ -129,13 +129,28 @@ export async function readJson(req) {
   return value;
 }
 
-/** Client IP for rate limits. Behind a proxy (Render, Fly, nginx) set TRUST_PROXY=true to use X-Forwarded-For. */
-export function clientIp(req, trustProxy = false) {
-  if (trustProxy) {
-    const fwd = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim();
-    if (fwd) return fwd;
+/**
+ * Client IP for rate limits. Behind a proxy (Render, Fly, nginx) set TRUST_PROXY=true (one proxy) or the number
+ * of proxies in front of the server. Each proxy appends the address it saw to X-Forwarded-For, so only the
+ * last `hops` entries are trustworthy; whatever the client wrote at the start of the header is ignored.
+ */
+export function clientIp(req, trustProxy = 0) {
+  const hops = trustProxy === true ? 1 : Number(trustProxy) || 0;
+  if (hops > 0) {
+    const raw = req.headers['x-forwarded-for'];
+    const list = (Array.isArray(raw) ? raw.join(',') : String(raw ?? '')).split(',').map((s) => s.trim()).filter(Boolean);
+    const ip = list[list.length - hops] ?? list[0];
+    if (ip) return ip;
   }
   return req.socket?.remoteAddress ?? 'unknown';
+}
+
+const LOOPBACK = /^(127\.\d+\.\d+\.\d+|::1|::ffff:127\.\d+\.\d+\.\d+)$/;
+
+/** A request from this machine that did not pass through a proxy (local development, first setup on the server itself). */
+export function isLocalRequest(req) {
+  if (req.headers['x-forwarded-for'] || req.headers.forwarded || req.headers['x-real-ip']) return false;
+  return LOOPBACK.test(String(req.socket?.remoteAddress ?? ''));
 }
 
 /** Constant-time string comparison (hashing first hides the length too). */

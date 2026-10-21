@@ -30,6 +30,18 @@ if (needsProxyRespawn()) {
   for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => child.kill(sig));
   child.on('exit', (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
 } else {
+  // settings a server facing the internet should have; each one is explained in README.md (אבטחה)
+  const setupWarnings = (cfg) => {
+    const out = [];
+    if (cfg.db.mode === 'file') {
+      if (!cfg.db.authSecret) out.push('AUTH_SECRET is not set: the token secret is generated and stored inside db.json and its backups');
+      if (!cfg.db.encryptionKey) out.push('DB_ENCRYPTION_KEY is not set: db.json and its backups (customers, password hashes) are stored unencrypted');
+      if (!cfg.db.bootstrapToken) out.push('BOOTSTRAP_TOKEN is not set: first setup is possible only from this machine');
+    }
+    if (cfg.allowedOrigins.includes('*')) out.push('ALLOWED_ORIGINS=* lets any website call this server from a browser');
+    if (cfg.whatsapp.token && !cfg.whatsapp.appSecret) out.push('WHATSAPP_APP_SECRET is not set: incoming WhatsApp webhooks are refused');
+    return out;
+  };
   const port = Number(process.env.PORT) || 8787;
   const host = process.env.HOST || '0.0.0.0';
   const server = createServer((req, res) => {
@@ -42,6 +54,7 @@ if (needsProxyRespawn()) {
   server.keepAliveTimeout = 65_000; // longer than the load balancers in front (Render, Fly, nginx)
   server.listen(port, host, () => {
     console.log(`genair-server listening on http://localhost:${port}`);
+    for (const w of setupWarnings(loadConfig())) console.warn(`[genair-server] warning: ${w}`);
     startPrioritySync(loadConfig()).catch((e) => console.error('[priority-sync] did not start:', e?.message ?? e));
   });
   // Write the shared database before exiting; open SSE / long-poll connections are cut.

@@ -116,7 +116,7 @@ test('APP_TOKEN: required everywhere except health and the WhatsApp webhook', as
   assert.equal(hook.status, 200);
   assert.equal(hook.text, '42');
   const hookPost = await s.request('POST', '/api/whatsapp/webhook', { body: { entry: [] } });
-  assert.equal(hookPost.status, 200);
+  assert.equal(hookPost.status, 503, 'reaches the webhook without the token; refused there for lack of WHATSAPP_APP_SECRET');
   // Preflight never carries custom headers, so it must not require the token.
   const pre = await s.request('OPTIONS', '/api/whatsapp/inbox', { headers: { origin: 'http://localhost:5173' } });
   assert.equal(pre.status, 204);

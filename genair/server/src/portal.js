@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { HttpError, clientIp, readJson } from './http.js';
 import { createWindowLimiter } from './limiter.js';
 import { requireStore } from './db/index.js';
-import { filesDir, sendStoredFile, storeUpload } from './files.js';
+import { filesDir, sendStoredFile, storeBuffer, storeUpload } from './files.js';
 import { googleFeatures, jerusalemDate, uploadBufferToDrive } from './google.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -21,17 +21,23 @@ export const firstName = (name) => {
 };
 
 const limiters = {
+  // every portal request, counted per address before the link is even looked up
+  visit: createWindowLimiter({ max: 300, windowMs: 10 * 60_000 }),
+  // links that matched no case: someone guessing
+  miss: createWindowLimiter({ max: 20, windowMs: 10 * 60_000 }),
   read: createWindowLimiter({ max: 120, windowMs: 10 * 60_000 }),
   write: createWindowLimiter({ max: 30, windowMs: 10 * 60_000 }),
   message: createWindowLimiter({ max: 20, windowMs: 10 * 60_000 }),
   upload: createWindowLimiter({ max: 10, windowMs: 10 * 60_000 }),
   lead: createWindowLimiter({ max: 5, windowMs: 10 * 60_000 }),
-  leadGlobal: createWindowLimiter({ max: 300, windowMs: 60 * 60_000 }),
+  leadPhone: createWindowLimiter({ max: 3, windowMs: 60 * 60_000 }),
+  // a ceiling for the whole form, counted only for valid leads, so junk requests cannot use it up
+  leadGlobal: createWindowLimiter({ max: 1000, windowMs: 60 * 60_000 }),
 };
 export const resetPortalLimits = () => Object.values(limiters).forEach((l) => l.clear());
 
-function limit(kind, key) {
-  const v = limiters[kind].hit(key);
+function limit(kind, key, { peek = false } = {}) {
+  const v = peek ? limiters[kind].peek(key) : limiters[kind].hit(key);
   if (!v.allowed) {
     const e = new HttpError(429, 'too_many_requests', 'יותר מדי בקשות. נסו שוב בעוד כמה דקות');
     e.retryAfter = Math.ceil(v.retryAfterMs / 1000);
@@ -41,13 +47,42 @@ function limit(kind, key) {
 
 const notFound = () => new HttpError(404, 'not_found', 'הקישור לא נמצא או שהאזור האישי נסגר');
 
+// portal token -> case id, rebuilt only after the store changed (instead of scanning every case per request)
+const tokenIndex = new WeakMap();
+function caseIdByToken(store, token) {
+  let idx = tokenIndex.get(store);
+  if (!idx || idx.seq !== store.seq) {
+    idx = { seq: store.seq, map: new Map() };
+    for (const k of store.list('cases')) if (k.portal?.token) idx.map.set(k.portal.token, k.id);
+    tokenIndex.set(store, idx);
+  }
+  return idx.map.get(token);
+}
+
+// a closed case keeps its link this long after closing (PORTAL_TTL_DAYS), so old links stop working on their own
+const portalTtlMs = () => (Number(process.env.PORTAL_TTL_DAYS) > 0 ? Number(process.env.PORTAL_TTL_DAYS) : 365) * 86400_000;
+function portalOpen(k) {
+  if (!k?.portal?.token || k.portal.enabled === false) return false;
+  if (k.portal.expiresAt && Date.parse(k.portal.expiresAt) < Date.now()) return false;
+  if (k.stage === 'closed' || k.stage === 'lost') {
+    const since = Date.parse(k.closedAt ?? k.updatedAt ?? '') || 0;
+    if (since && Date.now() - since > portalTtlMs()) return false;
+  }
+  return true;
+}
+
 async function caseByToken(ctx) {
   const store = await requireStore(ctx.cfg);
-  const token = ctx.params.token;
-  if (!TOKEN_RE.test(String(token ?? ''))) throw notFound();
-  const k = store.list('cases').find((c) => c.portal?.token === token && c.portal?.enabled !== false);
-  if (!k) throw notFound();
-  return { store, k, ip: clientIp(ctx.req, ctx.cfg.db.trustProxy) };
+  const ip = clientIp(ctx.req, ctx.cfg.db.trustProxy);
+  limit('visit', ip);
+  limit('miss', ip, { peek: true });
+  const token = String(ctx.params.token ?? '');
+  const k = TOKEN_RE.test(token) ? store.get('cases', caseIdByToken(store, token) ?? '') : undefined;
+  if (!k || k.portal?.token !== token || !portalOpen(k)) {
+    limiters.miss.hit(ip);
+    throw notFound();
+  }
+  return { store, k, ip };
 }
 
 // ------------------------------------------------------------ server-side writes
@@ -178,6 +213,7 @@ function openQuote(store, k, quoteId) {
 }
 
 const SIG_RE = /^data:image\/png;base64,[A-Za-z0-9+/=]+$/;
+const DEPOSIT_METHODS = { credit: 'כרטיס אשראי', bit: 'ביט', transfer: 'העברה בנקאית' };
 
 /** Signature + deposit method. The server sets the quote and case fields; a staff device finishes the rest once (approvedVia). */
 export async function approveQuote(ctx) {
@@ -198,15 +234,14 @@ export async function approveQuote(ctx) {
   const settings = store.get('settings', 'org') ?? {};
   const total = quoteTotals(q).total;
   const amount = Math.round((total * Number(settings.depositPct ?? 20)) / 100);
-  const deposit = { amount, method, ...(method === 'transfer' ? {} : { paidAt: at }) }; // demo payment, like the app
+  // There is no payment provider yet: the customer only chose how to pay. The deposit waits until the office
+  // confirms the money arrived (no paidAt, no payment line), so nothing reports money that was never received.
+  const deposit = { amount, method, status: 'pending' };
   const ops = [
     patch('quotes', q.id, { status: 'approved', signature: { name, dataUrl, at, ip }, deposit, decidedAt: at, approvedVia: 'portal', approvedFromStage: k.stage }),
     activity({ kind: 'quote', caseId: k.id, text: `הלקוח אישר וחתם על הצעה ${q.number} (${name})` }),
+    activity({ kind: 'payment', caseId: k.id, text: `הלקוח בחר לשלם מקדמה של ₪${amount.toLocaleString('he-IL')} (${DEPOSIT_METHODS[method]}). ממתין לאימות התשלום` }),
   ];
-  if (deposit.paidAt) {
-    ops.push(upsert('money', { id: uid('mn'), caseId: k.id, kind: 'payment', category: 'מקדמה', description: `מקדמה — ${q.number}`, amount, at: today() }));
-    ops.push(activity({ kind: 'payment', caseId: k.id, text: `התקבלה מקדמה ₪${amount.toLocaleString('he-IL')}` }));
-  }
   for (const other of store.list('quotes')) {
     if (other.caseId === k.id && other.id !== q.id && ['draft', 'sent', 'viewed'].includes(other.status)) ops.push(patch('quotes', other.id, { status: 'rejected' }));
   }
@@ -215,7 +250,10 @@ export async function approveQuote(ctx) {
     ops.push(activity({ kind: 'stage', caseId: k.id, text: `שלב: ${stageLabel(store, k.stage)} ← ${stageLabel(store, 'approved')}` }));
     if (k.agentId) ops.push(notification(k.agentId, `${k.title}: ${stageLabel(store, 'approved')}`, `/cases/${k.id}`));
   }
-  for (const u of managers(store)) ops.push(notification(u.id, `הצעה אושרה: ${k.title} — לתאם התקנה`, `/cases/${k.id}`));
+  for (const u of managers(store)) {
+    ops.push(notification(u.id, `הצעה אושרה: ${k.title} — לתאם התקנה`, `/cases/${k.id}`));
+    ops.push(notification(u.id, `לאמת את תשלום המקדמה (₪${amount.toLocaleString('he-IL')}, ${DEPOSIT_METHODS[method]}): ${k.title}`, `/cases/${k.id}`));
+  }
   write(store, ops);
   return { status: 200, body: { ok: true, deposit, decidedAt: at } };
 }
@@ -353,7 +391,7 @@ export async function createLead(ctx) {
   const store = await requireStore(ctx.cfg);
   const ip = clientIp(ctx.req, ctx.cfg.db.trustProxy);
   limit('lead', ip);
-  limit('leadGlobal', 'all');
+  limit('leadGlobal', 'all', { peek: true });
   const body = await readJson(ctx.req);
   if (typeof body.website === 'string' && body.website.trim()) return { status: 201, body: { ok: true, number: null, portalToken: null } };
   const name = typeof body.name === 'string' ? body.name.trim().replace(/\s+/g, ' ') : '';
@@ -369,11 +407,19 @@ export async function createLead(ctx) {
   if (!type) fields.push({ field: 'type', message: 'בחרו את סוג הפרויקט' });
   if (photos.length > 6 || photos.some((p) => typeof p !== 'string' || !PHOTO_RE.test(p) || p.length > 2_000_000)) fields.push({ field: 'photos', message: 'עד 6 תמונות' });
   if (fields.length) throw new HttpError(400, 'validation_error', 'נתונים חסרים או שגויים', { fields });
+  limit('leadPhone', phone);
+  limit('leadGlobal', 'all');
 
   const source = SOURCES.includes(body.source) ? body.source : 'website';
   const at = nowIso();
   const addressId = uid('ad');
-  const customer = { id: uid('c'), name, type: customerTypeOf(type), phone, addresses: [{ id: addressId, city: city || 'לא צוין', street: '' }], tags: ['פנייה מהאתר'], temp: true, sync: { status: 'not_synced' }, createdAt: at };
+  // Anyone can send the form with any phone number, so this customer is not trusted yet: it is not sent to
+  // Priority (where it could be matched by phone to a real customer, whose details would then flow back into
+  // this case and its portal) until someone in the office has looked at it and cleared pendingReview.
+  const customer = {
+    id: uid('c'), name, type: customerTypeOf(type), phone, addresses: [{ id: addressId, city: city || 'לא צוין', street: '' }], tags: ['פנייה מהאתר'], temp: true,
+    pendingReview: true, sync: { status: 'pending', error: 'פנייה מהאתר: ממתין לאישור במשרד' }, createdAt: at,
+  };
   const contact = { id: uid('ct'), customerId: customer.id, name, phone, primary: true };
   const numbering = store.get('config', 'org')?.caseNumbering ?? {};
   const { from } = store.reserve('case', 1);
@@ -383,16 +429,25 @@ export async function createLead(ctx) {
   const k = {
     id: uid('k'), number, title, customerId: customer.id, contactIds: [contact.id], addressId, projectType: type, stage: 'lead', source, priority: 'normal', tags: [], installerIds: [],
     notes: text ? `מהטופס: "${text}"` : undefined,
-    survey: { rooms: [], photos: photos.map((dataUrl, i) => ({ id: uid('p'), dataUrl, caption: `תמונה מהלקוח ${i + 1}`, tag: 'other', takenAt: at })) },
+    survey: { rooms: [], photos: [] },
     portal: { token: portalToken(), enabled: true }, createdAt: at, updatedAt: at, createdVia: 'lead',
   };
   if (!k.notes) delete k.notes;
+  // the photos go to the file store and the case's "customer" folder, not into the database itself
+  const docs = [];
+  for (const [i, dataUrl] of photos.entries()) {
+    const [, mime, b64] = /^data:(image\/[a-z]+);base64,(.+)$/.exec(dataUrl);
+    const name = `תמונה מהלקוח ${i + 1}.${mime === 'image/jpeg' ? 'jpg' : mime.slice(6)}`;
+    const meta = await storeBuffer(ctx.cfg, Buffer.from(b64, 'base64'), { name, mime, meta: { caseId: k.id, folder: 'customer', source: 'lead' } });
+    docs.push({ id: uid('d'), caseId: k.id, customerId: customer.id, folder: 'customer', name: meta.name, mime: meta.mime, size: meta.size, fileId: meta.id, uploadedAt: at, source: 'portal', customerVisible: true });
+  }
   const sourceLabel = { website: 'אתר', facebook: 'פייסבוק / אינסטגרם', whatsapp: 'וואטסאפ' }[source];
   const users = store.list('users').filter((u) => u.active !== false);
   write(store, [
     upsert('customers', customer),
     upsert('contacts', contact),
     upsert('cases', k),
+    ...docs.map((d) => upsert('docs', d)),
     activity({ kind: 'created', caseId: k.id, text: `התיק נפתח (${number})` }),
     activity({ kind: 'created', caseId: k.id, customerId: customer.id, text: `ליד חדש מטופס "השאירו פרטים" (${sourceLabel})${photos.length ? `, ${photos.length} תמונות` : ''}` }),
     ...users.filter((u) => u.role === 'admin').map((u) => notification(u.id, `תיק חדש: ${title}`, `/cases/${k.id}`)),

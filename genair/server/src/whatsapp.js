@@ -191,9 +191,11 @@ export async function webhookVerify({ url, cfg }) {
 }
 
 export async function webhookReceive({ req, cfg }) {
-  const raw = await readBody(req);
   const secret = cfg.whatsapp.appSecret;
-  if (secret && !verifySignature(raw, req.headers['x-hub-signature-256'], secret)) {
+  // without the app secret there is no way to tell Meta's calls from anyone else's: refuse rather than fill the inbox with fakes
+  if (!secret) throw new HttpError(503, 'whatsapp_not_configured', 'WHATSAPP_APP_SECRET לא הוגדר בשרת, ולכן ה-Webhook לא מקבל הודעות');
+  const raw = await readBody(req);
+  if (!verifySignature(raw, req.headers['x-hub-signature-256'], secret)) {
     throw new HttpError(401, 'invalid_signature', 'חתימת ה-Webhook אינה תקינה');
   }
   const events = extractEvents(parseJson(raw));

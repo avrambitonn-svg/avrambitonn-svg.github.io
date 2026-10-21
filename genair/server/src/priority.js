@@ -322,6 +322,10 @@ function requireReadable(cfg) {
 
 function requireWritable(cfg) {
   requireReadable(cfg);
+  // Priority's public demo is shared by everyone on the internet: never write to it, whatever PRIORITY_ALLOW_WRITE says
+  if (cfg.mode !== 'live') {
+    throw new HttpError(403, 'priority_write_disabled', 'סביבת הדמו של Priority משותפת לכולם, ולכן לא כותבים אליה. כתיבה רק מול המערכת של החברה (PRIORITY_MODE=live)', { mode: cfg.mode });
+  }
   if (!cfg.allowWrite) {
     throw new HttpError(403, 'priority_write_disabled', 'כתיבה לפריוריטי מושבתת בשרת. כדי לאפשר יצירת לקוחות, הצעות מחיר והזמנות יש להגדיר PRIORITY_ALLOW_WRITE=true', {
       mode: cfg.mode,
