@@ -66,8 +66,9 @@ export function createWindowLimiter({ max, windowMs, now = Date.now }) {
     }
     return b;
   };
-  const verdict = (b) => ({ allowed: b.count <= max, retryAfterMs: Math.max(0, b.resetAt - now()) });
+  const verdict = (b) => ({ allowed: b.count <= max, count: b.count, retryAfterMs: Math.max(0, b.resetAt - now()) });
   return {
+    max,
     hit(key) {
       const b = bucket(key);
       b.count++;
@@ -75,7 +76,7 @@ export function createWindowLimiter({ max, windowMs, now = Date.now }) {
     },
     peek(key) {
       const b = bucket(key);
-      return { allowed: b.count < max, retryAfterMs: Math.max(0, b.resetAt - now()) };
+      return { allowed: b.count < max, count: b.count, retryAfterMs: Math.max(0, b.resetAt - now()) };
     },
     reset(key) {
       buckets.delete(key);

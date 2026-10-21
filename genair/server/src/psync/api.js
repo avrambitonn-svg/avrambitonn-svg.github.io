@@ -3,7 +3,10 @@
 // Field names come from Priority's $metadata - see PRIORITY_MAPPING.md.
 import { buildQuery, escapeODataString } from '../priority.js';
 
-const q = (v) => `'${escapeODataString(v)}'`;
+const q = (v) => `'${escapeODataString(v)}'`; // inside $filter (buildQuery encodes the whole expression)
+// Inside a URL path every reserved character of the value is percent-encoded, so a name with "/", "?", "#" or "%" cannot
+// change which resource is addressed (the apostrophe stays literal: that is how OData quotes a key).
+const qp = (v) => `'${encodeURIComponent(escapeODataString(v)).replace(/[()]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}'`;
 const rows = (data) => (Array.isArray(data?.value) ? data.value : []);
 const PAGE = 200;
 const MAX_ROWS = 50_000;
@@ -39,7 +42,7 @@ export async function createCustomer(client, payload) {
   return String(res?.CUSTNAME ?? '');
 }
 
-export const updateCustomer = (client, custname, payload) => client.patch(`CUSTOMERS(${q(custname)})`, payload);
+export const updateCustomer = (client, custname, payload) => client.patch(`CUSTOMERS(${qp(custname)})`, payload);
 
 export const listCustomers = (client, filter) => all(client, 'CUSTOMERS', { $select: CUSTOMER_FIELDS, $filter: filter });
 
@@ -48,7 +51,7 @@ export async function getCustomer(client, custname) {
 }
 
 const CONTACT_FIELDS = 'NAME,FIRM,CELLPHONE,PHONENUM,EMAIL,POSITIONDES';
-const contactsPath = (custname) => `CUSTOMERS(${q(custname)})/CUSTPERSONNEL_SUBFORM`;
+const contactsPath = (custname) => `CUSTOMERS(${qp(custname)})/CUSTPERSONNEL_SUBFORM`;
 
 export async function listContacts(client, custname) {
   return rows(await client.get(contactsPath(custname), buildQuery({ $select: CONTACT_FIELDS })));
@@ -60,9 +63,9 @@ export async function createContact(client, custname, payload) {
 }
 
 // FIRM is the customer's name (a string) in CUSTPERSONNEL's key, checked against the demo
-const firmKey = (f) => (typeof f === 'number' ? String(f) : q(f));
+const firmKey = (f) => (typeof f === 'number' ? String(f) : qp(f));
 export const updateContact = (client, custname, key, payload) =>
-  client.patch(`${contactsPath(custname)}(NAME=${q(key.NAME)},FIRM=${firmKey(key.FIRM)})`, payload);
+  client.patch(`${contactsPath(custname)}(NAME=${qp(key.NAME)},FIRM=${firmKey(key.FIRM)})`, payload);
 
 // ---------------------------------------------------------------- statuses
 // Every installation names its statuses differently; their meaning is in flags (checked in the demo):
@@ -91,11 +94,11 @@ export async function createQuote(client, payload) {
   return String(res?.CPROFNUM ?? '');
 }
 
-export const updateQuote = (client, num, head) => client.patch(`CPROF(${q(num)})`, head);
+export const updateQuote = (client, num, head) => client.patch(`CPROF(${qp(num)})`, head);
 
 /** Lines can't be matched one to one, so an edited quote gets its lines replaced. */
 export async function replaceQuoteLines(client, num, lines) {
-  const path = `CPROF(${q(num)})/CPROFITEMS_SUBFORM`;
+  const path = `CPROF(${qp(num)})/CPROFITEMS_SUBFORM`;
   const old = rows(await client.get(path, buildQuery({ $select: 'KLINE' })));
   for (const l of old) await client.del(`${path}(${Number(l.KLINE)})`);
   for (const l of lines) await client.post(path, l);
@@ -133,7 +136,7 @@ export async function createSupplier(client, payload) {
   return String(res?.SUPNAME ?? '');
 }
 
-export const updateSupplier = (client, supname, payload) => client.patch(`SUPPLIERS(${q(supname)})`, payload);
+export const updateSupplier = (client, supname, payload) => client.patch(`SUPPLIERS(${qp(supname)})`, payload);
 
 export async function findPurchaseOrder(client, details) {
   return rows(await client.get('PORDERS', buildQuery({ $select: 'ORDNAME,STATDES', $filter: `DETAILS eq ${q(details)}`, $top: 1 })))[0];
@@ -186,8 +189,8 @@ export function listStock(client, warehouses) {
 // customer is closed to the API in the demo). The file goes up inline as a data: URI in EXTFILENAME.
 
 export const FILE_TARGETS = {
-  customer: (id) => `CUSTOMERS(${q(id)})/CUSTEXTFILE_SUBFORM`,
-  supplier: (id) => `SUPPLIERS(${q(id)})/SUPEXTFILE_SUBFORM`,
+  customer: (id) => `CUSTOMERS(${qp(id)})/CUSTEXTFILE_SUBFORM`,
+  supplier: (id) => `SUPPLIERS(${qp(id)})/SUPEXTFILE_SUBFORM`,
 };
 
 export async function listFiles(client, path) {
@@ -210,7 +213,7 @@ export const listSerialsChanged = (client, since) => all(client, 'SERNUMBERS', {
 
 // ---------------------------------------------------------------- service call status
 
-const callPath = (docno) => `DOCUMENTS_Q(DOCNO=${q(docno)},TYPE='Q')`;
+const callPath = (docno) => `DOCUMENTS_Q(DOCNO=${qp(docno)},TYPE='Q')`;
 export const listCallStatuses = (client) => all(client, 'CALLSTATUSES', { $select: 'CODE,INITSTATFLAG,ACTIVEFLAG,FINAL,CANCEL' });
 export const updateServiceCall = (client, docno, data) => client.patch(callPath(docno), data);
 export const listServiceCallsChanged = (client, since) =>
@@ -242,12 +245,12 @@ export async function createStockDoc(client, type, payload) {
   return String(res?.DOCNO ?? '');
 }
 
-export const setStockDocStatus = (client, type, docno, status) => client.patch(`${STOCK_DOCS[type].form}(DOCNO=${q(docno)},TYPE='${type}')`, { STATDES: status });
+export const setStockDocStatus = (client, type, docno, status) => client.patch(`${STOCK_DOCS[type].form}(DOCNO=${qp(docno)},TYPE='${type}')`, { STATDES: status });
 
 // ---------------------------------------------------------------- purchase order status, supplier invoices
 
 export const listPurchaseStatuses = (client) => all(client, 'PORDSTATS', { $select: 'STATDES,INITSTATFLAG,OPENDOCFLAG,APPROVED,AFTERAPPFLAG,CLOSEDBOOL,CLOSESTATFLAG' });
-export const updatePurchaseOrder = (client, ordname, data) => client.patch(`PORDERS(${q(ordname)})`, data);
+export const updatePurchaseOrder = (client, ordname, data) => client.patch(`PORDERS(${qp(ordname)})`, data);
 export const listPurchaseOrders = (client, filter) => all(client, 'PORDERS', { $select: 'ORDNAME,STATDES,CLOSEDBOOL', $filter: filter });
 
 export const SUPPLIER_INVOICE_FORMS = ['YINVOICES', 'PINVOICES'];
@@ -262,11 +265,11 @@ export async function createAgent(client, payload) {
   return String(res?.AGENTCODE ?? payload.AGENTCODE);
 }
 
-const destsPath = (custname) => `CUSTOMERS(${q(custname)})/CUSTDESTS_SUBFORM`;
+const destsPath = (custname) => `CUSTOMERS(${qp(custname)})/CUSTDESTS_SUBFORM`;
 export async function listSites(client, custname) {
   return rows(await client.get(destsPath(custname), buildQuery({ $select: 'CODE,CODEDES,ADDRESS,STATE' })));
 }
 export const createSite = (client, custname, payload) => client.post(destsPath(custname), payload);
-export const updateSite = (client, custname, code, payload) => client.patch(`${destsPath(custname)}(${q(code)})`, payload);
+export const updateSite = (client, custname, code, payload) => client.patch(`${destsPath(custname)}(${qp(code)})`, payload);
 
-export const createCustomerNote = (client, custname, payload) => client.post(`CUSTOMERS(${q(custname)})/CUSTNOTES_SUBFORM`, payload);
+export const createCustomerNote = (client, custname, payload) => client.post(`CUSTOMERS(${qp(custname)})/CUSTNOTES_SUBFORM`, payload);

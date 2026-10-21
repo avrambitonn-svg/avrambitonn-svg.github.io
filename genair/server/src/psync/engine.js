@@ -26,7 +26,9 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 const uid = (prefix) => `${prefix}${randomBytes(6).toString('hex')}`;
 const safeId = (s) => String(s).replace(/[^A-Za-z0-9_.:-]/g, '_').slice(0, 100);
-const errText = (e) => (e instanceof HttpError ? (e.details?.message ? `${e.message} (${e.details.message})` : e.message) : String(e?.message ?? e));
+// Sync errors are stored on the record and shown in the app to everybody, so they carry no addresses or paths of the ERP.
+const scrub = (t) => String(t).replace(/https?:\/\/\S+/g, '[כתובת]').replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, '[כתובת]').replace(/(?:[A-Za-z]:\\|\/)[\w.-]+(?:[\\/][\w.-]+){2,}/g, '[נתיב]').slice(0, 240);
+const errText = (e) => scrub(e instanceof HttpError ? (e.details?.message ? `${e.message} (${e.details.message})` : e.message) : String(e?.message ?? e));
 
 // collection -> the stream that pushes it, in dependency order (customers before what hangs on them)
 const PUSH = [
@@ -319,6 +321,10 @@ export class PrioritySync {
     if (sync.priorityId && sync.hash === hash && sync.status === 'synced') return this.canWrite ? X.pushSites(this, c, sync.priorityId) : undefined;
     if (sync.status === 'disabled' || !this.due(sync, now)) return;
     if (!payload.CUSTDES || !payload.PHONE) return this.holdPending('customers', c, 'חסר שם או טלפון');
+    // a name and a number typed into the public form are not yet a customer: a person takes the lead forward first
+    if (c.createdVia === 'lead' && !sync.priorityId && !this.store.list('cases').some((k) => k.customerId === c.id && k.stage !== 'lead')) {
+      return this.holdPending('customers', c, 'ליד מהאתר: ממתין שמישהו יטפל בו לפני שייפתח ב-Priority');
+    }
     // linked before the engine ran: no baseline yet, so nothing is overwritten; the next pull decides
     if (sync.priorityId && !sync.hash) return this.patch('customers', c.id, { sync: { ...sync, hash } });
     if (!this.writeGate('customers', c)) return;
@@ -360,7 +366,10 @@ export class PrioritySync {
 
   /** An existing Priority customer: Priority's details win, and only what it lacks is filled in from the app. */
   async linkCustomer(c, row) {
-    const fromP = M.customerIn(row, c);
+    // a customer who came from the public form keeps what was typed there: Priority's details are not copied onto it
+    // (anyone can type any phone number into that form); Priority only gets what it lacks
+    const fromLead = c.createdVia === 'lead';
+    const fromP = fromLead ? {} : M.customerIn(row, c);
     const merged = { ...c, ...fromP };
     const payload = M.customerOut(merged);
     const have = M.customerRow(row);
@@ -372,7 +381,7 @@ export class PrioritySync {
       hash: M.hashOf(payload),
       remoteHash: M.hashOf({ ...have, ...missing }),
     });
-    this.activity(`הלקוח קושר ללקוח קיים ב-Priority (${row.CUSTNAME})`, { customerId: c.id });
+    this.activity(`הלקוח קושר ללקוח קיים ב-Priority (${row.CUSTNAME}) לפי הטלפון או ח״פ${fromLead ? '. הגיע מהטופס באתר: כדאי לוודא שמדובר באותו אדם' : ''}`, { customerId: c.id });
     this.queueDependents(c.id);
   }
 
@@ -781,7 +790,7 @@ export class PrioritySync {
           const line = M.moneyFromDoc(form, row, caseId, kind);
           known.add(`${kind}|${row.IVNUM}`);
           // a payment the office already typed in (or the portal deposit) is linked, not doubled
-          const twin = kind === 'payment' && money.find((m) => m.kind === 'payment' && m.caseId === caseId && !m.priorityId && Math.abs(Number(m.amount) - line.amount) < 1 && Math.abs(Date.parse(m.at) - Date.parse(line.at)) <= 10 * DAY);
+          const twin = kind === 'payment' && money.find((m) => m.kind === 'payment' && m.caseId === caseId && !m.priorityId && Math.abs(Number(m.amount) - line.amount) < 0.5 && Math.abs(Date.parse(m.at) - Date.parse(line.at)) <= 5 * DAY);
           if (twin) {
             twin.priorityId = line.priorityId;
             this.patch('money', twin.id, { priorityId: line.priorityId, priorityForm: form, source: 'priority', status: 'paid' });

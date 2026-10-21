@@ -1,10 +1,11 @@
 // Users and sessions: scrypt password hashes (kept only in the server's auth state, never in the
 // shared users collection), HS256 tokens with a session id (logout revokes it), sliding refresh,
 // login rate limits and the one-time bootstrap that uploads the app's data to an empty store.
-import { createHmac, randomBytes, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, randomInt, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
-import { HttpError, clientIp, readJson, safeEqual } from './http.js';
+import { HttpError, ipOf, readJson, safeEqual } from './http.js';
 import { createWindowLimiter } from './limiter.js';
+import { alertAdmins, audit, maskLogin } from './audit.js';
 import { requireStore } from './db/index.js';
 import { BAD_KEYS, COLLECTION_RE, ID_RE, SINGLETONS } from './db/store.js';
 
@@ -18,10 +19,35 @@ const SECRET_FIELDS = ['password', 'passwordHash', 'hash', 'salt', 'token', 'tem
 
 // ------------------------------------------------------------ passwords
 
-export async function hashPassword(password) {
-  const salt = randomBytes(16);
-  const key = await scrypt(String(password).normalize('NFC'), salt, SCRYPT.keylen, { N: SCRYPT.N, r: SCRYPT.r, p: SCRYPT.p, maxmem: 64 * 1024 * 1024 });
-  return `scrypt$${SCRYPT.N}$${SCRYPT.r}$${SCRYPT.p}$${salt.toString('base64')}$${key.toString('base64')}`;
+// scrypt is deliberately slow and memory-hungry. Without a cap a flood of sign-in attempts fills the thread pool and
+// every other request (files, DNS) waits behind it, so only a few run at once and the queue is short.
+const MAX_HASHES_AT_ONCE = 3;
+const MAX_HASHES_WAITING = 40;
+let hashesRunning = 0;
+const hashQueue = [];
+
+async function withHashSlot(fn) {
+  if (hashesRunning >= MAX_HASHES_AT_ONCE) {
+    if (hashQueue.length >= MAX_HASHES_WAITING) throw new HttpError(503, 'server_busy', 'השרת עמוס כרגע, נסו שוב בעוד רגע');
+    await new Promise((resolve) => hashQueue.push(resolve)); // the finishing run hands its slot over
+  } else {
+    hashesRunning++;
+  }
+  try {
+    return await fn();
+  } finally {
+    const next = hashQueue.shift();
+    if (next) next();
+    else hashesRunning--;
+  }
+}
+
+export function hashPassword(password) {
+  return withHashSlot(async () => {
+    const salt = randomBytes(16);
+    const key = await scrypt(String(password).normalize('NFC'), salt, SCRYPT.keylen, { N: SCRYPT.N, r: SCRYPT.r, p: SCRYPT.p, maxmem: 64 * 1024 * 1024 });
+    return `scrypt$${SCRYPT.N}$${SCRYPT.r}$${SCRYPT.p}$${salt.toString('base64')}$${key.toString('base64')}`;
+  });
 }
 
 export async function verifyPassword(password, stored) {
@@ -29,23 +55,36 @@ export async function verifyPassword(password, stored) {
   if (parts.length !== 6 || parts[0] !== 'scrypt') return false;
   const [, N, r, p, saltB64, keyB64] = parts;
   const expected = Buffer.from(keyB64, 'base64');
-  const key = await scrypt(String(password).normalize('NFC'), Buffer.from(saltB64, 'base64'), expected.length, { N: Number(N), r: Number(r), p: Number(p), maxmem: 64 * 1024 * 1024 });
-  return key.length === expected.length && timingSafeEqual(key, expected);
+  return withHashSlot(async () => {
+    const key = await scrypt(String(password).normalize('NFC'), Buffer.from(saltB64, 'base64'), expected.length, { N: Number(N), r: Number(r), p: Number(p), maxmem: 64 * 1024 * 1024 });
+    return key.length === expected.length && timingSafeEqual(key, expected);
+  });
 }
 
 const DUMMY_HASH = 'scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA==$' + Buffer.alloc(64).toString('base64');
 
 export function temporaryPassword(len = 10) {
   const abc = 'abcdefghjkmnpqrstuvwxyz23456789';
-  const bytes = randomBytes(len);
-  let s = Array.from(bytes, (b) => abc[b % abc.length]).join('');
-  if (!/\d/.test(s)) s = s.slice(0, -1) + String(bytes[0] % 10);
+  // rejection sampling: 256 is not a multiple of 31, so a plain modulo would favour the first letters
+  const limit = 256 - (256 % abc.length);
+  let s = '';
+  while (s.length < len) for (const b of randomBytes(len * 2)) if (b < limit && s.length < len) s += abc[b % abc.length];
+  if (!/\d/.test(s)) s = s.slice(0, -1) + String(randomInt(2, 10));
   return s;
 }
 
-export function passwordProblem(pw) {
+const COMMON_PASSWORDS = new Set([
+  '12345678', '123456789', '1234567890', '87654321', '11111111', '00000000', 'password', 'password1', 'passw0rd', 'qwertyui', 'qwerty123',
+  'iloveyou', 'admin123', 'letmein1', 'welcome1', 'abc12345', 'aa123456', 'a1234567', '1q2w3e4r', '0501234567', 'genair123', 'genair1234',
+]);
+
+/** null when the password is acceptable, else the reason (Hebrew, shown to the user). `who` = login names it must not equal. */
+export function passwordProblem(pw, who = []) {
   if (typeof pw !== 'string' || pw.length < 8) return 'הסיסמה צריכה לפחות 8 תווים';
   if (pw.length > 200) return 'הסיסמה ארוכה מדי';
+  const low = pw.toLowerCase();
+  if (COMMON_PASSWORDS.has(low) || /^(.)\1+$/.test(pw)) return 'הסיסמה קלה מדי לניחוש, בחרו סיסמה אחרת';
+  if (who.some((w) => w && String(w).toLowerCase() === low)) return 'הסיסמה לא יכולה להיות זהה לשם המשתמש';
   return null;
 }
 
@@ -76,10 +115,11 @@ export function verifyToken(token, secret, nowSec = Math.floor(Date.now() / 1000
 
 export const tokenSecret = (store, cfg) => cfg.db.authSecret || store.ensureSecret();
 
-export function issueToken(store, cfg, userId, { sid = randomBytes(12).toString('base64url'), pv } = {}) {
+export function issueToken(store, cfg, userId, { sid = randomBytes(12).toString('base64url'), pv, ses } = {}) {
   const iat = Math.floor(Date.now() / 1000);
   const exp = iat + Math.round(cfg.db.tokenTtlHours * 3600);
-  const claims = { sub: userId, sid, pv: pv ?? store.auth.credentials.get(userId)?.pv ?? 0, iat, exp };
+  // ses = when the sign-in began; renewing a token keeps it, so a session cannot be kept alive forever
+  const claims = { sub: userId, sid, pv: pv ?? store.auth.credentials.get(userId)?.pv ?? 0, ses: ses ?? iat, iat, exp };
   return { token: signToken(claims, tokenSecret(store, cfg)), expiresAt: new Date(exp * 1000).toISOString(), claims };
 }
 
@@ -94,6 +134,8 @@ export function readSession(req, store, cfg) {
   if (!token) return null;
   const claims = verifyToken(token, tokenSecret(store, cfg));
   if (!claims) return { error: 'expired' };
+  const maxAge = (cfg.db.maxSessionHours ?? 168) * 3600;
+  if (Math.floor(Date.now() / 1000) - (claims.ses ?? claims.iat) > maxAge) return { error: 'expired' };
   if (store.auth.revoked.has(claims.sid)) return { error: 'revoked' };
   const cred = store.auth.credentials.get(claims.sub);
   const user = store.get('users', claims.sub);
@@ -104,10 +146,12 @@ export function readSession(req, store, cfg) {
 /** Requires a session; refreshes the token (x-auth-token response header) once it is 15 minutes old. */
 export function requireSession(req, res, store, cfg) {
   const s = readSession(req, store, cfg);
-  if (!s || s.error) throw new HttpError(401, 'unauthorized', s?.error === 'expired' ? 'פג תוקף ההתחברות, צריך להתחבר שוב' : 'צריך להתחבר למערכת');
+  if (!s || s.error) {
+    throw new HttpError(401, 'unauthorized', s?.error === 'expired' ? 'פג תוקף ההתחברות, צריך להתחבר שוב' : 'צריך להתחבר למערכת', { reason: s?.error ?? 'missing' });
+  }
   const nowSec = Math.floor(Date.now() / 1000);
   if (nowSec - s.claims.iat > REFRESH_AFTER_SEC) {
-    const t = issueToken(store, cfg, s.user.id, { sid: s.claims.sid, pv: s.claims.pv });
+    const t = issueToken(store, cfg, s.user.id, { sid: s.claims.sid, pv: s.claims.pv, ses: s.claims.ses ?? s.claims.iat });
     res.setHeader('x-auth-token', t.token);
   }
   return s;
@@ -117,17 +161,32 @@ export const isManager = (user) => user?.role === 'admin' || user?.role === 'off
 
 // ------------------------------------------------------------ login
 
+// Three counters: this address (any account), this account from this address, and this account from anywhere. The
+// per-account-from-anywhere limit is high on purpose: a stranger who types wrong passwords for the manager's login must
+// not be able to lock the manager out (the "account + address" limit is what stops guessing from one place).
 const failuresByIp = createWindowLimiter({ max: 30, windowMs: 15 * 60_000 });
-const failuresByLogin = createWindowLimiter({ max: 8, windowMs: 15 * 60_000 });
+const failuresByAccountIp = createWindowLimiter({ max: 8, windowMs: 15 * 60_000 });
+const failuresByAccount = createWindowLimiter({ max: 60, windowMs: 15 * 60_000 });
+const passwordChangeFailures = createWindowLimiter({ max: 5, windowMs: 15 * 60_000 });
 export const resetLoginLimits = () => {
   failuresByIp.clear();
-  failuresByLogin.clear();
+  failuresByAccountIp.clear();
+  failuresByAccount.clear();
+  passwordChangeFailures.clear();
 };
 
 const normPhone = (p) => {
   const d = String(p ?? '').replace(/\D/g, '');
   return d.startsWith('972') ? `0${d.slice(3)}` : d;
 };
+
+/** One key per account however it was typed: "A@x.io " and "a@x.io" are the same, so are "050-123 4567" and "0501234567". */
+export function accountKey(login) {
+  const raw = String(login ?? '').trim();
+  if (raw.includes('@')) return raw.toLowerCase();
+  const p = normPhone(raw);
+  return p.length >= 9 ? `p:${p}` : raw.toLowerCase();
+}
 
 export function findUserByLogin(store, login) {
   const raw = String(login ?? '').trim();
@@ -150,30 +209,46 @@ export async function login({ req, cfg }) {
   const loginId = typeof body.login === 'string' ? body.login.trim().slice(0, 120) : '';
   const password = typeof body.password === 'string' ? body.password : '';
   if (!loginId || !password) throw new HttpError(400, 'validation_error', 'צריך טלפון או אימייל וסיסמה', { fields: [!loginId && { field: 'login' }, !password && { field: 'password' }].filter(Boolean) });
-  const ip = clientIp(req, cfg.db.trustProxy);
-  const lk = loginId.toLowerCase();
-  for (const [lim, key] of [[failuresByIp, ip], [failuresByLogin, lk]]) {
+  const ip = ipOf(req, cfg);
+  const acct = accountKey(loginId);
+  const pairs = [[failuresByIp, ip], [failuresByAccountIp, `${acct}|${ip}`], [failuresByAccount, acct]];
+  for (const [lim, key] of pairs) {
     const v = lim.peek(key);
-    if (!v.allowed) throw tooMany(v.retryAfterMs);
+    if (!v.allowed) {
+      audit(cfg, 'login_blocked', { login: maskLogin(loginId), ip });
+      throw tooMany(v.retryAfterMs);
+    }
   }
   const user = findUserByLogin(store, loginId);
   const cred = user && store.auth.credentials.get(user.id);
   const ok = await verifyPassword(password, cred?.hash ?? DUMMY_HASH);
   if (!user || !cred || !ok) {
-    failuresByIp.hit(ip);
-    failuresByLogin.hit(lk);
+    let locked = false;
+    for (const [lim, key] of pairs) {
+      const v = lim.hit(key);
+      if (v.count === lim.max) locked = true; // this very attempt used up the last try: the next one is refused
+    }
+    audit(cfg, 'login_failed', { login: maskLogin(loginId), ip, known: Boolean(user) });
+    if (locked) {
+      audit(cfg, 'login_locked', { login: maskLogin(loginId), ip });
+      alertAdmins(store, 'login_locked', `ניסיונות כניסה כושלים חוזרים (${maskLogin(loginId)}). כדאי לבדוק שזה לא ניסיון פריצה`);
+    }
     throw new HttpError(401, 'invalid_credentials', 'הפרטים לא נכונים');
   }
-  failuresByLogin.reset(lk);
+  failuresByAccountIp.reset(`${acct}|${ip}`);
   store.setCredential(user.id, { ...cred, lastLoginAt: new Date().toISOString() });
   const t = issueToken(store, cfg, user.id);
+  audit(cfg, 'login_ok', { user: user.id, role: user.role, ip });
   return { status: 200, body: { token: t.token, expiresAt: t.expiresAt, user, mustChange: Boolean(cred.mustChange) } };
 }
 
 export async function logout({ req, res, cfg }) {
   const store = await requireStore(cfg);
   const s = readSession(req, store, cfg);
-  if (s?.claims) store.revoke(s.claims.sid, s.claims.exp + 13 * 3600);
+  if (s?.claims) {
+    store.revoke(s.claims.sid, s.claims.exp + 13 * 3600);
+    audit(cfg, 'logout', { user: s.user.id });
+  }
   res.removeHeader?.('x-auth-token');
   return { status: 200, body: { ok: true } };
 }
@@ -195,9 +270,10 @@ export async function setUserPassword({ req, res, cfg, params }) {
   let temporary;
   let password = body.password;
   if (password === undefined || password === null || password === '') password = temporary = temporaryPassword();
-  const problem = passwordProblem(password);
+  const problem = passwordProblem(password, [target.email, target.phone]);
   if (problem) throw new HttpError(400, 'validation_error', problem, { fields: [{ field: 'password', message: problem }] });
   const prev = store.auth.credentials.get(target.id);
+  audit(cfg, 'password_reset', { by: s.user.id, target: target.id, temporary: Boolean(temporary) });
   store.setCredential(target.id, { hash: await hashPassword(password), pv: (prev?.pv ?? 0) + 1, at: new Date().toISOString(), by: s.user.id, mustChange: Boolean(temporary) || body.mustChange === true, lastLoginAt: prev?.lastLoginAt });
   return { status: 200, body: temporary ? { ok: true, temporaryPassword: temporary } : { ok: true } };
 }
@@ -208,13 +284,21 @@ export async function changePassword({ req, res, cfg }) {
   const s = requireSession(req, res, store, cfg);
   const body = await readJson(req);
   const cred = store.auth.credentials.get(s.user.id);
-  if (!(await verifyPassword(String(body.current ?? ''), cred?.hash ?? DUMMY_HASH))) throw new HttpError(401, 'invalid_credentials', 'הסיסמה הנוכחית לא נכונה');
-  const problem = passwordProblem(body.next);
+  const blocked = passwordChangeFailures.peek(s.user.id);
+  if (!blocked.allowed) throw tooMany(blocked.retryAfterMs);
+  if (!(await verifyPassword(String(body.current ?? ''), cred?.hash ?? DUMMY_HASH))) {
+    passwordChangeFailures.hit(s.user.id);
+    audit(cfg, 'password_change_failed', { user: s.user.id });
+    throw new HttpError(401, 'invalid_credentials', 'הסיסמה הנוכחית לא נכונה');
+  }
+  passwordChangeFailures.reset(s.user.id);
+  const problem = passwordProblem(body.next, [s.user.email, s.user.phone]);
   if (problem) throw new HttpError(400, 'validation_error', problem, { fields: [{ field: 'next', message: problem }] });
   const pv = (cred?.pv ?? 0) + 1;
   store.setCredential(s.user.id, { ...cred, hash: await hashPassword(body.next), pv, at: new Date().toISOString(), by: s.user.id, mustChange: false });
-  const t = issueToken(store, cfg, s.user.id, { sid: s.claims.sid, pv });
+  const t = issueToken(store, cfg, s.user.id, { sid: s.claims.sid, pv, ses: s.claims.ses ?? s.claims.iat });
   res.setHeader('x-auth-token', t.token);
+  audit(cfg, 'password_changed', { user: s.user.id });
   return { status: 200, body: { ok: true, token: t.token, expiresAt: t.expiresAt } };
 }
 
@@ -281,21 +365,31 @@ function validSnapshot(snap) {
   return { collections, config: obj(snap.config), settings: obj(snap.settings) && cleanSettings(snap.settings), counters };
 }
 
+/**
+ * The code a person must type to finish the first setup. BOOTSTRAP_TOKEN when set; otherwise a random code made when the
+ * server starts and printed in its log, so only whoever runs the server can finish the setup (not whoever reaches the
+ * address first). It is new on every start and is never stored.
+ */
+export function setupCode(store, cfg) {
+  return cfg.db.bootstrapToken || (store.setupCode ??= randomBytes(9).toString('base64url'));
+}
+
 /** First run only: uploads the app's data and sets the admin's password. */
 export async function bootstrap({ req, cfg }) {
   const store = await requireStore(cfg);
-  const ip = clientIp(req, cfg.db.trustProxy);
+  const ip = ipOf(req, cfg);
   if (!failuresByIp.peek(ip).allowed) throw tooMany(failuresByIp.peek(ip).retryAfterMs);
   if (!store.isEmpty()) throw new HttpError(409, 'already_bootstrapped', 'המערכת כבר הוקמה. מתחברים עם משתמש וסיסמה');
   const body = await readJson(req);
-  if (cfg.db.bootstrapToken && !safeEqual(String(body.bootstrapToken ?? ''), cfg.db.bootstrapToken)) {
+  if (!safeEqual(String(body.bootstrapToken ?? ''), setupCode(store, cfg))) {
     failuresByIp.hit(ip);
-    throw new HttpError(401, 'invalid_bootstrap_token', 'קוד ההקמה (BOOTSTRAP_TOKEN) שגוי');
+    audit(cfg, 'bootstrap_denied', { ip });
+    throw new HttpError(401, 'invalid_bootstrap_token', 'קוד ההקמה שגוי. הקוד מופיע ביומן השרת בעת ההפעלה (או ב-BOOTSTRAP_TOKEN)');
   }
   const snap = validSnapshot(body.snapshot);
   const admin = (snap.collections.users ?? []).find((u) => u.id === body.adminUserId);
   if (!admin || admin.role !== 'admin' || admin.active === false) throw new HttpError(400, 'validation_error', 'צריך לבחור משתמש פעיל בתפקיד ניהול', { fields: [{ field: 'adminUserId' }] });
-  const problem = passwordProblem(body.password);
+  const problem = passwordProblem(body.password, [admin.email, admin.phone]);
   if (problem) throw new HttpError(400, 'validation_error', problem, { fields: [{ field: 'password', message: problem }] });
   const hash = await hashPassword(body.password);
   if (!store.isEmpty()) throw new HttpError(409, 'already_bootstrapped', 'המערכת כבר הוקמה');
@@ -303,5 +397,6 @@ export async function bootstrap({ req, cfg }) {
   store.setCredential(admin.id, { hash, pv: 1, at: new Date().toISOString(), by: admin.id });
   const t = issueToken(store, cfg, admin.id);
   await store.flush();
+  audit(cfg, 'bootstrap_done', { admin: admin.id, ip });
   return { status: 201, body: { token: t.token, expiresAt: t.expiresAt, user: admin, seq: store.seq } };
 }

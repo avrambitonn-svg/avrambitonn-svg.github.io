@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
-import { jsonResponse, mockFetch, startServer, useEnv } from './helpers.js';
-import { bearer, bootstrapOrg } from './fixtures.js';
+import { jsonResponse, mockFetch, startServer, useEnv, useIntegrationEnv } from './helpers.js';
+import { bearer, bootstrapOrg, orgSnapshot } from './fixtures.js';
 import { clearTokenCache } from '../src/google.js';
 
 const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -43,7 +43,9 @@ test('files: copied into the case folder in Drive when configured', async (t) =>
   useEnv(t, { GOOGLE_SERVICE_ACCOUNT_JSON: SA, GOOGLE_DRIVE_PARENT_ID: 'ROOT' });
   const calls = mockFetch(t, (url) => (url.includes('oauth2') ? jsonResponse(200, { access_token: 'ya29', expires_in: 3600 }) : jsonResponse(200, { id: 'drv1', webViewLink: 'https://drive.google.com/file/d/drv1' })));
   const s = await startServer(t);
-  const { token } = await bootstrapOrg(s);
+  const snapshot = orgSnapshot();
+  snapshot.collections.cases[0].driveFolders = { customer: 'SUB_CUSTOMER' };
+  const { token } = await bootstrapOrg(s, { snapshot });
   const up = await s.request('POST', '/api/files', { headers: { ...bearer(token), 'content-type': 'image/jpeg', 'x-file-name': 'a.jpg', 'x-drive-folder-id': 'SUB_CUSTOMER' }, body: Buffer.from('jpegdata') });
   assert.equal(up.status, 201);
   assert.equal(up.json.driveFileId, 'drv1');
@@ -58,7 +60,7 @@ test('files: copied into the case folder in Drive when configured', async (t) =>
 
 test('Drive: case folder with subfolders, direct upload, move and trash', async (t) => {
   clearTokenCache();
-  useEnv(t, { GOOGLE_SERVICE_ACCOUNT_JSON: SA, GOOGLE_DRIVE_PARENT_ID: 'ROOT' });
+  useIntegrationEnv(t, { GOOGLE_SERVICE_ACCOUNT_JSON: SA, GOOGLE_DRIVE_PARENT_ID: 'ROOT' });
   let n = 0;
   const calls = mockFetch(t, (url, init) => {
     if (url.includes('oauth2')) return jsonResponse(200, { access_token: 'ya29', expires_in: 3600 });
@@ -92,7 +94,7 @@ test('Drive: case folder with subfolders, direct upload, move and trash', async 
 
 test('Calendar: per-user calendarId, update and delete events', async (t) => {
   clearTokenCache();
-  useEnv(t, { GOOGLE_SERVICE_ACCOUNT_JSON: SA, GOOGLE_CALENDAR_ID: 'company@group.calendar.google.com' });
+  useIntegrationEnv(t, { GOOGLE_SERVICE_ACCOUNT_JSON: SA, GOOGLE_CALENDAR_ID: 'company@group.calendar.google.com' });
   const calls = mockFetch(t, (url, init) => {
     if (url.includes('oauth2')) return jsonResponse(200, { access_token: 'ya29', expires_in: 3600 });
     if (init.method === 'DELETE') return new Response(null, { status: url.includes('/events/old') ? 410 : 204 });

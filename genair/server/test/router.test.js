@@ -1,11 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { forbidFetch, startServer, useEnv } from './helpers.js';
+import { TEST_APP_TOKEN, forbidFetch, startServer, useEnv, useIntegrationEnv } from './helpers.js';
 import { safeEqual } from '../src/http.js';
 
-test('GET /api/health reports version and features', async (t) => {
-  useEnv(t, { PRIORITY_MODE: 'demo' });
+test('GET /api/health: anyone sees ok + setup state; version and features only with a session or the app token', async (t) => {
+  useIntegrationEnv(t, { PRIORITY_MODE: 'demo' });
+  forbidFetch(t);
+  const s = await startServer(t);
+  const anon = await s.request('GET', '/api/health', { anonymous: true });
+  assert.equal(anon.status, 200);
+  assert.deepEqual(anon.json, { ok: true, db: { mode: 'off' } });
+});
+
+test('GET /api/health reports version and features to a trusted caller', async (t) => {
+  useIntegrationEnv(t, { PRIORITY_MODE: 'demo' });
   forbidFetch(t);
   const s = await startServer(t);
   const r = await s.request('GET', '/api/health');
@@ -23,7 +32,7 @@ test('GET /api/health reports version and features', async (t) => {
 });
 
 test('health: live mode without credentials reports priority off; flags follow env', async (t) => {
-  useEnv(t, {
+  useIntegrationEnv(t, {
     PRIORITY_MODE: 'live',
     PRIORITY_ALLOW_WRITE: 'true',
     ANTHROPIC_API_KEY: 'sk-test',
@@ -101,8 +110,8 @@ test('CORS: wildcard, same-host origin and no-origin requests', async (t) => {
   assert.equal(none.status, 200, 'server-to-server (no Origin) is allowed');
 });
 
-test('APP_TOKEN: required everywhere except health and the WhatsApp webhook', async (t) => {
-  useEnv(t, { APP_TOKEN: 's3cret-token', WHATSAPP_VERIFY_TOKEN: 'vt' });
+test('APP_TOKEN (integration-only server): required everywhere except health and the WhatsApp webhook', async (t) => {
+  useEnv(t, { DB_MODE: 'off', APP_TOKEN: 's3cret-token', WHATSAPP_VERIFY_TOKEN: 'vt', WHATSAPP_ALLOW_UNSIGNED: 'true' });
   const s = await startServer(t);
   const noToken = await s.request('GET', '/api/whatsapp/inbox');
   assert.equal(noToken.status, 401);
@@ -130,7 +139,7 @@ test('safeEqual compares in constant time and handles different lengths', () => 
 });
 
 test('invalid JSON body -> 400 invalid_json', async (t) => {
-  useEnv(t, { WHATSAPP_TOKEN: 't', WHATSAPP_PHONE_NUMBER_ID: '1' });
+  useIntegrationEnv(t, { WHATSAPP_TOKEN: 't', WHATSAPP_PHONE_NUMBER_ID: '1' });
   forbidFetch(t);
   const s = await startServer(t);
   const r = await s.request('POST', '/api/whatsapp/send', { body: '{not json', headers: { 'content-type': 'application/json' } });
@@ -139,12 +148,12 @@ test('invalid JSON body -> 400 invalid_json', async (t) => {
 });
 
 test('body over 25 MB -> 413 (declared Content-Length)', async (t) => {
-  useEnv(t, { ANTHROPIC_API_KEY: 'k' });
+  useIntegrationEnv(t, { ANTHROPIC_API_KEY: 'k' });
   forbidFetch(t);
   const s = await startServer(t);
   const r = await new Promise((resolve, reject) => {
     const req = http.request(
-      { host: '127.0.0.1', port: s.port, method: 'POST', path: '/api/ai/messages', headers: { 'content-type': 'application/json', 'content-length': String(26 * 1024 * 1024) } },
+      { host: '127.0.0.1', port: s.port, method: 'POST', path: '/api/ai/messages', headers: { 'content-type': 'application/json', 'x-app-token': TEST_APP_TOKEN, 'content-length': String(26 * 1024 * 1024) } },
       (res) => {
         let text = '';
         res.on('data', (c) => (text += c));
@@ -159,12 +168,12 @@ test('body over 25 MB -> 413 (declared Content-Length)', async (t) => {
 });
 
 test('body over 25 MB -> 413 (chunked, no Content-Length)', async (t) => {
-  useEnv(t, { ANTHROPIC_API_KEY: 'k' });
+  useIntegrationEnv(t, { ANTHROPIC_API_KEY: 'k' });
   forbidFetch(t);
   const s = await startServer(t);
   const r = await new Promise((resolve, reject) => {
     const req = http.request(
-      { host: '127.0.0.1', port: s.port, method: 'POST', path: '/api/ai/messages', headers: { 'content-type': 'application/json', 'transfer-encoding': 'chunked' } },
+      { host: '127.0.0.1', port: s.port, method: 'POST', path: '/api/ai/messages', headers: { 'content-type': 'application/json', 'x-app-token': TEST_APP_TOKEN, 'transfer-encoding': 'chunked' } },
       (res) => {
         let text = '';
         res.on('data', (c) => (text += c));

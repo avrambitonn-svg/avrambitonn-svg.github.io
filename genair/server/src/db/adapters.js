@@ -2,7 +2,7 @@
 //   load(): Promise<state | null>      - the whole state written by the last save, or null when empty
 //   save(state, info?): Promise<void>  - persist the state; must be atomic (all or nothing)
 // A database adapter would ignore the full state and upsert only the changed rows.
-import { mkdir, open, readFile, readdir, rename, rm, copyFile, stat } from 'node:fs/promises';
+import { chmod, mkdir, open, readFile, readdir, rename, rm, copyFile, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 export class MemoryAdapter {
@@ -45,10 +45,11 @@ export class JsonFileAdapter {
   }
 
   async save(state) {
-    await mkdir(this.dir, { recursive: true });
+    await mkdir(this.dir, { recursive: true, mode: 0o700 });
     await this.#backup();
     const tmp = `${this.file}.${process.pid}.${Date.now()}.tmp`;
-    const fh = await open(tmp, 'w');
+    // the file holds the password hashes and the signing secret: only the account that runs the server may read it
+    const fh = await open(tmp, 'w', 0o600);
     try {
       await fh.writeFile(JSON.stringify(state));
       await fh.sync();
@@ -68,8 +69,9 @@ export class JsonFileAdapter {
       return;
     }
     const dir = join(this.dir, 'backups');
-    await mkdir(dir, { recursive: true });
+    await mkdir(dir, { recursive: true, mode: 0o700 });
     await copyFile(this.file, join(dir, `db-${day}.json`));
+    await chmod(join(dir, `db-${day}.json`), 0o600);
     const old = (await readdir(dir)).filter((f) => /^db-\d{4}-\d{2}-\d{2}\.json$/.test(f)).sort().slice(0, -this.keepBackups);
     await Promise.all(old.map((f) => rm(join(dir, f), { force: true })));
   }

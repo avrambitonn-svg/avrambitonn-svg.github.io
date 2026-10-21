@@ -4,7 +4,8 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { handler } from './app.js';
-import { flushAll } from './db/index.js';
+import { flushAll, getStore } from './db/index.js';
+import { setupCode } from './auth.js';
 import { loadConfig } from './config.js';
 import { startPrioritySync, stopPrioritySync } from './psync/index.js';
 
@@ -19,6 +20,19 @@ function needsProxyRespawn() {
   if (!proxy || process.env.NODE_USE_ENV_PROXY !== undefined) return false;
   const [major, minor] = process.versions.node.split('.').map(Number);
   return (major === 22 && minor >= 21) || (major === 24 && minor >= 5) || major >= 25;
+}
+
+/** What the person running the server needs to know at start: the setup code, and settings that leave the door open. */
+async function announce(cfg) {
+  if (cfg.db.mode !== 'off') {
+    const store = await getStore(cfg);
+    if (store?.isEmpty()) console.log(`[setup] המערכת עדיין לא הוקמה. קוד ההקמה (יידרש במסך ההקמה הראשונה): ${setupCode(store, cfg)}`);
+    if (cfg.db.mode === 'file' && !cfg.db.authSecret) console.warn('[security] AUTH_SECRET לא הוגדר: סוד החתימה נשמר בתוך db.json. מומלץ להגדיר אותו במשתני הסביבה ולא להעתיק את הקובץ הזה הלאה.');
+  } else if (!cfg.appToken) {
+    console.warn('[security] DB_MODE=off בלי APP_TOKEN: נתיבי האינטגרציה סגורים לגמרי עד שמגדירים APP_TOKEN.');
+  }
+  if (cfg.allowedOrigins.includes('*')) console.warn('[security] ALLOWED_ORIGINS=* מאפשר לכל אתר לקרוא לשרת מהדפדפן. להגדיר את הדומיין של האפליקציה בלבד.');
+  if (cfg.db.trustProxy && cfg.db.trustProxyHops < 1) console.warn('[security] TRUST_PROXY_HOPS לא תקין.');
 }
 
 if (needsProxyRespawn()) {
@@ -42,7 +56,15 @@ if (needsProxyRespawn()) {
   server.keepAliveTimeout = 65_000; // longer than the load balancers in front (Render, Fly, nginx)
   server.listen(port, host, () => {
     console.log(`genair-server listening on http://localhost:${port}`);
+    announce(loadConfig()).catch((e) => console.error('[startup] check failed:', e?.message ?? e));
     startPrioritySync(loadConfig()).catch((e) => console.error('[priority-sync] did not start:', e?.message ?? e));
+  });
+  // A promise nobody awaited must not take the whole server down; a real crash writes the database first and lets the
+  // supervisor (Docker, systemd, Render) start a clean process.
+  process.on('unhandledRejection', (reason) => console.error('[genair-server] unhandled rejection:', reason?.message ?? reason));
+  process.on('uncaughtException', (err) => {
+    console.error('[genair-server] uncaught exception:', err?.stack ?? err);
+    Promise.race([flushAll(), new Promise((r) => setTimeout(r, 3000))]).finally(() => process.exit(1));
   });
   // Write the shared database before exiting; open SSE / long-poll connections are cut.
   const stop = async () => {

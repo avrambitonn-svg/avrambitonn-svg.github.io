@@ -129,14 +129,21 @@ export async function readJson(req) {
   return value;
 }
 
-/** Client IP for rate limits. Behind a proxy (Render, Fly, nginx) set TRUST_PROXY=true to use X-Forwarded-For. */
-export function clientIp(req, trustProxy = false) {
+/**
+ * Client IP for rate limits. Behind a proxy (Render, Fly, nginx) set TRUST_PROXY=true. Each proxy appends the address it
+ * saw to X-Forwarded-For, so the left side is whatever the client claimed; the real client is the entry `hops` places from
+ * the right (TRUST_PROXY_HOPS, default 1 = a single proxy in front).
+ */
+export function clientIp(req, trustProxy = false, hops = 1) {
   if (trustProxy) {
-    const fwd = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim();
-    if (fwd) return fwd;
+    const parts = String(req.headers['x-forwarded-for'] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+    const n = Math.max(1, Math.floor(Number(hops)) || 1);
+    if (parts.length) return parts[Math.max(0, parts.length - n)];
   }
   return req.socket?.remoteAddress ?? 'unknown';
 }
+
+export const ipOf = (req, cfg) => clientIp(req, cfg.db.trustProxy, cfg.db.trustProxyHops);
 
 /** Constant-time string comparison (hashing first hides the length too). */
 export function safeEqual(a, b) {
@@ -199,4 +206,45 @@ export async function readUpstream(response) {
   } catch {
     return text.length > 1000 ? `${text.slice(0, 1000)}…` : text;
   }
+}
+
+/** Headers every API answer carries (the API returns JSON, never a page). */
+export function applySecurityHeaders(req, res, cfg) {
+  res.setHeader('x-content-type-options', 'nosniff');
+  res.setHeader('x-frame-options', 'DENY');
+  res.setHeader('referrer-policy', 'no-referrer');
+  res.setHeader('content-security-policy', "default-src 'none'; frame-ancestors 'none'");
+  const https = Boolean(req.socket?.encrypted) || (cfg.db.trustProxy && String(req.headers['x-forwarded-proto'] ?? '').split(',').pop().trim() === 'https');
+  if (https) res.setHeader('strict-transport-security', 'max-age=15552000');
+}
+
+// ---------------------------------------------------------------- links stored in records
+
+/** Fields that hold a link somebody may click later. A link with any other scheme (javascript:, data:, vbscript:) is never stored. */
+export const URL_FIELDS = new Set(['url', 'website', 'webViewLink', 'driveFolderUrl', 'link', 'href']);
+
+/**
+ * Returns a link that is safe to put in an href, or undefined. Allowed: http(s), mailto, tel, an app path ("/cases/k1", "#/x")
+ * and a bare domain ("example.com", which gets https://).
+ */
+export function safeUrl(value) {
+  if (typeof value !== 'string') return undefined;
+  const s = value.trim();
+  if (!s || s.length > 2048 || /[\u0000-\u001f\u007f\s]/.test(s)) return undefined;
+  if (/^(https?:\/\/|mailto:|tel:)/i.test(s)) return s;
+  if (/^[/#]/.test(s) && !s.startsWith('//')) return s;
+  if (/^(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?(?:[/?#][^\s]*)?$/i.test(s)) return `https://${s}`;
+  return undefined;
+}
+
+/** A copy of `data` whose link fields are safe; a field that cannot be made safe is removed. */
+export function cleanLinks(data) {
+  const out = { ...data };
+  for (const k of Object.keys(out)) {
+    if (!URL_FIELDS.has(k)) continue;
+    const v = safeUrl(out[k]);
+    if (v === undefined) delete out[k];
+    else out[k] = v;
+  }
+  return out;
 }

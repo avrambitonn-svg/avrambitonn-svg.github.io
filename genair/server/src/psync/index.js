@@ -1,6 +1,7 @@
 // One sync engine per process, started with the server (PRIORITY_SYNC=on), and its routes:
 // status and "sync now" for managers, and a webhook Priority can call when something changes there.
 import { HttpError, readJson, safeEqual } from '../http.js';
+import { alertAdminsFor, audit } from '../audit.js';
 import { getStore, requireStore } from '../db/index.js';
 import { requireSession } from '../auth.js';
 import { createPriorityClient } from '../priority.js';
@@ -71,11 +72,15 @@ export async function syncWebhook(ctx) {
   const secret = ctx.cfg.prioritySync.webhookSecret;
   if (!secret) throw new HttpError(503, 'webhook_off', 'PRIORITY_WEBHOOK_SECRET לא הוגדר בשרת');
   const key = ctx.url.searchParams.get('key') ?? ctx.req.headers['x-webhook-key'] ?? '';
-  if (!safeEqual(String(key), secret)) throw new HttpError(401, 'invalid_key', 'מפתח שגוי');
+  if (!safeEqual(String(key), secret)) {
+    audit(ctx.cfg, 'webhook_rejected', { service: 'priority' });
+    void alertAdminsFor(ctx.cfg, 'webhook_priority', 'התקבלה קריאה עם מפתח שגוי ל-Webhook של Priority');
+    throw new HttpError(401, 'invalid_key', 'מפתח שגוי');
+  }
   if (!engine) throw new HttpError(503, 'sync_off', 'הסנכרון האוטומטי לא פועל');
   const body = await readJson(ctx.req).catch(() => ({}));
   const form = String(body?.form ?? ctx.url.searchParams.get('form') ?? '').toUpperCase();
   const kind = ['CUSTOMERS', 'LOGPART', 'PARTBAL', 'OBLIGO'].includes(form) ? 'warm' : 'hot';
-  void engine.trigger(kind);
+  engine.trigger(kind).catch(() => {}); // the engine logs its own failures
   return { status: 202, body: { ok: true, queued: kind } };
 }

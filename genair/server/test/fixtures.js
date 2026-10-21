@@ -58,7 +58,7 @@ export const ADMIN_PASSWORD = 'admin-pass-123';
 
 /** Bootstraps the in-memory store through the API; returns { token } for the admin. */
 export async function bootstrapOrg(s, extra = {}) {
-  const r = await s.request('POST', '/api/auth/bootstrap', { body: { snapshot: orgSnapshot(), adminUserId: 'u-admin', password: ADMIN_PASSWORD, ...extra } });
+  const r = await s.request('POST', '/api/auth/bootstrap', { body: { snapshot: orgSnapshot(), adminUserId: 'u-admin', password: ADMIN_PASSWORD, bootstrapToken: 'test-setup-code', ...extra } });
   if (r.status !== 201) throw new Error(`bootstrap failed: ${r.status} ${r.text}`);
   return r.json;
 }

@@ -6,6 +6,9 @@ import { handler } from '../src/app.js';
 import { resetStores } from '../src/db/index.js';
 import { resetLoginLimits } from '../src/auth.js';
 import { resetPortalLimits } from '../src/portal.js';
+import { resetStreams, resetUserLimits } from '../src/ratelimit.js';
+import { resetAlerts, setAuditSink } from '../src/audit.js';
+import { resetDriveGuard } from '../src/driveguard.js';
 
 const ENV_KEYS = [
   'ALLOWED_ORIGINS', 'APP_TOKEN',
@@ -16,7 +19,17 @@ const ENV_KEYS = [
   'WHATSAPP_TOKEN', 'WHATSAPP_PHONE_NUMBER_ID', 'WHATSAPP_GRAPH_VERSION', 'WHATSAPP_VERIFY_TOKEN', 'WHATSAPP_APP_SECRET',
   'GOOGLE_SERVICE_ACCOUNT_JSON', 'GOOGLE_CALENDAR_ID', 'GOOGLE_DRIVE_PARENT_ID', 'GOOGLE_SUBJECT', 'GOOGLE_DRIVE_SCOPE',
   'DB_MODE', 'DATA_DIR', 'DB_FLUSH_MS', 'AUTH_SECRET', 'AUTH_TTL_HOURS', 'BOOTSTRAP_TOKEN', 'FILES_MAX_MB', 'TRUST_PROXY', 'VERCEL',
+  'TRUST_PROXY_HOPS', 'AUTH_MAX_SESSION_HOURS', 'AUDIT_LOG', 'AI_MAX_TOKENS', 'WHATSAPP_ALLOW_UNSIGNED', 'WHATSAPP_ANY_RECIPIENT', 'PORTAL_DEMO_PAYMENTS',
+  'LIMIT_OPS_PER_MIN', 'LIMIT_FILES_PER_10MIN', 'LIMIT_AI_PER_MIN', 'LIMIT_WHATSAPP_PER_MIN', 'LIMIT_GOOGLE_PER_MIN', 'LIMIT_PRIORITY_PER_MIN', 'LIMIT_STREAMS_PER_USER',
 ];
+
+export const SETUP_CODE = 'test-setup-code';
+export const TEST_APP_TOKEN = 'test-app-token';
+
+/** An integration-only server (no database): the shared APP_TOKEN opens the integration routes; the test client sends it by default. */
+export function useIntegrationEnv(t, vars = {}) {
+  useEnv(t, { DB_MODE: 'off', APP_TOKEN: TEST_APP_TOKEN, ...vars });
+}
 
 /** Clears all server env vars, applies `vars`, and restores everything after the test. */
 export function useEnv(t, vars = {}) {
@@ -29,9 +42,17 @@ export function useEnv(t, vars = {}) {
   resetStores();
   resetLoginLimits();
   resetPortalLimits();
+  resetUserLimits();
+  resetStreams();
+  resetAlerts();
+  resetDriveGuard();
+  setAuditSink(null);
+  // the setup code every first setup needs (tests that check the code itself set their own)
+  process.env.BOOTSTRAP_TOKEN = SETUP_CODE;
   Object.assign(process.env, vars);
   t.after(() => {
     resetStores();
+    setAuditSink(null);
     for (const k of ENV_KEYS) {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
@@ -73,7 +94,13 @@ export async function startServer(t) {
   }));
   return {
     port,
-    request: (method, path, opts) => request(port, method, path, opts),
+    request: (method, path, opts = {}) => {
+      const { anonymous, ...rest } = opts;
+      const headers = { ...(rest.headers ?? {}) };
+      const has = Object.keys(headers).some((k) => k.toLowerCase() === 'x-app-token');
+      if (!anonymous && !has && process.env.APP_TOKEN === TEST_APP_TOKEN) headers['x-app-token'] = TEST_APP_TOKEN;
+      return request(port, method, path, { ...rest, headers });
+    },
   };
 }
 

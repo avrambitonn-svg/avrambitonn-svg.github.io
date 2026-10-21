@@ -327,6 +327,10 @@ function requireWritable(cfg) {
       mode: cfg.mode,
     });
   }
+  // the public demo company is shared by everybody who reads Priority's developer pages: never write to it
+  if (cfg.mode !== 'live') {
+    throw new HttpError(403, 'priority_demo_readonly', 'סביבת הדמו הציבורית של Priority היא לקריאה בלבד. כתיבה אפשרית רק מול PRIORITY_MODE=live', { mode: cfg.mode });
+  }
 }
 
 const rows = (data) => (Array.isArray(data?.value) ? data.value : []);

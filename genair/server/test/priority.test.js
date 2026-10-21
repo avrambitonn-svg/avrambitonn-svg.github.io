@@ -13,7 +13,7 @@ import {
   mapPricelist,
 } from '../src/priority.js';
 import { priorityConfig } from '../src/config.js';
-import { forbidFetch, jsonResponse, mockFetch, startServer, useEnv } from './helpers.js';
+import { forbidFetch, jsonResponse, mockFetch, startServer, useIntegrationEnv } from './helpers.js';
 
 const FAKE_LIVE = {
   PRIORITY_MODE: 'live',
@@ -148,7 +148,7 @@ test('priorityConfig: demo, live user/password, live PAT, off, invalid mode', ()
 // ---------------------------------------------------------------- routes
 
 test('writes are blocked (403) unless PRIORITY_ALLOW_WRITE=true, without any network call', async (t) => {
-  useEnv(t, { PRIORITY_MODE: 'demo' });
+  useIntegrationEnv(t, { PRIORITY_MODE: 'demo' });
   const calls = forbidFetch(t);
   const s = await startServer(t);
   for (const path of ['/api/priority/customers', '/api/priority/quotes', '/api/priority/orders']) {
@@ -160,8 +160,18 @@ test('writes are blocked (403) unless PRIORITY_ALLOW_WRITE=true, without any net
   assert.equal(calls.length, 0);
 });
 
+test('the public demo company is never written to, even with PRIORITY_ALLOW_WRITE=true', async (t) => {
+  useIntegrationEnv(t, { PRIORITY_MODE: 'demo', PRIORITY_ALLOW_WRITE: 'true' });
+  const calls = forbidFetch(t);
+  const s = await startServer(t);
+  const r = await s.request('POST', '/api/priority/customers', { body: { name: 'n', phone: '1' } });
+  assert.equal(r.status, 403);
+  assert.equal(r.json.error.code, 'priority_demo_readonly');
+  assert.equal(calls.length, 0);
+});
+
 test('dryRun validates and returns the payload even while writes are disabled', async (t) => {
-  useEnv(t, { PRIORITY_MODE: 'demo' });
+  useIntegrationEnv(t, { PRIORITY_MODE: 'demo' });
   const calls = forbidFetch(t);
   const s = await startServer(t);
   const r = await s.request('POST', '/api/priority/orders?dryRun=1', { body: { custname: 'C1', lines: [{ partname: 'P', qty: 2, price: 10 }] } });
@@ -173,7 +183,7 @@ test('dryRun validates and returns the payload even while writes are disabled', 
 });
 
 test('POST /api/priority/quotes sends CPROF deep insert with auth headers and returns cprofnum', async (t) => {
-  useEnv(t, { ...FAKE_LIVE, PRIORITY_ALLOW_WRITE: 'true', PRIORITY_APP_ID: 'APP1', PRIORITY_APP_KEY: 'KEY1' });
+  useIntegrationEnv(t, { ...FAKE_LIVE, PRIORITY_ALLOW_WRITE: 'true', PRIORITY_APP_ID: 'APP1', PRIORITY_APP_KEY: 'KEY1' });
   const calls = mockFetch(t, () => jsonResponse(201, { CPROFNUM: 'PQ26000099', CUSTNAME: 'C100' }));
   const s = await startServer(t);
   const r = await s.request('POST', '/api/priority/quotes', {
@@ -197,7 +207,7 @@ test('POST /api/priority/quotes sends CPROF deep insert with auth headers and re
 });
 
 test('POST customers / orders return custname / ordname; PAT auth', async (t) => {
-  useEnv(t, { PRIORITY_MODE: 'live', PRIORITY_URL: FAKE_ROOT, PRIORITY_PAT: 'MYPAT', PRIORITY_ALLOW_WRITE: 'true' });
+  useIntegrationEnv(t, { PRIORITY_MODE: 'live', PRIORITY_URL: FAKE_ROOT, PRIORITY_PAT: 'MYPAT', PRIORITY_ALLOW_WRITE: 'true' });
   const calls = mockFetch(t, (url) =>
     url.endsWith('/CUSTOMERS') ? jsonResponse(201, { CUSTNAME: 'G-0001', CUSTDES: 'x' }) : jsonResponse(201, { ORDNAME: 'SO26000001' }),
   );
@@ -214,7 +224,7 @@ test('POST customers / orders return custname / ordname; PAT auth', async (t) =>
 });
 
 test('Priority business errors surface as 502 with the Hebrew Priority message', async (t) => {
-  useEnv(t, { ...FAKE_LIVE, PRIORITY_ALLOW_WRITE: 'true' });
+  useIntegrationEnv(t, { ...FAKE_LIVE, PRIORITY_ALLOW_WRITE: 'true' });
   mockFetch(t, () => jsonResponse(409, { FORM: { '@TYPE': 'ORDERS', InterfaceErrors: { text: 'שורה 1- לקוח לא קיים' } } }));
   const s = await startServer(t);
   const r = await s.request('POST', '/api/priority/orders', { body: { custname: 'NOPE', lines: [{ partname: 'P', qty: 1 }] } });
@@ -225,7 +235,7 @@ test('Priority business errors surface as 502 with the Hebrew Priority message',
 });
 
 test('GET customers: builds $select/$filter/$top/$skip and maps rows', async (t) => {
-  useEnv(t, FAKE_LIVE);
+  useIntegrationEnv(t, FAKE_LIVE);
   const calls = mockFetch(t, () => jsonResponse(200, { value: [{ CUSTNAME: 'C1', CUSTDES: 'Denver', PHONE: '03', EMAIL: null, ADDRESS: null, STATE: null, STATEA: null, VATNUM: null }] }));
   const s = await startServer(t);
   const r = await s.request('GET', `/api/priority/customers?search=${encodeURIComponent("o'b")}&top=10&skip=20`);
@@ -243,7 +253,7 @@ test('GET customers: builds $select/$filter/$top/$skip and maps rows', async (t)
 });
 
 test('GET items / pricelists map rows', async (t) => {
-  useEnv(t, FAKE_LIVE);
+  useIntegrationEnv(t, FAKE_LIVE);
   mockFetch(t, (url) =>
     url.includes('/LOGPART')
       ? jsonResponse(200, { value: [{ PARTNAME: 'AC', PARTDES: 'מזגן', BASEPLPRICE: 100, BASEPLCODE: 'שח', PUNITNAME: "יח'" }] })
@@ -257,7 +267,7 @@ test('GET items / pricelists map rows', async (t) => {
 });
 
 test('mode off -> 503 priority_off; live without credentials -> 503 priority_not_configured', async (t) => {
-  useEnv(t, { PRIORITY_MODE: 'off' });
+  useIntegrationEnv(t, { PRIORITY_MODE: 'off' });
   const calls = forbidFetch(t);
   const s = await startServer(t);
   const off = await s.request('GET', '/api/priority/customers');
@@ -275,7 +285,7 @@ test('mode off -> 503 priority_off; live without credentials -> 503 priority_not
 });
 
 test('GET /api/priority/test: ok:true with latency, ok:false on auth failure', async (t) => {
-  useEnv(t, FAKE_LIVE);
+  useIntegrationEnv(t, FAKE_LIVE);
   let status = 200;
   mockFetch(t, () => (status === 200 ? jsonResponse(200, { value: [{ CUSTNAME: 'A' }, { CUSTNAME: 'B' }] }) : new Response('', { status })));
   const s = await startServer(t);

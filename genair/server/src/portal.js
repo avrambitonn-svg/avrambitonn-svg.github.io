@@ -2,10 +2,11 @@
 // and the public lead form. Each response carries only that case's data, and every write is
 // built here on the server (the customer never sends entity data).
 import { randomBytes } from 'node:crypto';
-import { HttpError, clientIp, readJson } from './http.js';
+import { HttpError, ipOf, readJson } from './http.js';
+import { audit } from './audit.js';
 import { createWindowLimiter } from './limiter.js';
 import { requireStore } from './db/index.js';
-import { filesDir, sendStoredFile, storeUpload } from './files.js';
+import { discardFile, filesDir, looksLike, sendStoredFile, storeUpload } from './files.js';
 import { googleFeatures, jerusalemDate, uploadBufferToDrive } from './google.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -26,7 +27,9 @@ const limiters = {
   message: createWindowLimiter({ max: 20, windowMs: 10 * 60_000 }),
   upload: createWindowLimiter({ max: 10, windowMs: 10 * 60_000 }),
   lead: createWindowLimiter({ max: 5, windowMs: 10 * 60_000 }),
-  leadGlobal: createWindowLimiter({ max: 300, windowMs: 60 * 60_000 }),
+  leadGlobal: createWindowLimiter({ max: 120, windowMs: 60 * 60_000 }),
+  // only requests with a link that does not exist count, so the links cannot be searched for
+  probe: createWindowLimiter({ max: 30, windowMs: 10 * 60_000 }),
 };
 export const resetPortalLimits = () => Object.values(limiters).forEach((l) => l.clear());
 
@@ -41,13 +44,44 @@ function limit(kind, key) {
 
 const notFound = () => new HttpError(404, 'not_found', 'הקישור לא נמצא או שהאזור האישי נסגר');
 
+// A closed (or lost) case's link stops working after this long.
+const CLOSED_LINK_DAYS = 90;
+
+// token -> case, rebuilt when the database changes (one scan per change instead of one per request)
+const tokenIndex = new WeakMap();
+function caseOfToken(store, token) {
+  let idx = tokenIndex.get(store);
+  if (!idx || idx.seq !== store.seq) {
+    idx = { seq: store.seq, map: new Map() };
+    for (const c of store.list('cases')) if (c.portal?.token && c.portal.enabled !== false) idx.map.set(c.portal.token, c);
+    tokenIndex.set(store, idx);
+  }
+  return idx.map.get(token);
+}
+
+function linkExpired(k) {
+  if (!['closed', 'lost'].includes(k.stage)) return false;
+  const last = Date.parse(k.closedAt ?? k.updatedAt ?? k.createdAt ?? '') || 0;
+  return last > 0 && Date.now() - last > CLOSED_LINK_DAYS * 86_400_000;
+}
+
 async function caseByToken(ctx) {
   const store = await requireStore(ctx.cfg);
+  const ip = ipOf(ctx.req, ctx.cfg);
   const token = ctx.params.token;
-  if (!TOKEN_RE.test(String(token ?? ''))) throw notFound();
-  const k = store.list('cases').find((c) => c.portal?.token === token && c.portal?.enabled !== false);
-  if (!k) throw notFound();
-  return { store, k, ip: clientIp(ctx.req, ctx.cfg.db.trustProxy) };
+  const probe = limiters.probe.peek(ip);
+  if (!probe.allowed) {
+    audit(ctx.cfg, 'portal_probe_blocked', { ip });
+    const e = new HttpError(429, 'too_many_requests', 'יותר מדי בקשות. נסו שוב בעוד כמה דקות');
+    e.retryAfter = Math.ceil(probe.retryAfterMs / 1000);
+    throw e;
+  }
+  const k = TOKEN_RE.test(String(token ?? '')) ? caseOfToken(store, token) : undefined;
+  if (!k || linkExpired(k)) {
+    limiters.probe.hit(ip);
+    throw notFound();
+  }
+  return { store, k, ip };
 }
 
 // ------------------------------------------------------------ server-side writes
@@ -198,11 +232,17 @@ export async function approveQuote(ctx) {
   const settings = store.get('settings', 'org') ?? {};
   const total = quoteTotals(q).total;
   const amount = Math.round((total * Number(settings.depositPct ?? 20)) / 100);
-  const deposit = { amount, method, ...(method === 'transfer' ? {} : { paidAt: at }) }; // demo payment, like the app
+  // Nothing here collects money. By default the deposit is only recorded as promised (and the office is told to check the
+  // payment); PORTAL_DEMO_PAYMENTS=true keeps the demo behaviour where card / Bit counts as paid at once.
+  const demoPaid = Boolean(ctx.cfg.portal?.demoPayments) && method !== 'transfer';
+  const deposit = { amount, method, ...(demoPaid ? { paidAt: at } : { status: 'pending' }) };
   const ops = [
     patch('quotes', q.id, { status: 'approved', signature: { name, dataUrl, at, ip }, deposit, decidedAt: at, approvedVia: 'portal', approvedFromStage: k.stage }),
     activity({ kind: 'quote', caseId: k.id, text: `הלקוח אישר וחתם על הצעה ${q.number} (${name})` }),
   ];
+  if (!deposit.paidAt) {
+    for (const u of managers(store)) ops.push(notification(u.id, `הלקוח אישר הצעה ${q.number} ובחר ${method === 'transfer' ? 'העברה' : method === 'bit' ? 'ביט' : 'כרטיס אשראי'} למקדמה (₪${amount.toLocaleString('he-IL')}). לבדוק שהתשלום התקבל`, `/cases/${k.id}`));
+  }
   if (deposit.paidAt) {
     ops.push(upsert('money', { id: uid('mn'), caseId: k.id, kind: 'payment', category: 'מקדמה', description: `מקדמה — ${q.number}`, amount, at: today() }));
     ops.push(activity({ kind: 'payment', caseId: k.id, text: `התקבלה מקדמה ₪${amount.toLocaleString('he-IL')}` }));
@@ -285,6 +325,12 @@ export async function uploadFromPortal(ctx) {
     throw new HttpError(415, 'unsupported_type', 'אפשר להעלות תמונה או PDF');
   }
   const meta = await storeUpload(ctx.req, ctx.cfg, { maxBytes: Math.min(ctx.cfg.db.filesMaxBytes, 10 * 1024 * 1024), meta: { caseId: k.id, folder: 'customer', source: 'portal' } });
+  // the Content-Type is a header the sender chose; the first bytes must agree with it
+  if (!(await looksLike(ctx.cfg, meta))) {
+    await discardFile(ctx.cfg, meta.id);
+    audit(ctx.cfg, 'portal_upload_refused', { ip, case: k.id, claimed: meta.mime });
+    throw new HttpError(415, 'unsupported_type', 'הקובץ לא נראה כמו תמונה או PDF תקינים');
+  }
   const doc = { id: uid('d'), caseId: k.id, customerId: k.customerId, folder: 'customer', name: meta.name, mime: meta.mime, size: meta.size, fileId: meta.id, uploadedAt: nowIso(), source: 'portal', customerVisible: true };
   const driveFolder = k.driveFolders?.customer;
   if (driveFolder && googleFeatures(ctx.cfg).drive) {
@@ -351,7 +397,7 @@ function portalToken(len = 18) {
 /** POST /api/public/leads - customer + contact + case, like the form does in the demo. Honeypot field: website. */
 export async function createLead(ctx) {
   const store = await requireStore(ctx.cfg);
-  const ip = clientIp(ctx.req, ctx.cfg.db.trustProxy);
+  const ip = ipOf(ctx.req, ctx.cfg);
   limit('lead', ip);
   limit('leadGlobal', 'all');
   const body = await readJson(ctx.req);
@@ -367,13 +413,13 @@ export async function createLead(ctx) {
   if (name.length < 2 || name.length > 80) fields.push({ field: 'name', message: 'איך קוראים לכם?' });
   if (!phone) fields.push({ field: 'phone', message: 'צריך מספר טלפון תקין' });
   if (!type) fields.push({ field: 'type', message: 'בחרו את סוג הפרויקט' });
-  if (photos.length > 6 || photos.some((p) => typeof p !== 'string' || !PHOTO_RE.test(p) || p.length > 2_000_000)) fields.push({ field: 'photos', message: 'עד 6 תמונות' });
+  if (photos.length > 5 || photos.some((p) => typeof p !== 'string' || !PHOTO_RE.test(p) || p.length > 1_500_000)) fields.push({ field: 'photos', message: 'עד 5 תמונות' });
   if (fields.length) throw new HttpError(400, 'validation_error', 'נתונים חסרים או שגויים', { fields });
 
   const source = SOURCES.includes(body.source) ? body.source : 'website';
   const at = nowIso();
   const addressId = uid('ad');
-  const customer = { id: uid('c'), name, type: customerTypeOf(type), phone, addresses: [{ id: addressId, city: city || 'לא צוין', street: '' }], tags: ['פנייה מהאתר'], temp: true, sync: { status: 'not_synced' }, createdAt: at };
+  const customer = { id: uid('c'), name, type: customerTypeOf(type), phone, addresses: [{ id: addressId, city: city || 'לא צוין', street: '' }], tags: ['פנייה מהאתר'], temp: true, createdVia: 'lead', sync: { status: 'not_synced' }, createdAt: at };
   const contact = { id: uid('ct'), customerId: customer.id, name, phone, primary: true };
   const numbering = store.get('config', 'org')?.caseNumbering ?? {};
   const { from } = store.reserve('case', 1);

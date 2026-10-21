@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkBetaHeader, checkModel } from '../src/anthropic.js';
-import { forbidFetch, jsonResponse, mockFetch, startServer, useEnv } from './helpers.js';
+import { forbidFetch, jsonResponse, mockFetch, startServer, useIntegrationEnv } from './helpers.js';
 
 const BODY = { model: 'claude-opus-5-5', max_tokens: 1024, messages: [{ role: 'user', content: 'שלום' }] };
 
@@ -18,7 +18,7 @@ test('checkBetaHeader / checkModel', () => {
 });
 
 test('no ANTHROPIC_API_KEY -> 503 ai_not_configured', async (t) => {
-  useEnv(t);
+  useIntegrationEnv(t);
   forbidFetch(t);
   const s = await startServer(t);
   const r = await s.request('POST', '/api/ai/messages', { body: BODY });
@@ -27,7 +27,7 @@ test('no ANTHROPIC_API_KEY -> 503 ai_not_configured', async (t) => {
 });
 
 test('forwards the body unchanged with key/version headers and allowed beta', async (t) => {
-  useEnv(t, { ANTHROPIC_API_KEY: 'sk-ant-test-key' });
+  useIntegrationEnv(t, { ANTHROPIC_API_KEY: 'sk-ant-test-key' });
   const upstream = { id: 'msg_1', type: 'message', role: 'assistant', content: [{ type: 'text', text: 'שלום!' }], stop_reason: 'end_turn' };
   const calls = mockFetch(t, () => jsonResponse(200, upstream, { 'request-id': 'req_123' }));
   const s = await startServer(t);
@@ -47,7 +47,7 @@ test('forwards the body unchanged with key/version headers and allowed beta', as
 });
 
 test('no beta header from client -> none upstream', async (t) => {
-  useEnv(t, { ANTHROPIC_API_KEY: 'k' });
+  useIntegrationEnv(t, { ANTHROPIC_API_KEY: 'k' });
   const calls = mockFetch(t, () => jsonResponse(200, { ok: 1 }));
   const s = await startServer(t);
   await s.request('POST', '/api/ai/messages', { body: BODY });
@@ -55,7 +55,7 @@ test('no beta header from client -> none upstream', async (t) => {
 });
 
 test('rejects disallowed beta values and models before calling upstream', async (t) => {
-  useEnv(t, { ANTHROPIC_API_KEY: 'k', AI_ALLOWED_MODELS: 'claude-haiku-5-5' });
+  useIntegrationEnv(t, { ANTHROPIC_API_KEY: 'k', AI_ALLOWED_MODELS: 'claude-haiku-5-5' });
   const calls = forbidFetch(t);
   const s = await startServer(t);
   const beta = await s.request('POST', '/api/ai/messages', { body: { ...BODY, model: 'claude-haiku-5-5' }, headers: { 'anthropic-beta': 'computer-use-2025-01-24' } });
@@ -69,7 +69,7 @@ test('rejects disallowed beta values and models before calling upstream', async 
 });
 
 test('upstream error status and body are returned as-is', async (t) => {
-  useEnv(t, { ANTHROPIC_API_KEY: 'k' });
+  useIntegrationEnv(t, { ANTHROPIC_API_KEY: 'k' });
   const err = { type: 'error', error: { type: 'rate_limit_error', message: 'Rate limited' } };
   mockFetch(t, () => jsonResponse(429, err, { 'retry-after': '7' }));
   const s = await startServer(t);
@@ -80,7 +80,7 @@ test('upstream error status and body are returned as-is', async (t) => {
 });
 
 test('streaming responses (SSE) are piped through', async (t) => {
-  useEnv(t, { ANTHROPIC_API_KEY: 'k' });
+  useIntegrationEnv(t, { ANTHROPIC_API_KEY: 'k' });
   const sse = 'event: message_start\ndata: {"type":"message_start"}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n';
   mockFetch(t, () => new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } }));
   const s = await startServer(t);
@@ -91,7 +91,7 @@ test('streaming responses (SSE) are piped through', async (t) => {
 });
 
 test('network failure -> 502 ai_unreachable', async (t) => {
-  useEnv(t, { ANTHROPIC_API_KEY: 'k' });
+  useIntegrationEnv(t, { ANTHROPIC_API_KEY: 'k' });
   mockFetch(t, () => {
     throw new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } });
   });

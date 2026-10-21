@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { Inbox, buildSendPayload, extractEvents, inbox, normalizePhone, verifySignature } from '../src/whatsapp.js';
-import { forbidFetch, jsonResponse, mockFetch, startServer, useEnv } from './helpers.js';
+import { forbidFetch, jsonResponse, mockFetch, startServer, useIntegrationEnv } from './helpers.js';
 
 test('normalizePhone: Israeli formats -> 972...', () => {
   assert.equal(normalizePhone('0541234567'), '972541234567');
@@ -55,7 +55,7 @@ test('buildSendPayload validation', () => {
 });
 
 test('POST /api/whatsapp/send calls the Graph API and returns the message id', async (t) => {
-  useEnv(t, { WHATSAPP_TOKEN: 'EAAtoken', WHATSAPP_PHONE_NUMBER_ID: '1234567890' });
+  useIntegrationEnv(t, { WHATSAPP_TOKEN: 'EAAtoken', WHATSAPP_PHONE_NUMBER_ID: '1234567890' });
   const calls = mockFetch(t, () => jsonResponse(200, { messaging_product: 'whatsapp', contacts: [{ input: '972501234567', wa_id: '972501234567' }], messages: [{ id: 'wamid.ABC' }] }));
   const s = await startServer(t);
   const r = await s.request('POST', '/api/whatsapp/send', { body: { to: '0501234567', text: 'הטכנאי בדרך' } });
@@ -68,7 +68,7 @@ test('POST /api/whatsapp/send calls the Graph API and returns the message id', a
 });
 
 test('send: not configured -> 503', async (t) => {
-  useEnv(t);
+  useIntegrationEnv(t);
   forbidFetch(t);
   const s = await startServer(t);
   const r = await s.request('POST', '/api/whatsapp/send', { body: { to: '0501234567', text: 'x' } });
@@ -77,7 +77,7 @@ test('send: not configured -> 503', async (t) => {
 });
 
 test('send: 24h-window error -> 422 with Hebrew hint; graph version override', async (t) => {
-  useEnv(t, { WHATSAPP_TOKEN: 't', WHATSAPP_PHONE_NUMBER_ID: '1', WHATSAPP_GRAPH_VERSION: 'v25.0' });
+  useIntegrationEnv(t, { WHATSAPP_TOKEN: 't', WHATSAPP_PHONE_NUMBER_ID: '1', WHATSAPP_GRAPH_VERSION: 'v25.0' });
   const calls = mockFetch(t, () => jsonResponse(400, { error: { message: 'Re-engagement message', code: 131047, fbtrace_id: 'x' } }));
   const s = await startServer(t);
   const r = await s.request('POST', '/api/whatsapp/send', { body: { to: '0501234567', text: 'x' } });
@@ -88,7 +88,7 @@ test('send: 24h-window error -> 422 with Hebrew hint; graph version override', a
 });
 
 test('webhook GET verification echoes hub.challenge only with the right token', async (t) => {
-  useEnv(t, { WHATSAPP_VERIFY_TOKEN: 'my-verify' });
+  useIntegrationEnv(t, { WHATSAPP_VERIFY_TOKEN: 'my-verify' });
   const s = await startServer(t);
   const ok = await s.request('GET', '/api/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=my-verify&hub.challenge=1158201444');
   assert.equal(ok.status, 200);
@@ -140,7 +140,7 @@ test('verifySignature checks sha256 HMAC of the raw body', () => {
 });
 
 test('webhook POST: signature enforced when WHATSAPP_APP_SECRET is set; inbox polling with since/cursor', async (t) => {
-  useEnv(t, { WHATSAPP_APP_SECRET: 'app-secret' });
+  useIntegrationEnv(t, { WHATSAPP_APP_SECRET: 'app-secret' });
   inbox.clear();
   const s = await startServer(t);
   const raw = JSON.stringify(SAMPLE);

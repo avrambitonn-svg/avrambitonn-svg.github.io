@@ -1,6 +1,8 @@
 // WhatsApp Business Cloud API (Meta): send messages, receive webhooks, poll an inbox.
 import { createHmac } from 'node:crypto';
 import { HttpError, fetchUpstream, parseJson, readBody, readJson, readUpstream, safeEqual } from './http.js';
+import { getStore } from './db/index.js';
+import { alertAdminsFor, audit } from './audit.js';
 
 const SERVICE = { code: 'whatsapp', label: 'וואטסאפ', to: 'לוואטסאפ' };
 const GRAPH = 'https://graph.facebook.com';
@@ -79,12 +81,38 @@ function whatsappHttpError(status, data) {
   return new HttpError(502, 'whatsapp_error', 'וואטסאפ דחה את שליחת ההודעה', details);
 }
 
-export async function sendWhatsapp({ req, cfg }) {
+/** Every phone number the system knows (customers, contacts, suppliers, staff, building tenants...), in WhatsApp's format. */
+export function knownPhones(store) {
+  const out = new Set();
+  const walk = (v, key, depth) => {
+    if (depth > 4 || v === null || v === undefined) return;
+    if (typeof v === 'string' || typeof v === 'number') {
+      if (/phone|mobile|cell|whatsapp|tel/i.test(key)) {
+        const n = normalizePhone(v);
+        if (n) out.add(n);
+      }
+    } else if (Array.isArray(v)) v.forEach((x) => walk(x, key, depth + 1));
+    else if (typeof v === 'object') for (const [k, x] of Object.entries(v)) walk(x, k, depth + 1);
+  };
+  for (const c of ['customers', 'contacts', 'suppliers', 'users', 'projects', 'leads']) for (const r of store.list(c)) walk(r, c, 0);
+  return out;
+}
+
+export async function sendWhatsapp({ req, cfg, user }) {
   const wa = cfg.whatsapp;
   if (!wa.token || !wa.phoneNumberId) {
     throw new HttpError(503, 'whatsapp_not_configured', 'וואטסאפ לא הוגדר בשרת (חסרים WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID)');
   }
   const payload = buildSendPayload(await readJson(req));
+  // a signed-in user can message the people in the system, not any number in the world (no spam from the business number)
+  if (user && !wa.anyRecipient) {
+    const store = await getStore(cfg);
+    if (store && !knownPhones(store).has(payload.to)) {
+      audit(cfg, 'whatsapp_recipient_refused', { user: user.id, to: `***${payload.to.slice(-4)}` });
+      throw new HttpError(403, 'recipient_unknown', 'אפשר לשלוח הודעות רק למספרים של לקוחות, אנשי קשר, ספקים ועובדים שרשומים במערכת');
+    }
+  }
+  audit(cfg, 'whatsapp_send', { user: user?.id ?? 'app-token', to: `***${payload.to.slice(-4)}` });
   const url = `${GRAPH}/${encodeURIComponent(wa.graphVersion)}/${encodeURIComponent(wa.phoneNumberId)}/messages`;
   const res = await fetchUpstream(
     url,
@@ -193,7 +221,13 @@ export async function webhookVerify({ url, cfg }) {
 export async function webhookReceive({ req, cfg }) {
   const raw = await readBody(req);
   const secret = cfg.whatsapp.appSecret;
+  // an unsigned webhook could be called by anyone, who could then put messages in the inbox in a customer's name
+  if (!secret && !cfg.whatsapp.allowUnsigned) {
+    throw new HttpError(503, 'whatsapp_secret_missing', 'WHATSAPP_APP_SECRET לא הוגדר בשרת, ולכן ה-Webhook לא מקבל הודעות (לפיתוח בלבד: WHATSAPP_ALLOW_UNSIGNED=true)');
+  }
   if (secret && !verifySignature(raw, req.headers['x-hub-signature-256'], secret)) {
+    audit(cfg, 'webhook_rejected', { service: 'whatsapp' });
+    void alertAdminsFor(cfg, 'webhook_whatsapp', 'התקבלה בקשה לא חתומה ל-Webhook של וואטסאפ. אם זה לא ניסוי שלכם, כדאי לבדוק את WHATSAPP_APP_SECRET');
     throw new HttpError(401, 'invalid_signature', 'חתימת ה-Webhook אינה תקינה');
   }
   const events = extractEvents(parseJson(raw));

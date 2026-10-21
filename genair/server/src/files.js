@@ -2,7 +2,7 @@
 // signed-in users (or through a portal link when the doc is visible to the customer), and copied
 // into a Google Drive folder when the request names one and Drive is configured.
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
@@ -12,6 +12,8 @@ import { HttpError } from './http.js';
 import { requireStore } from './db/index.js';
 import { requireSession } from './auth.js';
 import { googleFeatures, safeFileName, safeMime, uploadBufferToDrive } from './google.js';
+import { assertFolder } from './driveguard.js';
+import { spend } from './ratelimit.js';
 
 const FILE_ID_RE = /^f[a-f0-9]{24}$/;
 const INLINE = /^(image\/(png|jpe?g|gif|webp|avif|bmp|heic|heif)|application\/pdf|text\/plain|video\/[a-z0-9.+-]+|audio\/[a-z0-9.+-]+)$/;
@@ -28,7 +30,7 @@ export async function storeUpload(req, cfg, { maxBytes = cfg.db.filesMaxBytes, m
   const declared = Number(req.headers['content-length']);
   if (Number.isFinite(declared) && declared > maxBytes) throw tooLarge(maxBytes);
   const dir = filesDir(cfg);
-  await mkdir(dir, { recursive: true });
+  await mkdir(dir, { recursive: true, mode: 0o700 });
   const id = `f${randomBytes(12).toString('hex')}`;
   const tmp = join(dir, `${id}.part`);
   let size = 0;
@@ -43,9 +45,9 @@ export async function storeUpload(req, cfg, { maxBytes = cfg.db.filesMaxBytes, m
     if (Buffer.isBuffer(req.rawBody)) {
       if (req.rawBody.length > maxBytes) throw tooLarge(maxBytes);
       size = req.rawBody.length;
-      await writeFile(tmp, req.rawBody);
+      await writeFile(tmp, req.rawBody, { mode: 0o600 });
     } else {
-      await pipeline(req, counter, createWriteStream(tmp, { flags: 'wx' }));
+      await pipeline(req, counter, createWriteStream(tmp, { flags: 'wx', mode: 0o600 }));
     }
   } catch (err) {
     await rm(tmp, { force: true });
@@ -64,9 +66,43 @@ export async function storeUpload(req, cfg, { maxBytes = cfg.db.filesMaxBytes, m
     at: new Date().toISOString(),
     ...meta,
   };
-  await writeFile(join(dir, `${id}.json`), JSON.stringify(info));
+  await writeFile(join(dir, `${id}.json`), JSON.stringify(info), { mode: 0o600 });
   await rename(tmp, join(dir, id));
   return info;
+}
+
+const MAGIC = [
+  ['image/jpeg', (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff],
+  ['image/png', (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))],
+  ['image/gif', (b) => b.subarray(0, 4).toString('latin1') === 'GIF8'],
+  ['image/webp', (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP'],
+  ['image/heic', (b) => b.subarray(4, 8).toString('latin1') === 'ftyp'],
+  ['image/heif', (b) => b.subarray(4, 8).toString('latin1') === 'ftyp'],
+  ['application/pdf', (b) => b.subarray(0, 5).toString('latin1') === '%PDF-'],
+];
+
+/** Does the start of the stored file look like what its Content-Type claims? (the claim alone is only a header the sender chose) */
+export async function looksLike(cfg, meta) {
+  const check = MAGIC.find(([mime]) => mime === meta.mime)?.[1];
+  if (!check) return false;
+  let fh;
+  try {
+    fh = await open(join(filesDir(cfg), meta.id), 'r');
+    const buf = Buffer.alloc(16);
+    const { bytesRead } = await fh.read(buf, 0, 16, 0);
+    return bytesRead >= 4 && check(buf.subarray(0, bytesRead));
+  } catch {
+    return false;
+  } finally {
+    await fh?.close();
+  }
+}
+
+/** Deletes a stored file and its description (an upload that was refused after it was written). */
+export async function discardFile(cfg, id) {
+  const dir = filesDir(cfg);
+  await rm(join(dir, id), { force: true });
+  await rm(join(dir, `${id}.json`), { force: true });
 }
 
 export async function readFileMeta(cfg, id) {
@@ -100,6 +136,7 @@ export async function sendStoredFile(res, cfg, id, { download = false } = {}) {
 export async function uploadFile({ req, res, cfg }) {
   const store = await requireStore(cfg);
   const s = requireSession(req, res, store, cfg);
+  spend('files', s.user.id, cfg.limits.filesPer10Min, 10 * 60_000);
   const caseId = String(req.headers['x-case-id'] ?? '').slice(0, 128) || undefined;
   const folder = String(req.headers['x-folder'] ?? '').slice(0, 40) || undefined;
   const meta = await storeUpload(req, cfg, { meta: { by: s.user.id, caseId, folder } });
@@ -107,6 +144,7 @@ export async function uploadFile({ req, res, cfg }) {
   const driveFolder = String(req.headers['x-drive-folder-id'] ?? '');
   if (driveFolder && googleFeatures(cfg).drive) {
     try {
+      await assertFolder(cfg, driveFolder);
       const data = await readFile(join(filesDir(cfg), meta.id));
       const d = await uploadBufferToDrive(cfg, { name: meta.name, mime: meta.mime, data, folderId: driveFolder });
       out.driveFileId = d.id;

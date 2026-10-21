@@ -30,18 +30,20 @@ test('bootstrap: only while empty, strips secrets and device settings, returns a
   forbidFetch(t);
   const s = await startServer(t);
   const h0 = await s.request('GET', '/api/health');
-  assert.deepEqual(h0.json.db, { mode: 'memory', ready: true, bootstrapped: false, bootstrapToken: false });
+  assert.deepEqual(h0.json.db, { mode: 'memory', ready: true, bootstrapped: false, bootstrapToken: true });
+  assert.equal(h0.json.version, undefined, 'version and features are for signed-in people only');
+  assert.equal(h0.json.features, undefined);
 
-  const bad = await s.request('POST', '/api/auth/bootstrap', { body: { snapshot: orgSnapshot(), adminUserId: 'u-agent1', password: ADMIN_PASSWORD } });
+  const bad = await s.request('POST', '/api/auth/bootstrap', { body: { snapshot: orgSnapshot(), adminUserId: 'u-agent1', password: ADMIN_PASSWORD, bootstrapToken: 'test-setup-code' } });
   assert.equal(bad.status, 400, 'the bootstrap user must be an admin');
-  const short = await s.request('POST', '/api/auth/bootstrap', { body: { snapshot: orgSnapshot(), adminUserId: 'u-admin', password: '123' } });
+  const short = await s.request('POST', '/api/auth/bootstrap', { body: { snapshot: orgSnapshot(), adminUserId: 'u-admin', password: '123', bootstrapToken: 'test-setup-code' } });
   assert.equal(short.status, 400);
 
   const boot = await bootstrapOrg(s);
   assert.ok(boot.token);
   assert.equal(boot.user.id, 'u-admin');
   assert.equal(boot.user.password, undefined);
-  const again = await s.request('POST', '/api/auth/bootstrap', { body: { snapshot: orgSnapshot(), adminUserId: 'u-admin', password: ADMIN_PASSWORD } });
+  const again = await s.request('POST', '/api/auth/bootstrap', { body: { snapshot: orgSnapshot(), adminUserId: 'u-admin', password: ADMIN_PASSWORD, bootstrapToken: 'test-setup-code' } });
   assert.equal(again.status, 409);
   assert.equal((await s.request('GET', '/api/health')).json.db.bootstrapped, true);
 
@@ -62,7 +64,7 @@ test('bootstrap replaces short demo portal links with random ones', async (t) =>
   const s = await startServer(t);
   const snap = orgSnapshot();
   snap.collections.cases[0].portal.token = 'pt-k1';
-  const r = await s.request('POST', '/api/auth/bootstrap', { body: { snapshot: snap, adminUserId: 'u-admin', password: ADMIN_PASSWORD } });
+  const r = await s.request('POST', '/api/auth/bootstrap', { body: { snapshot: snap, adminUserId: 'u-admin', password: ADMIN_PASSWORD, bootstrapToken: 'test-setup-code' } });
   const d = await s.request('GET', '/api/db/snapshot', { headers: bearer(r.json.token) });
   const tok = d.json.collections.cases.find((k) => k.id === 'k1').portal.token;
   assert.match(tok, /^[A-Za-z0-9]{18}$/);
@@ -154,16 +156,43 @@ test('deactivating a user ends their session at once', async (t) => {
   assert.equal((await s.request('GET', '/api/auth/me', { headers: bearer(agent) })).status, 401);
 });
 
-test('integration routes: open before setup, then session or APP_TOKEN', async (t) => {
+test('integration routes: never open - a session with the right role, or on a database-less server the APP_TOKEN', async (t) => {
   useEnv(t, { ANTHROPIC_API_KEY: '' });
   forbidFetch(t);
   const s = await startServer(t);
-  // nothing configured: open as before (503 = AI not configured, not 401)
-  assert.equal((await s.request('POST', '/api/ai/messages', { body: {} })).status, 503);
+  // before the first setup nobody can be signed in, so nothing is open
+  assert.equal((await s.request('POST', '/api/ai/messages', { body: {} })).status, 401);
+  assert.equal((await s.request('GET', '/api/whatsapp/inbox')).status, 401);
   const { token } = await bootstrapOrg(s);
   assert.equal((await s.request('POST', '/api/ai/messages', { body: {} })).status, 401, 'after bootstrap a session is needed');
-  assert.equal((await s.request('POST', '/api/ai/messages', { headers: bearer(token), body: {} })).status, 503);
+  assert.equal((await s.request('POST', '/api/ai/messages', { headers: bearer(token), body: {} })).status, 503, 'signed in: reaches the handler (AI not configured)');
+  // with a database the shared token is NOT accepted: it would bypass names and roles
   process.env.APP_TOKEN = 'shared';
-  assert.equal((await s.request('POST', '/api/ai/messages', { headers: { 'x-app-token': 'shared' }, body: {} })).status, 503);
+  assert.equal((await s.request('POST', '/api/ai/messages', { headers: { 'x-app-token': 'shared' }, body: {} })).status, 401);
   assert.equal((await s.request('POST', '/api/ai/messages', { headers: { 'x-app-token': 'bad' }, body: {} })).status, 401);
+});
+
+test('integration routes by role: an installer may not use Priority, AI or WhatsApp', async (t) => {
+  useEnv(t, { ANTHROPIC_API_KEY: 'k' });
+  forbidFetch(t);
+  const s = await startServer(t);
+  const { token: admin } = await bootstrapOrg(s);
+  const inst = await loginAs(s, admin, 'u-inst1', '0502201105');
+  for (const [m, p] of [['POST', '/api/ai/messages'], ['GET', '/api/whatsapp/inbox'], ['GET', '/api/priority/customers']]) {
+    const r = await s.request(m, p, { headers: bearer(inst), body: m === 'POST' ? {} : undefined });
+    assert.equal(r.status, 403, `${m} ${p}`);
+  }
+  const agent = await loginAs(s, admin, 'u-agent1', '0502201102');
+  assert.notEqual((await s.request('GET', '/api/whatsapp/inbox', { headers: bearer(agent) })).status, 403);
+});
+
+test('integration-only server (no database) needs APP_TOKEN, and refuses when it is not set', async (t) => {
+  useEnv(t, { DB_MODE: 'off' });
+  const s = await startServer(t);
+  const none = await s.request('GET', '/api/whatsapp/inbox');
+  assert.equal(none.status, 503);
+  assert.equal(none.json.error.code, 'app_token_required');
+  process.env.APP_TOKEN = 'shared';
+  assert.equal((await s.request('GET', '/api/whatsapp/inbox')).status, 401);
+  assert.equal((await s.request('GET', '/api/whatsapp/inbox', { headers: { 'x-app-token': 'shared' } })).status, 200);
 });

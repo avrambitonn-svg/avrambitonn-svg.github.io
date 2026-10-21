@@ -5,7 +5,10 @@ import { HttpError, readJson } from './http.js';
 import { requireStore } from './db/index.js';
 import { BAD_KEYS, COLLECTION_RE, COUNTER_RE, ID_RE, SINGLETONS, SINGLETON_ID } from './db/store.js';
 import { cleanSettings, cleanUser, readSession, requireSession } from './auth.js';
-import { checkOp } from './permissions.js';
+import { checkOp, readChanges, readSnapshot, sanitizeOp } from './permissions.js';
+import { alertAdmins, audit } from './audit.js';
+import { readFileMeta } from './files.js';
+import { openStream, spend } from './ratelimit.js';
 
 const MAX_OPS = 500;
 const MAX_ENTITY_BYTES = 12 * 1024 * 1024;
@@ -17,6 +20,8 @@ async function session(ctx) {
   const s = requireSession(ctx.req, ctx.res, store, ctx.cfg);
   return { store, user: s.user };
 }
+
+const MANAGER_ROLES = new Set(['admin', 'office']);
 
 const invalid = (message, details) => new HttpError(400, 'validation_error', message, details);
 
@@ -73,27 +78,64 @@ export function parseOps(list) {
 
 export async function snapshot(ctx) {
   const { store, user } = await session(ctx);
-  return { status: 200, body: { ...store.snapshot(), serverTime: Date.now(), me: user } };
+  return { status: 200, body: { ...readSnapshot(store.snapshot(), user), serverTime: Date.now(), me: user } };
 }
 
 export async function ops(ctx) {
   const { store, user } = await session(ctx);
+  const { cfg } = ctx;
+  spend('db-ops', user.id, cfg.limits.opsPerMin);
   const body = await readJson(ctx.req);
-  const list = parseOps(body.ops);
   const clientId = typeof body.clientId === 'string' ? body.clientId.slice(0, 64) : undefined;
-  const result = store.applyOps(list, { userId: user.id, clientId, check: (op, current) => checkOp(op, current, user, store) });
+  const manager = MANAGER_ROLES.has(user.role);
+  const list = parseOps(body.ops).map((op) => sanitizeOp(op, user, store.get(op.collection, op.id)));
+  // a document may point only at a file its own uploader sent (managers may link any file)
+  const foreignFile = new WeakSet();
+  if (!manager) {
+    for (const op of list) {
+      const id = op.collection === 'docs' ? op.data?.fileId : undefined;
+      if (typeof id !== 'string') continue;
+      const meta = await readFileMeta(cfg, id);
+      if (!meta || meta.by !== user.id) foreignFile.add(op);
+    }
+  }
+  const result = store.applyOps(list, {
+    userId: user.id,
+    clientId,
+    check: (op, current) => (foreignFile.has(op) ? 'file_not_yours' : checkOp(op, current, user, store)),
+  });
+  auditOps(cfg, store, user, list, result.results);
   return { status: 200, body: { ...result, serverTime: Date.now() } };
+}
+
+/** The security trail of a write batch: what was refused, and every change to people, roles and the organisation's settings. */
+function auditOps(cfg, store, user, list, results) {
+  let denied = 0;
+  list.forEach((op, i) => {
+    const r = results[i];
+    if (!r) return;
+    if (r.status === 'denied') {
+      if (denied++ < 20) audit(cfg, 'op_denied', { user: user.id, role: user.role, collection: op.collection, id: op.id, op: op.op, reason: r.error });
+      return;
+    }
+    if (op.collection === 'users' && r.status !== 'stale' && r.status !== 'missing') {
+      audit(cfg, 'user_changed', { by: user.id, target: op.id, op: op.op, role: op.data?.role, active: op.data?.active });
+      if (op.data?.role === 'admin') alertAdmins(store, 'admin_granted', `הרשאת ניהול ניתנה למשתמש (${op.id}) על ידי ${user.name ?? user.id}`);
+    } else if ((op.collection === 'config' || op.collection === 'settings') && r.status !== 'stale') {
+      audit(cfg, 'org_settings_changed', { by: user.id, collection: op.collection, fields: Object.keys(op.data ?? {}).slice(0, 20) });
+    }
+  });
 }
 
 /** Current state of specific entities (after a denied or stale write the client takes the server's copy). */
 export async function fetchEntities(ctx) {
-  const { store } = await session(ctx);
+  const { store, user } = await session(ctx);
   const body = await readJson(ctx.req);
   if (!Array.isArray(body.items) || body.items.length > 500) throw invalid('items חייב להיות מערך (עד 500)');
   const items = body.items
     .filter((x) => x && COLLECTION_RE.test(x.c ?? '') && ID_RE.test(x.id ?? ''))
     .map((x) => store.record(x.c, x.id) ?? { c: x.c, id: x.id, seq: 0, del: true });
-  return { status: 200, body: { seq: store.seq, items } };
+  return { status: 200, body: { seq: store.seq, items: readChanges(items, user) } };
 }
 
 export async function reserveCounter(ctx) {
@@ -111,35 +153,43 @@ const parseSince = (v) => {
 };
 
 /** Long-poll: answers at once when there are changes after `since`, else waits up to `wait` seconds (max 25). */
+const forUser = (batch, user) => (batch.changes ? { ...batch, changes: readChanges(batch.changes, user) } : batch);
+
 export async function changes(ctx) {
-  const { store } = await session(ctx);
+  const { store, user } = await session(ctx);
   const since = parseSince(ctx.url.searchParams.get('since'));
   if (Number.isNaN(since)) throw invalid('since חייב להיות מספר');
   const waitRaw = Number(ctx.url.searchParams.get('wait') ?? LONG_POLL_MAX_SEC);
   const waitSec = Math.max(0, Math.min(LONG_POLL_MAX_SEC, Number.isFinite(waitRaw) ? waitRaw : LONG_POLL_MAX_SEC));
   const now = store.changesSince(since);
-  if (now.reset || now.changes.length || waitSec === 0) return { status: 200, body: now };
+  if (now.reset || now.changes.length || waitSec === 0) return { status: 200, body: forUser(now, user) };
   const { res } = ctx;
-  await new Promise((resolve) => {
-    const done = () => {
-      clearTimeout(timer);
-      store.off('change', onChange);
-      res.off('close', done);
-      resolve();
-    };
-    const onChange = () => done();
-    const timer = setTimeout(done, waitSec * 1000);
-    store.on('change', onChange);
-    res.on('close', done); // the client went away (req 'close' fires as soon as the body is read)
-  });
+  const free = openStream(user.id, ctx.cfg.limits.streamsPerUser);
+  try {
+    await new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        store.off('change', onChange);
+        res.off('close', done);
+        resolve();
+      };
+      const onChange = () => done();
+      const timer = setTimeout(done, waitSec * 1000);
+      store.on('change', onChange);
+      res.on('close', done); // the client went away (req 'close' fires as soon as the body is read)
+    });
+  } finally {
+    free();
+  }
   if (res.destroyed || res.writableEnded) return null;
-  return { status: 200, body: store.changesSince(since) };
+  return { status: 200, body: forUser(store.changesSince(since), user) };
 }
 
 /** Server-sent events: `hello`, then `changes` batches (id = seq), `reset` when the client must reload; heartbeat comments. */
 export async function events(ctx) {
   const { store, user } = await session(ctx);
   const { req, res, cfg } = ctx;
+  const free = openStream(user.id, cfg.limits.streamsPerUser);
   const sinceQ = parseSince(ctx.url.searchParams.get('since'));
   const sinceH = parseSince(req.headers['last-event-id']);
   let since = Number.isNaN(sinceQ) ? (Number.isNaN(sinceH) ? store.seq : sinceH) : sinceQ;
@@ -160,14 +210,14 @@ export async function events(ctx) {
 
   const backlog = store.changesSince(since);
   if (backlog.reset) send('reset', { seq: store.seq });
-  else if (backlog.changes.length) send('changes', backlog, backlog.seq);
+  else if (backlog.changes.length) send('changes', forUser(backlog, user), backlog.seq);
   since = backlog.seq;
 
   const onChange = (e) => {
     if (e.reset) return send('reset', { seq: e.seq });
-    const list = e.changes.filter((c) => c.seq > since);
-    if (!list.length) return;
+    const list = readChanges(e.changes.filter((c) => c.seq > since), user);
     since = e.seq;
+    if (!list.length) return;
     send('changes', { seq: e.seq, changes: list, origin: e.origin }, e.seq);
   };
   store.on('change', onChange);
@@ -186,6 +236,7 @@ export async function events(ctx) {
     const close = () => {
       clearInterval(beat);
       store.off('change', onChange);
+      free();
       resolve();
     };
     res.on('close', close);

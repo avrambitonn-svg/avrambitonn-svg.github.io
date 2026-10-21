@@ -3,16 +3,20 @@ import assert from 'node:assert/strict';
 import { forbidFetch, startServer, useEnv } from './helpers.js';
 import { bearer, bootstrapOrg } from './fixtures.js';
 import { quoteTotals } from '../src/portal.js';
+import { getStore } from '../src/db/index.js';
+import { loadConfig } from '../src/config.js';
 
 const SIG = `data:image/png;base64,${Buffer.from('signature').toString('base64')}`;
 
-async function org(t) {
-  useEnv(t);
+async function org(t, vars = {}) {
+  useEnv(t, vars);
   forbidFetch(t);
   const s = await startServer(t);
   const { token: admin } = await bootstrapOrg(s);
   const db = async () => (await s.request('GET', '/api/db/snapshot', { headers: bearer(admin) })).json;
-  return { s, admin, db };
+  // everybody's notifications (the admin's snapshot shows only the admin's own)
+  const notes = async () => (await getStore(loadConfig())).list('notifications');
+  return { s, admin, db, notes };
 }
 
 test('portal GET: only that case, no internal fields', async (t) => {
@@ -46,18 +50,18 @@ test('portal: unknown, malformed and disabled tokens are 404', async (t) => {
 });
 
 test('view marks the quote viewed and notifies the agent once', async (t) => {
-  const { s, db } = await org(t);
+  const { s, db, notes } = await org(t);
   await s.request('POST', '/api/portal/TokenK1abcdefgh/view', { body: {} });
   await s.request('POST', '/api/portal/TokenK1abcdefgh/view', { body: {} });
   const d = await db();
   assert.equal(d.collections.quotes.find((q) => q.id === 'q1').status, 'viewed');
   assert.ok(d.collections.cases.find((k) => k.id === 'k1').portal.lastViewedAt);
-  assert.equal(d.collections.notifications.filter((n) => n.userId === 'u-agent1' && n.text.includes('צפה')).length, 1);
+  assert.equal((await notes()).filter((n) => n.userId === 'u-agent1' && n.text.includes('צפה')).length, 1);
   assert.equal(d.collections.activities.filter((a) => a.text === 'הלקוח נכנס לאזור האישי').length, 1);
 });
 
-test('approve: server sets quote + case, money and notifications; marks approvedVia for the staff follow-up', async (t) => {
-  const { s, db } = await org(t);
+test('approve (demo payments on): server sets quote + case, money and notifications; marks approvedVia for the staff follow-up', async (t) => {
+  const { s, db, notes } = await org(t, { PORTAL_DEMO_PAYMENTS: 'true' });
   const wrongCase = await s.request('POST', '/api/portal/TokenK1abcdefgh/approve', { body: { quoteId: 'q2', signature: { name: 'יעל לוי', dataUrl: SIG }, deposit: { method: 'credit' } } });
   assert.equal(wrongCase.status, 404, 'a quote of another case cannot be approved through this link');
   const noSig = await s.request('POST', '/api/portal/TokenK1abcdefgh/approve', { body: { quoteId: 'q1', signature: { name: 'י', dataUrl: 'javascript:x' }, deposit: { method: 'cash' } } });
@@ -81,17 +85,17 @@ test('approve: server sets quote + case, money and notifications; marks approved
   assert.equal(d.collections.cases.find((k) => k.id === 'k1').stage, 'approved');
   assert.equal(d.collections.cases.find((k) => k.id === 'k2').stage, 'quote', 'other cases untouched');
   assert.equal(d.collections.money.filter((m) => m.caseId === 'k1' && m.kind === 'payment').length, 1);
-  const notes = d.collections.notifications.map((n) => `${n.userId}:${n.text}`);
-  assert.ok(notes.some((n) => n.startsWith('u-office:הצעה אושרה')));
-  assert.ok(notes.some((n) => n.startsWith('u-admin:הצעה אושרה')));
-  assert.ok(notes.some((n) => n.startsWith('u-agent1:') && n.includes('אושר')));
+  const lines = (await notes()).map((n) => `${n.userId}:${n.text}`);
+  assert.ok(lines.some((n) => n.startsWith('u-office:הצעה אושרה')));
+  assert.ok(lines.some((n) => n.startsWith('u-admin:הצעה אושרה')));
+  assert.ok(lines.some((n) => n.startsWith('u-agent1:') && n.includes('אושר')));
 
   const twice = await s.request('POST', '/api/portal/TokenK1abcdefgh/approve', { body: { quoteId: 'q1', signature: { name: 'יעל לוי', dataUrl: SIG }, deposit: { method: 'bit' } } });
   assert.equal(twice.status, 409);
 });
 
 test('expired quotes cannot be approved; reject with a reason', async (t) => {
-  const { s, db } = await org(t);
+  const { s, db, notes } = await org(t);
   const exp = await s.request('POST', '/api/portal/TokenK2abcdefgh/approve', { body: { quoteId: 'q2', signature: { name: 'רונית ברק', dataUrl: SIG }, deposit: { method: 'credit' } } });
   assert.equal(exp.status, 409);
   assert.equal(exp.json.error.code, 'quote_expired');
@@ -99,7 +103,7 @@ test('expired quotes cannot be approved; reject with a reason', async (t) => {
   assert.equal(r.status, 200);
   const d = await db();
   assert.equal(d.collections.quotes.find((x) => x.id === 'q1').status, 'rejected');
-  assert.ok(d.collections.notifications.some((n) => n.userId === 'u-agent1' && n.text.includes('המחיר גבוה')));
+  assert.ok((await notes()).some((n) => n.userId === 'u-agent1' && n.text.includes('המחיר גבוה')));
 });
 
 test('service request: number from the shared counter, unit must belong to the customer', async (t) => {
@@ -117,14 +121,14 @@ test('service request: number from the shared counter, unit must belong to the c
 });
 
 test('chat: customer message in, staff reply out, both on the portal; files upload and download by link', async (t) => {
-  const { s, admin, db } = await org(t);
+  const { s, admin, db, notes } = await org(t);
   const m = await s.request('POST', '/api/portal/TokenK1abcdefgh/messages', { body: { body: 'מתי מגיעים?' } });
   assert.equal(m.status, 201);
   assert.equal((await s.request('POST', '/api/portal/TokenK1abcdefgh/messages', { body: { body: '' } })).status, 400);
   await s.request('POST', '/api/db/ops', { headers: bearer(admin), body: { ops: [{ op: 'upsert', collection: 'messages', id: 'm-reply', data: { caseId: 'k1', customerId: 'c1', channel: 'portal', direction: 'out', body: 'מחר ב-9', at: new Date().toISOString(), by: 'u-admin', status: 'sent' }, at: Date.now() }] } });
   const p = (await s.request('GET', '/api/portal/TokenK1abcdefgh')).json;
   assert.deepEqual(p.messages.map((x) => [x.direction, x.body, x.by ?? null]), [['out', 'שלום יעל', 'אבי'], ['in', 'מתי מגיעים?', null], ['out', 'מחר ב-9', 'דוד']]);
-  assert.ok((await db()).collections.notifications.some((n) => n.userId === 'u-agent1' && n.text.includes('מתי מגיעים')));
+  assert.ok((await notes()).some((n) => n.userId === 'u-agent1' && n.text.includes('מתי מגיעים')));
 
   const bad = await s.request('POST', '/api/portal/TokenK1abcdefgh/upload', { headers: { 'content-type': 'text/html', 'x-file-name': 'x.html' }, body: '<script>' });
   assert.equal(bad.status, 415);
@@ -147,7 +151,7 @@ test('chat: customer message in, staff reply out, both on the portal; files uplo
 });
 
 test('leads: validation, honeypot, customer + contact + case on the server', async (t) => {
-  const { s, db } = await org(t);
+  const { s, db, notes } = await org(t);
   const bad = await s.request('POST', '/api/public/leads', { body: { name: 'א', phone: '123', type: 'spaceship' } });
   assert.equal(bad.status, 400);
   assert.deepEqual(bad.json.error.details.fields.map((f) => f.field), ['name', 'phone', 'type']);
@@ -167,7 +171,7 @@ test('leads: validation, honeypot, customer + contact + case on the server', asy
   const c = d.collections.customers.find((x) => x.id === k.customerId);
   assert.equal(c.phone, '0541234567');
   assert.equal(d.collections.contacts.find((x) => x.customerId === c.id).name, 'נועה כהן');
-  assert.ok(d.collections.notifications.some((n) => n.userId === 'u-office' && n.text.includes('נועה כהן')));
+  assert.ok((await notes()).some((n) => n.userId === 'u-office' && n.text.includes('נועה כהן')));
   assert.equal(d.collections.customers.filter((x) => x.name === 'בוט').length, 0);
   assert.equal((await s.request('GET', `/api/portal/${r.json.portalToken}`)).json.case.number, r.json.number, 'the new lead can follow up in the portal');
 });
@@ -184,4 +188,37 @@ test('portal without a shared database answers 503', async (t) => {
   const s = await startServer(t);
   assert.equal((await s.request('GET', '/api/portal/TokenK1abcdefgh')).status, 503);
   assert.equal((await s.request('GET', '/api/health')).json.db.mode, 'off');
+});
+
+test('approve by default does not count a card / Bit deposit as paid: it is pending and the office is told to check', async (t) => {
+  const { s, db, notes } = await org(t);
+  const ok = await s.request('POST', '/api/portal/TokenK1abcdefgh/approve', { body: { quoteId: 'q1', signature: { name: 'יעל לוי', dataUrl: SIG }, deposit: { method: 'credit' } } });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.json.deposit.paidAt, undefined);
+  assert.equal(ok.json.deposit.status, 'pending');
+  const d = await db();
+  assert.equal(d.collections.money.filter((m) => m.caseId === 'k1' && m.kind === 'payment').length, 0, 'no payment line without a payment');
+  assert.equal(d.collections.quotes.find((q) => q.id === 'q1').status, 'approved', 'the approval itself still counts');
+  assert.ok((await notes()).some((n) => n.userId === 'u-office' && n.text.includes('לבדוק שהתשלום התקבל')));
+});
+
+test('portal: a closed case\'s link stops working after 90 days; the first wrong guesses are counted per address', async (t) => {
+  const { s, admin } = await org(t);
+  const store = await getStore(loadConfig());
+  const old = new Date(Date.now() - 100 * 86400_000).toISOString();
+  store.applyOps([{ op: 'patch', collection: 'cases', id: 'k2', at: Date.now(), data: { stage: 'closed', updatedAt: old, closedAt: old } }], { clientId: 'test' });
+  assert.equal((await s.request('GET', '/api/portal/TokenK2abcdefgh')).status, 404);
+  assert.equal((await s.request('GET', '/api/portal/TokenK1abcdefgh')).status, 200, 'other links are fine');
+  for (let i = 0; i < 40; i++) await s.request('GET', `/api/portal/guess${String(i).padStart(8, '0')}`);
+  assert.equal((await s.request('GET', '/api/portal/TokenK1abcdefgh')).status, 429, 'after many wrong links even a right one waits');
+  assert.ok(admin);
+});
+
+test('portal upload: the first bytes must match the declared type', async (t) => {
+  const { s } = await org(t);
+  const fake = await s.request('POST', '/api/portal/TokenK1abcdefgh/upload', { headers: { 'content-type': 'image/png', 'x-file-name': 'a.png' }, body: Buffer.from('<html><script>alert(1)</script></html>') });
+  assert.equal(fake.status, 415);
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(32)]);
+  const real = await s.request('POST', '/api/portal/TokenK1abcdefgh/upload', { headers: { 'content-type': 'image/png', 'x-file-name': 'a.png' }, body: png });
+  assert.equal(real.status, 201);
 });

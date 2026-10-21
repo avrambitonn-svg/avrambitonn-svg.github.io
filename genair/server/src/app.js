@@ -1,6 +1,6 @@
 // Request router shared by the local server (src/server.js) and Vercel (api/index.js).
 import { VERSION, loadConfig } from './config.js';
-import { HttpError, applyCors, sendError, sendJson, safeEqual } from './http.js';
+import { HttpError, applyCors, applySecurityHeaders, sendError, sendJson, safeEqual } from './http.js';
 import * as priority from './priority.js';
 import { aiMessages } from './anthropic.js';
 import * as whatsapp from './whatsapp.js';
@@ -11,64 +11,76 @@ import * as files from './files.js';
 import * as portal from './portal.js';
 import * as psync from './psync/index.js';
 import { getStore } from './db/index.js';
+import { audit } from './audit.js';
+import { spend } from './ratelimit.js';
 
 async function dbHealth(cfg) {
   if (cfg.db.mode === 'off') return { mode: 'off' };
   try {
     const store = await getStore(cfg);
-    return { mode: cfg.db.mode, ready: true, bootstrapped: !store.isEmpty(), bootstrapToken: Boolean(cfg.db.bootstrapToken) };
+    // the first setup always needs a code (BOOTSTRAP_TOKEN, or the one the server prints when it starts)
+    return { mode: cfg.db.mode, ready: true, bootstrapped: !store.isEmpty(), bootstrapToken: true };
   } catch {
     return { mode: cfg.db.mode, ready: false };
   }
 }
 
-async function health({ cfg }) {
-  const p = cfg.priority;
-  return {
-    status: 200,
-    body: {
-      ok: true,
-      version: VERSION,
-      features: {
-        priority: p.mode === 'off' || p.configured ? p.mode : 'off',
-        priorityWrite: Boolean(p.configured && p.allowWrite),
-        prioritySync: Boolean(psync.currentEngine()),
-        ai: Boolean(cfg.ai.apiKey),
-        whatsapp: Boolean(cfg.whatsapp.token && cfg.whatsapp.phoneNumberId),
-        google: google.googleFeatures(cfg),
-      },
-      db: await dbHealth(cfg),
-    },
-  };
+/** True for a request that carries a valid session or, on an integration-only server, the shared APP_TOKEN. */
+async function isTrusted(req, cfg) {
+  try {
+    await checkIntegration(req, cfg, 'any');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function health({ req, cfg }) {
+  const body = { ok: true, db: await dbHealth(cfg) };
+  // who runs what, and the version, are for the people who work in the system, not for anyone who finds the address
+  if (await isTrusted(req, cfg)) {
+    const p = cfg.priority;
+    body.version = VERSION;
+    body.features = {
+      priority: p.mode === 'off' || p.configured ? p.mode : 'off',
+      priorityWrite: Boolean(p.configured && p.allowWrite && p.mode === 'live'),
+      prioritySync: Boolean(psync.currentEngine()),
+      ai: Boolean(cfg.ai.apiKey),
+      whatsapp: Boolean(cfg.whatsapp.token && cfg.whatsapp.phoneNumberId),
+      google: google.googleFeatures(cfg),
+    };
+  }
+  return { status: 200, body };
 }
 
 // access: 'public'      - no credentials (health, Meta's and Priority's webhooks, login, the customer portal, the lead form)
-//         'integration' - the session token or x-app-token (open while neither APP_TOKEN nor any user exists)
+//         'integration' - (no access field) a signed-in user whose role may use that service; on a server without a database,
+//                         the shared x-app-token. Never open. The `integration` field names the service.
 //         'session'     - a signed-in user (the route checks it itself, with the role it needs)
 const ROUTES = [
   { method: 'GET', path: '/api/health', handle: health, access: 'public' },
-  { method: 'GET', path: '/api/priority/test', handle: priority.priorityTest },
-  { method: 'GET', path: '/api/priority/customers', handle: priority.listCustomers },
-  { method: 'POST', path: '/api/priority/customers', handle: priority.createCustomer },
-  { method: 'GET', path: '/api/priority/items', handle: priority.listItems },
-  { method: 'GET', path: '/api/priority/pricelists', handle: priority.listPricelists },
-  { method: 'POST', path: '/api/priority/quotes', handle: priority.createQuote },
-  { method: 'POST', path: '/api/priority/orders', handle: priority.createOrder },
+  { method: 'GET', path: '/api/priority/test', handle: priority.priorityTest, integration: 'priority' },
+  { method: 'GET', path: '/api/priority/customers', handle: priority.listCustomers, integration: 'priority' },
+  { method: 'POST', path: '/api/priority/customers', handle: priority.createCustomer, integration: 'priority' },
+  { method: 'GET', path: '/api/priority/items', handle: priority.listItems, integration: 'priority' },
+  { method: 'GET', path: '/api/priority/pricelists', handle: priority.listPricelists, integration: 'priority' },
+  { method: 'POST', path: '/api/priority/quotes', handle: priority.createQuote, integration: 'priority' },
+  { method: 'POST', path: '/api/priority/orders', handle: priority.createOrder, integration: 'priority' },
   { method: 'GET', path: '/api/priority/sync/status', handle: psync.syncStatus, access: 'session' },
   { method: 'POST', path: '/api/priority/sync/run', handle: psync.syncRun, access: 'session' },
   { method: 'POST', path: '/api/priority/webhook', handle: psync.syncWebhook, access: 'public' },
-  { method: 'POST', path: '/api/ai/messages', handle: aiMessages },
-  { method: 'POST', path: '/api/whatsapp/send', handle: whatsapp.sendWhatsapp },
+  { method: 'POST', path: '/api/ai/messages', handle: aiMessages, integration: 'ai' },
+  { method: 'POST', path: '/api/whatsapp/send', handle: whatsapp.sendWhatsapp, integration: 'whatsapp' },
   { method: 'GET', path: '/api/whatsapp/webhook', handle: whatsapp.webhookVerify, access: 'public' },
   { method: 'POST', path: '/api/whatsapp/webhook', handle: whatsapp.webhookReceive, access: 'public' },
-  { method: 'GET', path: '/api/whatsapp/inbox', handle: whatsapp.inboxList },
-  { method: 'POST', path: '/api/google/calendar/events', handle: google.createCalendarEvent },
-  { method: 'PATCH', path: '/api/google/calendar/events/:id', handle: google.updateCalendarEvent },
-  { method: 'DELETE', path: '/api/google/calendar/events/:id', handle: google.deleteCalendarEvent },
-  { method: 'POST', path: '/api/google/drive/folders', handle: google.createDriveFolder },
-  { method: 'POST', path: '/api/google/drive/files', handle: google.uploadDriveFile },
-  { method: 'POST', path: '/api/google/drive/files/:id/move', handle: google.moveDriveFile },
-  { method: 'POST', path: '/api/google/drive/files/:id/trash', handle: google.trashDriveFile },
+  { method: 'GET', path: '/api/whatsapp/inbox', handle: whatsapp.inboxList, integration: 'whatsapp' },
+  { method: 'POST', path: '/api/google/calendar/events', handle: google.createCalendarEvent, integration: 'google' },
+  { method: 'PATCH', path: '/api/google/calendar/events/:id', handle: google.updateCalendarEvent, integration: 'google' },
+  { method: 'DELETE', path: '/api/google/calendar/events/:id', handle: google.deleteCalendarEvent, integration: 'google' },
+  { method: 'POST', path: '/api/google/drive/folders', handle: google.createDriveFolder, integration: 'google' },
+  { method: 'POST', path: '/api/google/drive/files', handle: google.uploadDriveFile, integration: 'google' },
+  { method: 'POST', path: '/api/google/drive/files/:id/move', handle: google.moveDriveFile, integration: 'google' },
+  { method: 'POST', path: '/api/google/drive/files/:id/trash', handle: google.trashDriveFile, integration: 'google' },
 
   { method: 'POST', path: '/api/auth/login', handle: auth.login, access: 'public' },
   { method: 'POST', path: '/api/auth/bootstrap', handle: auth.bootstrap, access: 'public' },
@@ -130,10 +142,22 @@ function findRoute(method, path) {
   return hit;
 }
 
-/** Integration routes: a valid session or the shared APP_TOKEN. With neither configured (no APP_TOKEN, no users yet) they stay open, as before. */
-async function checkIntegration(req, cfg) {
-  const given = req.headers['x-app-token'];
-  if (cfg.appToken && typeof given === 'string' && safeEqual(given, cfg.appToken)) return;
+// Which roles may use which service, and how often (requests per minute per user).
+const ROLES_FOR = {
+  priority: ['admin', 'office', 'agent', 'engineer'],
+  ai: ['admin', 'office', 'agent', 'engineer'],
+  whatsapp: ['admin', 'office', 'agent', 'engineer'],
+  google: ['admin', 'office', 'agent', 'engineer', 'installer'], // the field app files photos in the case's Drive folder
+};
+const BUDGET_KEY = { priority: 'priorityPerMin', ai: 'aiPerMin', whatsapp: 'whatsappPerMin', google: 'googlePerMin' };
+
+/**
+ * Integration routes (Priority, AI, WhatsApp, Google). With a shared database: a signed-in user whose role may use the
+ * service (the shared APP_TOKEN is not accepted there: it would let anyone who knows it act as nobody in particular).
+ * Without a database (an integration-only server, e.g. on Vercel): the APP_TOKEN, which must be set. Never open.
+ * Returns { user } (null for the token).
+ */
+async function checkIntegration(req, cfg, kind) {
   let store = null;
   if (cfg.db.mode !== 'off') {
     try {
@@ -145,10 +169,20 @@ async function checkIntegration(req, cfg) {
   }
   if (store) {
     const s = auth.readSession(req, store, cfg);
-    if (s && !s.error) return;
-    if (!cfg.appToken && store.isEmpty()) return;
-  } else if (!cfg.appToken) return;
-  throw new HttpError(401, 'unauthorized', cfg.appToken ? 'חסר טוקן גישה או שהוא שגוי (x-app-token)' : 'צריך להתחבר למערכת');
+    if (!s || s.error) throw new HttpError(401, 'unauthorized', s?.error === 'expired' ? 'פג תוקף ההתחברות, צריך להתחבר שוב' : 'צריך להתחבר למערכת', { reason: s?.error ?? 'missing' });
+    if (kind !== 'any' && !ROLES_FOR[kind]?.includes(s.user.role)) {
+      audit(cfg, 'integration_denied', { user: s.user.id, role: s.user.role, service: kind });
+      throw new HttpError(403, 'forbidden', 'התפקיד שלך לא מורשה להשתמש בשירות הזה');
+    }
+    return { user: s.user };
+  }
+  if (!cfg.appToken) throw new HttpError(503, 'app_token_required', 'השרת הזה בלי מסד נתונים דורש APP_TOKEN. הגדירו אותו בשרת ובהגדרות האפליקציה');
+  const given = req.headers['x-app-token'];
+  if (!(typeof given === 'string' && safeEqual(given, cfg.appToken))) {
+    audit(cfg, 'app_token_rejected', { service: kind });
+    throw new HttpError(401, 'unauthorized', 'חסר טוקן גישה או שהוא שגוי (x-app-token)');
+  }
+  return { user: null };
 }
 
 export async function handler(req, res) {
@@ -157,6 +191,7 @@ export async function handler(req, res) {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const path = url.pathname.replace(/\/+$/, '') || '/';
 
+    applySecurityHeaders(req, res, cfg);
     if (!applyCors(req, res, cfg.allowedOrigins)) {
       throw new HttpError(403, 'origin_not_allowed', 'המקור (Origin) אינו מורשה לגשת לשרת', { origin: req.headers.origin });
     }
@@ -167,9 +202,13 @@ export async function handler(req, res) {
     }
 
     const { route, params } = findRoute(req.method, path);
-    if (!route.access) await checkIntegration(req, cfg);
+    let user = null;
+    if (!route.access) {
+      ({ user } = await checkIntegration(req, cfg, route.integration));
+      spend(`int-${route.integration}`, user?.id ?? 'app-token', cfg.limits[BUDGET_KEY[route.integration]]);
+    }
 
-    const result = await route.handle({ req, res, url, cfg, params });
+    const result = await route.handle({ req, res, url, cfg, params, user });
     if (!result || res.headersSent) return; // the handler streamed its own response
     if (result.text !== undefined) {
       res.writeHead(result.status, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });

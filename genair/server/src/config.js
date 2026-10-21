@@ -30,6 +30,8 @@ function str(value) {
   return s || '';
 }
 
+const num = (v, d) => (Number(v) > 0 ? Number(v) : d);
+
 function bool(value) {
   return /^(1|true|yes|on)$/i.test(String(value ?? '').trim());
 }
@@ -106,7 +108,6 @@ export function prioritySyncConfig(env = process.env) {
 export function dbConfig(env = process.env) {
   const raw = str(env.DB_MODE).toLowerCase();
   const mode = ['file', 'memory', 'off'].includes(raw) ? raw : env.VERCEL ? 'off' : 'file';
-  const num = (v, d) => (Number(v) > 0 ? Number(v) : d);
   return {
     mode,
     dataDir: str(env.DATA_DIR) || './data',
@@ -116,6 +117,12 @@ export function dbConfig(env = process.env) {
     bootstrapToken: str(env.BOOTSTRAP_TOKEN),
     filesMaxBytes: num(env.FILES_MAX_MB, 25) * 1024 * 1024,
     trustProxy: bool(env.TRUST_PROXY),
+    // behind N proxies the client is the N-th entry from the right of X-Forwarded-For (the left side is client-controlled)
+    trustProxyHops: Math.floor(num(env.TRUST_PROXY_HOPS, 1)),
+    // a session can be renewed again and again, but never lives longer than this
+    maxSessionHours: num(env.AUTH_MAX_SESSION_HOURS, 168),
+    // stdout (default) or file (DATA_DIR/audit.log) for the security log
+    auditLog: str(env.AUDIT_LOG).toLowerCase() === 'file' ? 'file' : 'stdout',
   };
 }
 
@@ -132,6 +139,8 @@ export function loadConfig(env = process.env) {
       allowedModels: list(env.AI_ALLOWED_MODELS, DEFAULT_AI_MODELS),
       allowedBetas: list(env.AI_ALLOWED_BETAS, DEFAULT_AI_BETAS),
       timeoutMs: Number(env.AI_TIMEOUT_MS) > 0 ? Number(env.AI_TIMEOUT_MS) : 300_000,
+      // the proxy refuses requests asking for more output than this (cost control)
+      maxTokens: Math.floor(Number(env.AI_MAX_TOKENS) > 0 ? Number(env.AI_MAX_TOKENS) : 16_000),
     },
     whatsapp: {
       token: str(env.WHATSAPP_TOKEN),
@@ -139,6 +148,21 @@ export function loadConfig(env = process.env) {
       graphVersion: str(env.WHATSAPP_GRAPH_VERSION) || DEFAULT_GRAPH_VERSION,
       verifyToken: str(env.WHATSAPP_VERIFY_TOKEN),
       appSecret: str(env.WHATSAPP_APP_SECRET),
+      // dev only: accept webhooks without a signature / send to numbers that are not in the database
+      allowUnsigned: bool(env.WHATSAPP_ALLOW_UNSIGNED),
+      anyRecipient: bool(env.WHATSAPP_ANY_RECIPIENT),
+    },
+    // the customer portal records a deposit as paid without a payment provider (demo only)
+    portal: { demoPayments: bool(env.PORTAL_DEMO_PAYMENTS) },
+    // per-user request budgets for signed-in routes (requests per window)
+    limits: {
+      opsPerMin: Math.floor(num(env.LIMIT_OPS_PER_MIN, 600)),
+      filesPer10Min: Math.floor(num(env.LIMIT_FILES_PER_10MIN, 60)),
+      aiPerMin: Math.floor(num(env.LIMIT_AI_PER_MIN, 20)),
+      whatsappPerMin: Math.floor(num(env.LIMIT_WHATSAPP_PER_MIN, 30)),
+      googlePerMin: Math.floor(num(env.LIMIT_GOOGLE_PER_MIN, 60)),
+      priorityPerMin: Math.floor(num(env.LIMIT_PRIORITY_PER_MIN, 60)),
+      streamsPerUser: Math.floor(num(env.LIMIT_STREAMS_PER_USER, 6)),
     },
     google: {
       serviceAccountRaw: str(env.GOOGLE_SERVICE_ACCOUNT_JSON),

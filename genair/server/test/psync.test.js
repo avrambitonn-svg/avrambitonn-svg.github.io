@@ -468,7 +468,7 @@ test('sync routes: managers only; the webhook needs its key', async (t) => {
   assert.equal((await s.request('POST', '/api/priority/webhook?key=wrong', { body: {} })).status, 401);
   assert.equal((await s.request('POST', '/api/priority/webhook?key=hook-secret', { body: { form: 'ORDERS' } })).status, 202);
 
-  const health = await s.request('GET', '/api/health');
+  const health = await s.request('GET', '/api/health', { headers: bearer(admin) });
   assert.equal(health.json.features.prioritySync, true);
 
   // clients never write the engine's state or money lines that came from Priority
@@ -631,4 +631,68 @@ test('contacts added or edited in Priority come into the app', async () => {
   await engine.sweep({ all: true });
   await engine.chain;
   assert.equal(priority.writes().length, writes, 'a contact that came from Priority is not sent back');
+});
+
+// ------------------------------------------------------------ the public form must not reach the ERP by itself
+
+const leadData = (stage = 'lead') => ({
+  customers: [{ id: 'c1', name: 'מישהו', phone: '0541234567', type: 'private', addresses: [{ id: 'ad1', city: 'חיפה', street: '' }], temp: true, createdVia: 'lead', sync: { status: 'not_synced' } }],
+  cases: [{ id: 'k1', customerId: 'c1', title: 'ליד', stage, createdAt: '2026-10-01' }],
+});
+
+test('a lead from the public form waits for a person before it becomes a customer in Priority', async () => {
+  const { store, engine, priority } = await setup({ data: leadData('lead') });
+  await engine.sweep({ all: true });
+  await engine.chain;
+  assert.equal(priority.writes().length, 0, 'nothing is written for an untouched lead');
+  const waiting = store.get('customers', 'c1');
+  assert.equal(waiting.sync.status, 'pending');
+  assert.match(waiting.sync.error, /ליד מהאתר/);
+  // the office takes the case forward
+  userWrite(store, [{ op: 'patch', collection: 'cases', id: 'k1', data: { stage: 'survey' } }]);
+  await engine.sweep({ all: true });
+  await engine.chain;
+  assert.equal(priority.t.CUSTOMERS.length, 1);
+  assert.equal(store.get('customers', 'c1').sync.status, 'synced');
+});
+
+test('a lead whose phone matches a customer in Priority does not take over that customer\'s name or address', async () => {
+  const priority = new FakePriority({ CUSTOMERS: [{ CUSTNAME: '10077', CUSTDES: 'לקוח אמיתי בע״מ', PHONE: '0541234567', EMAIL: 'real@example.com', ADDRESS: 'רחוב הסתר 9', STATE: 'עכו' }] });
+  const { store, engine } = await setup({ priority, data: leadData('survey') });
+  await engine.sweep({ all: true });
+  await engine.chain;
+  const c = store.get('customers', 'c1');
+  assert.equal(c.sync.priorityId, '10077', 'still linked, for a person to confirm');
+  assert.equal(c.name, 'מישהו', 'the name typed in the form stays');
+  assert.deepEqual(c.addresses.map((a) => a.city), ['חיפה'], 'the address of the real customer is not copied here');
+  assert.equal(c.email, undefined);
+  const log = store.list('activities').map((a) => a.text).join(' | ');
+  assert.match(log, /לוודא שמדובר באותו אדם/);
+});
+
+// ------------------------------------------------------------ what goes into the ERP's URLs and what comes back from it
+
+test('names go into Priority URLs percent-encoded, so "/", "?", "#" and "%" cannot change what is addressed', async () => {
+  const { updateContact, updateCustomer, FILE_TARGETS } = await import('../src/psync/api.js');
+  const seen = [];
+  const client = { patch: async (path) => void seen.push(path), get: async () => ({ value: [] }), post: async () => ({}) };
+  await updateContact(client, 'GN/1?x#y', { NAME: "יעל/לוי ?# 100% O'Brien (x)", FIRM: 'F/1' }, {});
+  await updateCustomer(client, "a'b", {});
+  assert.equal(seen[0], "CUSTOMERS('GN%2F1%3Fx%23y')/CUSTPERSONNEL_SUBFORM(NAME='%D7%99%D7%A2%D7%9C%2F%D7%9C%D7%95%D7%99%20%3F%23%20100%25%20O''Brien%20%28x%29',FIRM='F%2F1')");
+  assert.equal(seen[1], "CUSTOMERS('a''b')");
+  assert.equal(FILE_TARGETS.customer('a/b'), "CUSTOMERS('a%2Fb')/CUSTEXTFILE_SUBFORM");
+  for (const p of seen) assert.ok(!/[?#]/.test(p), 'no query or fragment can start inside a value');
+});
+
+test('a sync error stored on a record carries no addresses or paths of the ERP', async () => {
+  const priority = new FakePriority();
+  priority.post = async () => {
+    throw new HttpError(502, 'priority_rejected', 'Priority דחה', { message: 'failed at https://t.eu.priority-connect.online/odata/Priority/tabbtd38.ini/usdemo from 10.20.30.40 file /var/priority/data/bin/x.dll' });
+  };
+  const { store, engine } = await setup({ priority });
+  await engine.sweep();
+  await engine.chain;
+  const err = store.get('customers', 'c1').sync.error;
+  assert.ok(err.length > 0);
+  for (const leak of ['priority-connect', 'usdemo', '10.20.30.40', '/var/priority']) assert.ok(!err.includes(leak), `must not include ${leak}`);
 });

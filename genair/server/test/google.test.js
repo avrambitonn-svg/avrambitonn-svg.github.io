@@ -10,7 +10,7 @@ import {
   jerusalemDate,
   parseServiceAccount,
 } from '../src/google.js';
-import { forbidFetch, jsonResponse, mockFetch, startServer, useEnv } from './helpers.js';
+import { forbidFetch, jsonResponse, mockFetch, startServer, useIntegrationEnv } from './helpers.js';
 
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const PEM = privateKey.export({ type: 'pkcs8', format: 'pem' });
@@ -119,7 +119,7 @@ test('buildDriveFolder', () => {
 });
 
 test('routes return 503 without credentials and never call Google', async (t) => {
-  useEnv(t, { GOOGLE_CALENDAR_ID: 'cal@group.calendar.google.com' });
+  useIntegrationEnv(t, { GOOGLE_CALENDAR_ID: 'cal@group.calendar.google.com' });
   const calls = forbidFetch(t);
   const s = await startServer(t);
   const c = await s.request('POST', '/api/google/calendar/events', { body: { summary: 'x', start: '2026-10-20T09:00:00Z', end: '2026-10-20T10:00:00Z' } });
@@ -138,7 +138,7 @@ test('routes return 503 without credentials and never call Google', async (t) =>
 
 test('calendar + drive routes: token exchange, then API calls', async (t) => {
   clearTokenCache();
-  useEnv(t, {
+  useIntegrationEnv(t, {
     GOOGLE_SERVICE_ACCOUNT_JSON: Buffer.from(JSON.stringify(SA)).toString('base64'),
     GOOGLE_CALENDAR_ID: 'genair@group.calendar.google.com',
     GOOGLE_DRIVE_PARENT_ID: 'FOLDER123',
@@ -170,7 +170,7 @@ test('calendar + drive routes: token exchange, then API calls', async (t) => {
 
 test('Google API errors map to 502 google_error with the Google message', async (t) => {
   clearTokenCache();
-  useEnv(t, { GOOGLE_SERVICE_ACCOUNT_JSON: JSON.stringify(SA), GOOGLE_CALENDAR_ID: 'c' });
+  useIntegrationEnv(t, { GOOGLE_SERVICE_ACCOUNT_JSON: JSON.stringify(SA), GOOGLE_CALENDAR_ID: 'c' });
   mockFetch(t, (url) =>
     url.includes('oauth2') ? jsonResponse(200, { access_token: 't', expires_in: 3600 }) : jsonResponse(404, { error: { code: 404, message: 'Not Found', errors: [{ reason: 'notFound' }] } }),
   );
