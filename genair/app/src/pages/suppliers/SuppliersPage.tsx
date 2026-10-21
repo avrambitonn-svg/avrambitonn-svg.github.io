@@ -5,7 +5,7 @@ import { ClipboardList, MessageCircle, Phone, Plus, Search, Truck, Users } from 
 import { useApp } from '../../lib/store'
 import { Badge, Card, Empty, PageHead, Stat, Tabs } from '../../components/ui'
 import { Dot, Stars } from '../../features/case/controls'
-import { date, money, phone as fmtPhone } from '../../lib/format'
+import { date, money, phone as fmtPhone, ymd } from '../../lib/format'
 import { telLink, whatsappLink } from '../../lib/integrations/links'
 import { isOpenPo, poStatusLabel, poStatusTone, poTotal, type PoStatus } from './po'
 import { SupplierDialog } from './SupplierDialog'
@@ -44,7 +44,7 @@ export default function SuppliersPage() {
 
   const stats = useMemo(() => {
     const open = pos.filter(isOpenPo)
-    return { active: suppliers.filter((s) => s.active).length, open: open.length, openValue: open.reduce((s, p) => s + poTotal(p), 0), late: open.filter((p) => p.expectedAt && p.expectedAt < new Date().toISOString().slice(0, 10)).length }
+    return { active: suppliers.filter((s) => s.active).length, open: open.length, openValue: open.reduce((s, p) => s + poTotal(p), 0), late: open.filter((p) => p.expectedAt && p.expectedAt < ymd()).length }
   }, [suppliers, pos])
 
   const list = useMemo(() => {
@@ -185,7 +185,7 @@ export default function SuppliersPage() {
                 {orders.map((p) => {
                   const sup = suppliers.find((s) => s.id === p.supplierId)
                   const k = cases.find((x) => x.id === p.caseId)
-                  const late = isOpenPo(p) && p.expectedAt && p.expectedAt < new Date().toISOString().slice(0, 10)
+                  const late = isOpenPo(p) && p.expectedAt && p.expectedAt < ymd()
                   return (
                     <tr key={p.id} className="click" onClick={() => openPo(p.id)}>
                       <td className="small strong nowrap"><span className="ltr">{p.number}</span></td>

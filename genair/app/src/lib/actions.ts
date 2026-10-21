@@ -141,6 +141,9 @@ export function markQuoteViewed(quoteId: ID) {
 }
 
 // אישור הלקוח: חתימה, מקדמה, שלב "אושר", והזמנה ל-Priority
+// שלבים שאחריהם אישור הצעה מקדם את התיק ל"אושר"
+const BEFORE_APPROVAL: CaseStage[] = ['lead', 'survey', 'quote']
+
 export function approveQuote(quoteId: ID, signature: Signature, deposit?: Quote['deposit']) {
   const s = app()
   const q = s.db.quotes.find((x) => x.id === quoteId)
@@ -154,8 +157,10 @@ export function approveQuote(quoteId: ID, signature: Signature, deposit?: Quote[
   }
   // שאר ההצעות בתיק נדחות אוטומטית
   s.db.quotes.filter((x) => x.caseId === q.caseId && x.id !== q.id && ['draft', 'sent', 'viewed'].includes(x.status)).forEach((x) => s.patch('quotes', x.id, { status: 'rejected' }))
-  setStage(q.caseId, 'approved')
-  const k = s.db.cases.find((x) => x.id === q.caseId)
+  // רק תיק שעוד לא הגיע ל"אושר" מתקדם אליו; תיק שכבר שובץ או הותקן (למשל הצעה נוספת) נשאר בשלב שלו
+  const before = s.db.cases.find((x) => x.id === q.caseId)
+  if (before && BEFORE_APPROVAL.includes(before.stage)) setStage(q.caseId, 'approved')
+  const k = app().db.cases.find((x) => x.id === q.caseId)
   const office = s.db.users.filter((u) => u.role === 'office' || u.role === 'admin')
   office.forEach((u) => s.notify(u.id, `הצעה אושרה: ${k?.title ?? q.number} — לתאם התקנה`, `/cases/${q.caseId}`))
   if (deposit && !deposit.paidAt) office.forEach((u) => s.notify(u.id, `${q.number}: לאמת את תשלום המקדמה`, `/cases/${q.caseId}`))
@@ -218,7 +223,8 @@ export function completeInstallation(appointmentId: ID, signature: Signature, se
   if (!ap) return
   s.patch('appointments', appointmentId, { status: 'done', customerSignature: signature })
   if (!ap.caseId) return
-  const k = s.db.cases.find((x) => x.id === ap.caseId)!
+  const k = s.db.cases.find((x) => x.id === ap.caseId)
+  if (!k) return // התיק עוד לא הגיע למכשיר הזה: העבודה נסגרה, את השאר ישלים מי שרואה את התיק
   const others = s.db.appointments.filter((x) => x.caseId === k.id && x.id !== ap.id && x.type === 'installation' && x.status !== 'done' && x.status !== 'cancelled')
   if (others.length) {
     s.log({ kind: 'appointment', caseId: k.id, text: `יום התקנה הסתיים (${ap.title}), נשארו ${others.length} ימים` })

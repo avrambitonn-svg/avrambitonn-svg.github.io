@@ -290,7 +290,9 @@ export class PrioritySync {
   }
 
   markError(c, e, err, field = 'sync') {
-    const cur = e[field] ?? {};
+    // the current record, not the copy taken before the push: a step that did succeed (e.g. linking the
+    // customer in Priority) already wrote its priorityId, and writing the old sync state back would lose it
+    const cur = (this.store.get(c, e.id) ?? e)[field] ?? {};
     this.patch(c, e.id, { [field]: { ...cur, status: 'error', error: errText(err), lastSync: new Date(this.now()).toISOString(), attempts: (cur.attempts ?? 0) + 1 } });
   }
 

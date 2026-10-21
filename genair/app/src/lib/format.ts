@@ -23,6 +23,7 @@ export const nowIso = () => new Date().toISOString()
 
 // YYYY-MM-DD בשעון מקומי
 export function ymd(d: Date | string = new Date()): string {
+  if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) return d
   const x = typeof d === 'string' ? new Date(d) : d
   const m = String(x.getMonth() + 1).padStart(2, '0')
   const day = String(x.getDate()).padStart(2, '0')

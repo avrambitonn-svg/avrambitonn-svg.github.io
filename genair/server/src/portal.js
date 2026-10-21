@@ -245,7 +245,8 @@ export async function approveQuote(ctx) {
   for (const other of store.list('quotes')) {
     if (other.caseId === k.id && other.id !== q.id && ['draft', 'sent', 'viewed'].includes(other.status)) ops.push(patch('quotes', other.id, { status: 'rejected' }));
   }
-  if (k.stage !== 'approved') {
+  // only a case not yet approved moves to "approved"; one already scheduled or installed (another quote) keeps its stage
+  if (['lead', 'survey', 'quote'].includes(k.stage)) {
     ops.push(patch('cases', k.id, { stage: 'approved', updatedAt: at }));
     ops.push(activity({ kind: 'stage', caseId: k.id, text: `שלב: ${stageLabel(store, k.stage)} ← ${stageLabel(store, 'approved')}` }));
     if (k.agentId) ops.push(notification(k.agentId, `${k.title}: ${stageLabel(store, 'approved')}`, `/cases/${k.id}`));

@@ -2,6 +2,7 @@
 // (serial numbers), service call status, stock movements, goods receipts, supplier invoices,
 // customer notes, and contacts edited in Priority. Each function gets the engine (`e`) and works
 // like the pushes and pulls in engine.js: idempotent, with sync state on the record.
+import { jerusalemDate } from '../google.js';
 import { HttpError } from '../http.js';
 import * as P from './api.js';
 import * as M from './map.js';
@@ -10,7 +11,8 @@ const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
 const cut = (v, n) => String(v ?? '').trim().slice(0, n);
 const safeId = (s) => String(s).replace(/[^A-Za-z0-9_.:-]/g, '_').slice(0, 100);
-const dayIso = (d) => `${String(d ?? new Date().toISOString()).slice(0, 10)}T00:00:00Z`;
+// the Israeli calendar day of a moment (a note written at 01:00 belongs to that day, not to the UTC day before)
+const dayIso = (d) => `${jerusalemDate(d ?? new Date().toISOString())}T00:00:00Z`;
 const y = (v) => v === 'Y';
 const pick = (list, ...tests) => tests.map((t) => list.find(t)).find(Boolean);
 

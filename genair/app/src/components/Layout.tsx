@@ -8,7 +8,7 @@ import { brand } from '../brand'
 import { useApp, useMe } from '../lib/store'
 import { roleLabel, stageLabel } from '../lib/labels'
 import type { Role } from '../lib/types'
-import { relative } from '../lib/format'
+import { relative, ymd } from '../lib/format'
 import { ChatWidget } from '../features/chat/ChatWidget'
 import { UserMenu } from '../features/auth/UserMenu'
 import { useReminders } from '../features/tasks/reminders'
@@ -30,7 +30,7 @@ const nav: { group: string; items: NavItem[] }[] = [
       { to: '/field', label: 'היום שלי', icon: <HardHat size={18} />, roles: ['installer'] },
       { to: '/cases', label: 'תיקים ופרויקטים', icon: <FolderKanban size={18} />, roles: ['admin', 'office', 'agent', 'engineer'] },
       { to: '/calendar', label: 'לוח זמנים', icon: <CalendarDays size={18} /> },
-      { to: '/tasks', label: 'משימות', icon: <ListChecks size={18} />, count: (s) => s.db.tasks.filter((t) => !t.done && (t.assigneeId === s.currentUserId || t.sharedWith?.includes(s.currentUserId)) && !!t.due && t.due <= new Date().toISOString().slice(0, 10)).length },
+      { to: '/tasks', label: 'משימות', icon: <ListChecks size={18} />, count: (s) => s.db.tasks.filter((t) => !t.done && (t.assigneeId === s.currentUserId || t.sharedWith?.includes(s.currentUserId)) && !!t.due && t.due <= ymd()).length },
       { to: '/field', label: 'אפליקציית שטח', icon: <HardHat size={18} />, roles: ['admin', 'office', 'agent', 'engineer'] },
       { to: '/leave', label: 'אישורי חופשה', icon: <Palmtree size={18} />, count: (s) => (['admin', 'office'].includes(s.db.users.find((u) => u.id === s.currentUserId)?.role ?? '') ? s.db.leaves.filter((l) => l.status === 'pending').length : 0) },
     ],

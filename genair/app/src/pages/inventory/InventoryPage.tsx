@@ -5,7 +5,7 @@ import { Badge, Callout, Card, Empty, Field, Modal, PageHead, Stat, Tabs, toast 
 import { app, useApp, useMe } from '../../lib/store'
 import type { CatalogItem, ID, StockEntry } from '../../lib/types'
 import { categoryLabel } from '../../lib/labels'
-import { date as fmtDate, money, number as fmtNum } from '../../lib/format'
+import { date as fmtDate, money, number as fmtNum, ymd } from '../../lib/format'
 import { findStock, isVan, locationsOf, MAIN_WAREHOUSE, moveStock, readPref, setStock, vanOf, writePref } from '../../features/ops/ops'
 import { createPurchaseOrder, isOpenPo, markPoSent, poMail, poStatusLabel, poTotal, poWhatsapp } from '../suppliers/po'
 import { PurchaseOrderView, ReceiveDialog } from '../suppliers/PurchaseOrderView'
@@ -309,7 +309,7 @@ function OpenOrdersCard({ onOpenPo }: { onOpenPo: (id: ID) => void }) {
   const suppliers = useApp((s) => s.db.suppliers)
   const open = useMemo(() => pos.filter((p) => p.status === 'sent' || p.status === 'confirmed' || p.status === 'draft').sort((a, b) => (a.expectedAt ?? '9').localeCompare(b.expectedAt ?? '9')), [pos])
   const [receiving, setReceiving] = useState<ID | null>(null)
-  const today = new Date().toISOString().slice(0, 10)
+  const today = ymd()
   const rpo = open.find((p) => p.id === receiving)
   return (
     <Card title={<div className="row" style={{ gap: 8 }}><Truck size={16} className="muted" /><h2>הזמנות פתוחות</h2></div>} actions={<Link className="btn sm ghost" to="/suppliers?tab=orders">הכל</Link>}>
