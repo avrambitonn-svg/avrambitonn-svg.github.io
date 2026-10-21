@@ -6,7 +6,7 @@ import { useApp, useMe } from '../../lib/store'
 import { Avatar, Badge, Callout, Card, Field, Modal, PageHead, Tabs, toast } from '../../components/ui'
 import { roleLabel, type Tone } from '../../lib/labels'
 import { date, daysBetween, phone as fmtPhone, relative, uid } from '../../lib/format'
-import { bridge, listCredentials, setUserPassword } from '../../lib/sync'
+import { bridge, listCredentials, loginLabel, setUserPassword } from '../../lib/sync'
 import type { CredentialInfo } from '../../lib/sync/session'
 import type { Certification, Role, User, UserFunction } from '../../lib/types'
 import './users.css'
@@ -72,6 +72,7 @@ function Access({ c }: { c?: CredentialInfo }) {
   return (
     <span className="col" style={{ gap: 2 }}>
       <Badge tone={c.mustChange ? 'warning' : 'success'} dot>{c.mustChange ? 'סיסמה זמנית' : 'יש גישה'}</Badge>
+      {c.login && <span className="tiny muted">כניסה עם <span className="ltr">{loginLabel(c.login)}</span></span>}
       {c.lastLoginAt && <span className="tiny muted">נכנס/ה {relative(c.lastLoginAt)}</span>}
     </span>
   )
@@ -291,11 +292,21 @@ function UserDialog({ user, onClose }: { user?: User; onClose: () => void }) {
   )
 }
 
+function LoginHint({ login, closed }: { login: string; closed: boolean }) {
+  return (
+    <div className="small">
+      כניסה עם <b className="ltr">{login}</b>
+      <span className="muted"> {login.includes('@') ? '(אימייל, כי אין למשתמש טלפון נייד במערכת)' : '(הטלפון הנייד)'}{closed ? '. החיבורים הקודמים של המשתמש נסגרו.' : '.'}</span>
+    </div>
+  )
+}
+
 function PasswordDialog({ user, hasPassword, onClose }: { user: User; hasPassword: boolean; onClose: () => void }) {
   const [mode, setMode] = useState<'temp' | 'manual'>('temp')
   const [pw, setPw] = useState('')
   const [busy, setBusy] = useState(false)
   const [temp, setTemp] = useState('')
+  const [login, setLogin] = useState('')
   const [done, setDone] = useState(false)
 
   async function submit() {
@@ -304,6 +315,7 @@ function PasswordDialog({ user, hasPassword, onClose }: { user: User; hasPasswor
     try {
       const r = await setUserPassword(user.id, mode === 'manual' ? pw : undefined)
       if (r.temporaryPassword) setTemp(r.temporaryPassword)
+      if (r.login) setLogin(loginLabel(r.login))
       setDone(true)
       toast.success('הסיסמה נקבעה')
     } catch (e) {
@@ -333,7 +345,7 @@ function PasswordDialog({ user, hasPassword, onClose }: { user: User; hasPasswor
           ) : (
             <Callout tone="success">הסיסמה נשמרה.</Callout>
           )}
-          <div className="small muted">כניסה עם הטלפון <span className="ltr">{fmtPhone(user.phone)}</span>{user.email ? <> או <span className="ltr">{user.email}</span></> : null}.{hasPassword ? ' החיבורים הקודמים של המשתמש נסגרו.' : ''}</div>
+          <LoginHint login={login || (digits(user.phone).length >= 9 ? digits(user.phone) : (user.email ?? '').toLowerCase())} closed={hasPassword} />
         </div>
       ) : (
         <div className="col" style={{ gap: 12 }}>

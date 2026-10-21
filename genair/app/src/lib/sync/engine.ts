@@ -1,13 +1,16 @@
-// מנוע הסנכרון במצב "מסד נתונים משותף": תמונת מצב בכניסה, האזנה לשינויים (SSE, ואם לא עובר — long-poll),
-// תור של שינויים מקומיים שנשלח לשרת (גם אחרי עבודה בלי קליטה), ומספרים שמורים מראש לכל מכשיר.
+// מנוע הסנכרון במצב "מסד נתונים משותף" (Supabase): תמונת מצב בכניסה (db_snapshot), האזנה לשינויים
+// (Realtime על public.sync_feed, ובנוסף סקר כל 30 שניות), תור של שינויים מקומיים שנשלח למסד (db_ops, גם אחרי
+// עבודה בלי קליטה), ומספרים שמורים מראש לכל מכשיר (db_reserve).
 import { create } from 'zustand'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 import { DEVICE_SETTINGS, defaultSettings, emptyDB, useApp } from '../store'
 import { defaultConfig } from '../configDefaults'
 import { nowIso } from '../format'
 import type { DB, Settings, User } from '../types'
 import { asRemote, bridge, type Op } from './bridge'
 import { OpQueue, applyOp } from './queue'
-import { SyncError, authFetch, clearSession, endReason, logout as logoutApi, serverBase, setSignedOutHandler, useSession, type EndReason } from './session'
+import { SyncError, clearSession, logout as logoutApi, noticeFor, rpc, serverBase, setSignedOutHandler, useSession, type EndReason } from './session'
+import { sb } from './supabase'
 
 export type NetState = 'idle' | 'connecting' | 'online' | 'offline' | 'error'
 
@@ -17,7 +20,7 @@ interface SyncUI {
   ready: boolean // במאגר יש את נתוני הארגון של המשתמש המחובר
   error?: string
   lastSyncAt?: string
-  transport?: 'sse' | 'poll'
+  transport?: 'realtime' | 'poll'
   droppedOps?: number
 }
 
@@ -63,16 +66,14 @@ const clientId = (() => {
 
 let running = false
 let gen = 0
-let streamAbort: AbortController | null = null
+let channel: RealtimeChannel | null = null
 let flushing = false
 let flushTimer: ReturnType<typeof setTimeout> | undefined
-let reconnectTimer: ReturnType<typeof setTimeout> | undefined
-let watchdog: ReturnType<typeof setInterval> | undefined
-let keepAlive: ReturnType<typeof setInterval> | undefined
+let pollTimer: ReturnType<typeof setInterval> | undefined
+let retryTimer: ReturnType<typeof setTimeout> | undefined
 let backoff = 1000
-let sseFailures = 0
-let lastData = 0
-let transport: 'sse' | 'poll' = 'sse'
+let lastPull = 0
+const POLL_MS = 30_000
 const afterApply: (() => void)[] = []
 
 /** קריאה אחרי כל עדכון מהשרת (המתאם של אישורים מהאזור האישי, למשל) */
@@ -90,7 +91,6 @@ const markOnline = () => {
   backoff = 1000
   useSync.setState({ net: 'online', lastSyncAt: nowIso(), error: undefined })
 }
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const offlineNow = () => navigator.onLine === false
 
 function setOffset(serverTime: number | undefined, t0: number) {
@@ -163,7 +163,7 @@ function applyChanges(changes: Change[], seq: number, force = false) {
 
 async function pullSnapshot() {
   const t0 = Date.now()
-  const snap = await authFetch<Snapshot>('/api/db/snapshot')
+  const snap = await rpc<Snapshot>('db_snapshot')
   setOffset(snap.serverTime, t0)
   const s = useApp.getState()
   const db = emptyDB() as unknown as Record<string, unknown>
@@ -195,7 +195,7 @@ async function refetch(ops: Op[]) {
   const items = ops.filter((op) => !seen.has(keyOf(op.collection, op.id)) && seen.add(keyOf(op.collection, op.id))).map((op) => ({ c: op.collection, id: op.id }))
   if (!items.length) return
   try {
-    const r = await authFetch<{ seq: number; items: Change[] }>('/api/db/fetch', { method: 'POST', json: { items } })
+    const r = await rpc<{ seq: number; items: Change[] }>('db_fetch', { items })
     applyChanges(r.items, useApp.getState().syncSeq, true)
   } catch {
     /* יתוקן בסנכרון הבא */
@@ -219,7 +219,7 @@ async function flush() {
   const t0 = Date.now()
   let retry = false
   try {
-    const r = await authFetch<{ seq: number; results: OpResult[]; serverTime: number }>('/api/db/ops', { method: 'POST', json: { ops: batch, clientId } })
+    const r = await rpc<{ seq: number; results: OpResult[]; serverTime: number }>('db_ops', { ops: batch, client_id: clientId })
     setOffset(r.serverTime, t0)
     const again: Op[] = []
     const fix: Op[] = []
@@ -247,7 +247,7 @@ async function flush() {
     const err = e as SyncError
     // 429 (יותר מדי בקשות) הוא זמני: הפעולות נשארות בתור ונשלחות שוב אחרי המתנה
     if (err.status === 400 || err.status === 413) {
-      // בקשה שהשרת לא יקבל לעולם: לא חוסמים את התור בגללה
+      // בקשה שהמסד לא יקבל לעולם (22023): לא חוסמים את התור בגללה
       queue.ack(batch)
       await refetch(batch)
       useSync.setState({ error: err.message })
@@ -272,102 +272,70 @@ async function flush() {
 
 // ---------------------------------------------------------------- האזנה לשינויים
 
-function closeStream() {
-  streamAbort?.abort()
-  streamAbort = null
-}
+let pullBusy = false
+let pullAgain = false
 
-function reconnectLater() {
+/** מושך את השינויים מאז ה-seq האחרון (אחרי עדכון בזמן אמת, בסקר, בחזרה ללשונית או לרשת) */
+async function pull(): Promise<void> {
   if (!running) return
-  clearTimeout(reconnectTimer)
-  reconnectTimer = setTimeout(() => connect(), backoff)
-  backoff = Math.min(backoff * 2, 30_000)
-}
-
-function parseBlock(block: string) {
-  const ev = { event: 'message', data: '' }
-  for (const line of block.split('\n')) {
-    if (line.startsWith('event:')) ev.event = line.slice(6).trim()
-    else if (line.startsWith('data:')) ev.data += line.slice(5).trim()
+  if (pullBusy) {
+    pullAgain = true
+    return
   }
-  return ev
-}
-
-async function connect() {
-  if (!running) return
-  clearTimeout(reconnectTimer)
-  closeStream()
-  if (transport === 'poll') return void pollLoop()
-  const ctrl = new AbortController()
-  streamAbort = ctrl
-  let hello = false
-  const helloTimer = setTimeout(() => !hello && ctrl.abort(), 10_000)
+  pullBusy = true
+  const mine = gen
   try {
-    const res = await fetch(`${serverBase()}/api/db/events?since=${useApp.getState().syncSeq}`, {
-      headers: { authorization: `Bearer ${useSession.getState().token}`, accept: 'text/event-stream' },
-      signal: ctrl.signal,
-      cache: 'no-store',
-    })
-    if (res.status === 401) {
-      const body = (await res.json().catch(() => null)) as { error?: { code?: string; message?: string; reason?: string; details?: { reason?: string } } } | null
-      return signedOut(endReason(body?.error && { ...body.error, reason: body.error.reason ?? body.error.details?.reason }))
-    }
-    if (!res.ok || !res.body) throw new Error(String(res.status))
-    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
-    let buf = ''
-    for (;;) {
-      const { value, done } = await reader.read()
-      if (done) break
-      lastData = Date.now()
-      buf += value
-      let i
-      while ((i = buf.indexOf('\n\n')) >= 0) {
-        const ev = parseBlock(buf.slice(0, i))
-        buf = buf.slice(i + 2)
-        if (!ev.data) continue
-        const data = JSON.parse(ev.data)
-        if (ev.event === 'hello') {
-          hello = true
-          sseFailures = 0
-          useSync.setState({ transport: 'sse' })
-          markOnline()
-          scheduleFlush(0)
-        } else if (ev.event === 'changes') applyChanges(data.changes, data.seq)
-        else if (ev.event === 'reset') await pullSnapshot().catch(() => {})
-        else if (ev.event === 'signout') return signedOut(data?.reason === 'expired' ? 'expired' : data?.reason === 'missing' ? 'missing' : 'revoked')
-      }
-    }
-  } catch {
-    /* נפל החיבור; מתחברים שוב */
-  } finally {
-    clearTimeout(helloTimer)
-  }
-  if (!running || streamAbort !== ctrl) return
-  if (!hello && ++sseFailures >= 2) transport = 'poll' // פרוקסי שלא מעביר SSE: עוברים ל-long-poll
-  setNet(offlineNow() ? 'offline' : 'connecting')
-  reconnectLater()
-}
-
-async function pollLoop() {
-  const mine = ++gen
-  useSync.setState({ transport: 'poll' })
-  while (running && gen === mine) {
-    const ctrl = new AbortController()
-    streamAbort = ctrl
-    try {
-      const r = await authFetch<ChangesRes>(`/api/db/changes?since=${useApp.getState().syncSeq}&wait=25`, { signal: ctrl.signal })
+    do {
+      pullAgain = false
+      const r = await rpc<ChangesRes>('db_changes', { since: useApp.getState().syncSeq })
+      if (!running || gen !== mine) return
       if (r.reset) await pullSnapshot()
       else applyChanges(r.changes, r.seq)
+      lastPull = Date.now()
       if (useSync.getState().net !== 'online') {
         markOnline()
         scheduleFlush(0)
       }
-    } catch (e) {
-      if (!running || gen !== mine || (e as SyncError).status === 401) return
-      setNet('offline')
-      await sleep((backoff = Math.min(backoff * 2, 30_000)))
-    }
+    } while (pullAgain && running && gen === mine)
+  } catch (e) {
+    const err = e as SyncError
+    if (!running || gen !== mine || err.status === 401) return
+    setNet(offlineNow() || !err.status ? 'offline' : 'error', err.status ? { error: err.message } : {})
+  } finally {
+    pullBusy = false
   }
+}
+
+function closeChannel() {
+  const ch = channel
+  channel = null
+  if (ch) void sb().removeChannel(ch).catch(() => {})
+}
+
+/** Realtime: כל כתיבה במסד מקדמת את seq בשורה האחת של public.sync_feed, ואז מושכים את השינויים */
+async function subscribe() {
+  if (!running) return
+  closeChannel()
+  const client = sb()
+  // הערוץ מצטרף עם הטוקן של המשתמש (sync_feed קריא רק למחוברים)
+  await client.realtime.setAuth().catch(() => {})
+  if (!running) return
+  const ch = client.channel(`genair-sync-${clientId}`)
+  channel = ch
+  ch.on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sync_feed' }, (payload) => {
+    const seq = Number((payload.new as { seq?: number } | undefined)?.seq ?? 0)
+    if (seq > useApp.getState().syncSeq) void pull()
+  }).subscribe((status) => {
+    if (channel !== ch) return
+    if (status === 'SUBSCRIBED') {
+      // גם אחרי התחברות מחדש: מה שקרה בזמן הניתוק
+      useSync.setState({ transport: 'realtime' })
+      void pull()
+    } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+      // supabase-js מתחבר שוב לבד; עד אז הסקר כל 30 שניות
+      useSync.setState({ transport: 'poll' })
+    }
+  })
 }
 
 // ---------------------------------------------------------------- מספרים שמורים (nextNumber)
@@ -396,7 +364,7 @@ async function topUp(key: string, count = 10) {
   if (topping.has(key) || !running) return
   topping.add(key)
   try {
-    const r = await authFetch<{ from: number; to: number }>('/api/db/counters/reserve', { method: 'POST', json: { key, count } })
+    const r = await rpc<{ key: string; from: number; to: number }>('db_reserve', { p_key: key, p_count: count })
     ;(blocks[key] ??= []).push([r.from, r.to])
     saveBlocks()
   } catch {
@@ -430,7 +398,11 @@ function prefetchNumbers() {
 
 function onOnline() {
   backoff = 1000
-  void connect()
+  if (useSync.getState().ready) void pull()
+  else {
+    clearTimeout(retryTimer)
+    void initialPull()
+  }
   scheduleFlush(0)
 }
 function onOffline() {
@@ -438,7 +410,8 @@ function onOffline() {
 }
 function onVisible() {
   if (document.visibilityState !== 'visible' || !running) return
-  if (transport === 'sse' && Date.now() - lastData > 45_000) void connect()
+  // הדפדפן מקפיא לשוניות ברקע: בחזרה מושכים מה שהצטבר
+  if (useSync.getState().ready && Date.now() - lastPull > 5_000) void pull()
   scheduleFlush(0)
 }
 function onHide() {
@@ -453,9 +426,11 @@ function onHide() {
 function signedOut(reason: EndReason = 'revoked') {
   stopSync()
   clearSession()
-  useSession.setState({ notice: reason === 'expired' ? 'פג תוקף ההתחברות. נכנסים שוב, ומה שנשמר במכשיר יישלח.' : 'החיבור בוטל בשרת (למשל סיסמה הוחלפה או שהמשתמש הושבת). הנתונים נמחקו מהמכשיר הזה.' })
+  useSession.setState({ notice: noticeFor(reason) })
   if (reason !== 'expired') void wipeLocal()
 }
+// גם כשהמנוע לא רץ (במסך הכניסה, למשל): סוף החיבור עובר כאן
+setSignedOutHandler((reason) => signedOut(reason))
 
 /** מוחק מהמכשיר את העותק המקומי של נתוני הארגון, את התור ואת המספרים השמורים */
 async function wipeLocal() {
@@ -476,9 +451,6 @@ export async function startSync(): Promise<void> {
   const { token, userId } = useSession.getState()
   if (!token || !userId) return
   running = true
-  transport = 'sse'
-  sseFailures = 0
-  setSignedOutHandler((reason) => signedOut(reason))
   queue.onChange = () => {
     useSync.setState({ pending: queue.size })
     scheduleFlush()
@@ -498,11 +470,10 @@ export async function startSync(): Promise<void> {
   window.addEventListener('offline', onOffline)
   document.addEventListener('visibilitychange', onVisible)
   window.addEventListener('pagehide', onHide)
-  watchdog = setInterval(() => {
-    if (running && transport === 'sse' && streamAbort && Date.now() - lastData > 50_000) void connect()
-  }, 15_000)
-  // מחדש את הטוקן גם כשלא עושים כלום (פג אחרי 12 שעות בלי שימוש)
-  keepAlive = setInterval(() => void authFetch('/api/auth/me').catch(() => {}), 20 * 60_000)
+  // גיבוי ל-Realtime: סקר קצר כל 30 שניות (הטוקן מתחדש לבד ב-supabase-js)
+  pollTimer = setInterval(() => {
+    if (running && useSync.getState().ready && !offlineNow() && Date.now() - lastPull >= POLL_MS) void pull()
+  }, 5_000)
   await initialPull()
 }
 
@@ -510,32 +481,33 @@ async function initialPull() {
   const s = useApp.getState()
   try {
     if (s.syncSeq > 0 && s.db.users.length) {
-      const r = await authFetch<ChangesRes>(`/api/db/changes?since=${s.syncSeq}&wait=0`)
+      const r = await rpc<ChangesRes>('db_changes', { since: s.syncSeq })
       if (r.reset) await pullSnapshot()
       else applyChanges(r.changes, r.seq)
     } else await pullSnapshot()
+    lastPull = Date.now()
     useSync.setState({ ready: true })
     markOnline()
     prefetchNumbers()
     scheduleFlush(0)
-    void connect()
+    void subscribe()
   } catch (e) {
     const err = e as SyncError
     if (!running || err.status === 401) return
     setNet(err.status ? 'error' : 'offline', { error: err.message })
     // בלי קליטה עובדים מהעותק השמור, ומנסים שוב ברקע
-    setTimeout(() => running && void initialPull(), Math.min((backoff = Math.min(backoff * 2, 30_000)), 30_000))
+    clearTimeout(retryTimer)
+    retryTimer = setTimeout(() => running && void initialPull(), Math.min((backoff = Math.min(backoff * 2, 30_000)), 30_000))
   }
 }
 
 export function stopSync() {
   running = false
   gen++
-  closeStream()
+  closeChannel()
   clearTimeout(flushTimer)
-  clearTimeout(reconnectTimer)
-  clearInterval(watchdog)
-  clearInterval(keepAlive)
+  clearTimeout(retryTimer)
+  clearInterval(pollTimer)
   bridge.listener = null
   bridge.takeNumber = null
   bridge.resync = null
@@ -553,14 +525,15 @@ export async function syncNow() {
   backoff = 1000
   await flush()
   try {
-    const r = await authFetch<ChangesRes>(`/api/db/changes?since=${useApp.getState().syncSeq}&wait=0`)
+    const r = await rpc<ChangesRes>('db_changes', { since: useApp.getState().syncSeq })
     if (r.reset) await pullSnapshot()
     else applyChanges(r.changes, r.seq)
+    lastPull = Date.now()
     markOnline()
   } catch (e) {
-    setNet('offline', { error: (e as Error).message })
+    if ((e as SyncError).status !== 401) setNet('offline', { error: (e as Error).message })
   }
-  if (transport === 'sse' && Date.now() - lastData > 30_000) void connect()
+  if (!channel) void subscribe()
 }
 
 export const pendingCount = () => queue.size

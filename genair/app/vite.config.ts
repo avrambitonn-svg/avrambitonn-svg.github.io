@@ -3,14 +3,15 @@ import react from '@vitejs/plugin-react'
 
 // מדיניות אבטחת תוכן (CSP) לבנייה הרגילה בלבד: סקריפטים רק מהאתר עצמו, בלי סקריפט מוטמע.
 // לא בפיתוח (Vite מזריק סקריפטים), ולא בקובץ האחד (dist-single), שבו כל ה-JS מוטמע בדף.
-// frame-src: המפה בתיק ובשטח (Google Maps) ותצוגת PDF מקובץ מקומי (blob). connect-src כולל data:/blob: לקריאת קבצים שמורים.
-const CSP = [
+// frame-src: המפה בתיק ובשטח (Google Maps) ותצוגת PDF מקובץ מקומי (blob). connect-src כולל data:/blob: לקריאת קבצים שמורים,
+// ובבנייה מול Supabase גם את הפרויקט (https ל-REST/Auth/Edge, wss ל-Realtime), לפי VITE_SUPABASE_URL.
+const csp = (supabaseUrl: string) => [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
-  "connect-src 'self' https: http://localhost:* ws://localhost:* data: blob:",
+  `connect-src 'self' https: http://localhost:* ws://localhost:* data: blob:${supabaseUrl ? ` ${supabaseUrl} ${supabaseUrl.replace(/^https:/, 'wss:')}` : ''}`,
   "media-src 'self' blob: data:",
   "frame-src 'self' blob: https://maps.google.com https://www.google.com",
   "worker-src 'self'",
@@ -20,10 +21,15 @@ const CSP = [
 ].join('; ')
 
 function cspMeta(): Plugin {
+  let supabaseUrl = ''
   return {
     name: 'csp-meta',
     apply: (config, { command }) => command === 'build' && config.build?.outDir !== 'dist-single',
-    transformIndexHtml: () => [{ tag: 'meta', attrs: { 'http-equiv': 'Content-Security-Policy', content: CSP }, injectTo: 'head-prepend' }],
+    // המשתנים של המצב (.env.production / .env.demo) נטענים רק אחרי שהתצורה נפתרה
+    configResolved: (config) => {
+      supabaseUrl = String(config.env.VITE_SUPABASE_URL ?? '').trim().replace(/\/$/, '')
+    },
+    transformIndexHtml: () => [{ tag: 'meta', attrs: { 'http-equiv': 'Content-Security-Policy', content: csp(supabaseUrl) }, injectTo: 'head-prepend' }],
   }
 }
 

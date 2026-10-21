@@ -6,12 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:demo": "tsc -b && vite build --mode demo",
     "preview": "vite preview",
     "typecheck": "tsc -b",
-    "build:single": "tsc -b && vite build --config vite.single.config.ts"
+    "build:single": "tsc -b && vite build --config vite.single.config.ts",
+    "build:single:demo": "tsc -b && vite build --config vite.single.config.ts --mode demo"
   },
   "dependencies": {
     "@fontsource/assistant": "5.2.8",
+    "@supabase/supabase-js": "2.117.3",
     "idb-keyval": "6.3.0",
     "lucide-react": "1.46.0",
     "qrcode": "1.5.4",

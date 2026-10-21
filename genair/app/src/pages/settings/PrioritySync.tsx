@@ -218,7 +218,7 @@ function EngineCard({ state, active }: { state?: IntegrationState; active: boole
           <span className="small">
             {bridge.mode !== 'server'
               ? 'הסנכרון האוטומטי רץ בשרת, על המסד המשותף. במצב הדגמה (הנתונים בדפדפן) שולחים מכאן ידנית.'
-              : 'המנוע לא פועל בשרת. כדי להפעיל: PRIORITY_SYNC=on, PRIORITY_MODE=live עם פרטי ההתחברות, ו-PRIORITY_ALLOW_WRITE=true כדי לכתוב ל-Priority.'}
+              : 'המנוע לא פועל בשרת. כדי להפעיל, בסודות של פונקציית ה-Edge ב-Supabase: PRIORITY_SYNC=on, PRIORITY_MODE=live עם פרטי ההתחברות, ו-PRIORITY_ALLOW_WRITE=true כדי לכתוב ל-Priority.'}
             {' '}כשהוא פועל, כל שינוי במערכת נשלח ל-Priority תוך שניות, והזמנות, חשבוניות, קבלות, מחירים, יתרות ומלאי חוזרים מ-Priority לבד.
           </span>
         </div>

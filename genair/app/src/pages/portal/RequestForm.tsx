@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import { brand } from '../../brand'
 import { app } from '../../lib/store'
-import { publicServerUrl } from '../../lib/sync/bridge'
+import { publicHeaders, publicServerUrl } from '../../lib/sync/bridge'
 import { createCase, createCustomer, touchCase } from '../../lib/actions'
 import { projectTypeLabel, sourceLabel } from '../../lib/labels'
 import { nowIso, uid } from '../../lib/format'
@@ -112,7 +112,7 @@ export default function RequestForm() {
       try {
         const res = await fetch(`${server}/api/public/leads`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: { ...publicHeaders(), 'content-type': 'application/json' },
           body: JSON.stringify({ name: name.trim(), phone, city: city.trim(), type, text: text.trim(), photos, source, website: trap }),
         })
         const body = (await res.json().catch(() => ({}))) as { number?: string; portalToken?: string; error?: { message?: string } }

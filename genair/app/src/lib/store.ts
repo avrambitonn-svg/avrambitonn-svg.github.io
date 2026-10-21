@@ -163,7 +163,8 @@ export const useApp = create<AppState>()(
 
       return {
         db: serverMode ? emptyDB() : seedDB(),
-        settings: defaultSettings,
+        // במסד המשותף שרת האינטגרציות הוא פונקציית ה-Edge של Supabase, קבוע בבנייה
+        settings: serverMode ? { ...defaultSettings, serverUrl: readSyncConfig().serverUrl } : defaultSettings,
         currentUserId: serverMode ? readSyncConfig().userId ?? '' : 'u-admin',
         hydrated: false,
         syncSeq: 0,
@@ -230,6 +231,7 @@ export const useApp = create<AppState>()(
           if (p.anthropicKey !== undefined) writeAiKey(p.anthropicKey)
           // במסד המשותף ההתחברות מספיקה: אסימון הגישה לא נשמר ולא נשלח
           if (serverMode && p.appToken !== undefined) p = { ...p, appToken: '' }
+          if (serverMode && p.serverUrl !== undefined) p = { ...p, serverUrl: readSyncConfig().serverUrl }
           tracked(() => set((s) => ({ settings: { ...s.settings, ...p } })))
           bridge.emit([entityOp('settings', { id: 'org', ...orgSettings(prev) }, { id: 'org', ...orgSettings(get().settings) })])
         },
@@ -273,8 +275,8 @@ export const useApp = create<AppState>()(
         settings.anthropicKey = readAiKey()
         if (sc.anthropicKey !== undefined || sc.appToken !== undefined) writeSyncConfig({ anthropicKey: undefined, appToken: undefined })
         if (serverMode) {
-          // כתובת השרת נשמרת בהגדרות החיבור, כדי שתעבור גם בין שני העותקים. אסימון גישה לא צריך: ההתחברות מספיקה
-          settings.serverUrl = sc.serverUrl || settings.serverUrl
+          // כתובת השרת = פונקציית ה-Edge של Supabase (נקבעת בבנייה). אסימון גישה לא צריך: ההתחברות מספיקה
+          settings.serverUrl = sc.serverUrl
           settings.appToken = ''
           return { ...current, ...p, db, settings, currentUserId: sc.userId ?? p.currentUserId ?? current.currentUserId }
         }

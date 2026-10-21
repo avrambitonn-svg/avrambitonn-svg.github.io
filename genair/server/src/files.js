@@ -126,6 +126,12 @@ export async function readFileMeta(cfg, id) {
   }
 }
 
+/** The bytes of a stored file (a copy to Drive). */
+export async function readStoredFile(cfg, id) {
+  if (!FILE_ID_RE.test(String(id ?? ''))) return null;
+  return readFile(join(filesDir(cfg), id));
+}
+
 /** Streams a stored file with safe headers (no inline HTML/SVG, sandboxed). Returns null (response handled). */
 export async function sendStoredFile(res, cfg, id, { download = false } = {}) {
   const meta = await readFileMeta(cfg, id);

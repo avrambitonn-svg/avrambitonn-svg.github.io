@@ -5,10 +5,8 @@ import { randomBytes } from 'node:crypto';
 import { HttpError, clientIp, readJson } from './http.js';
 import { createWindowLimiter } from './limiter.js';
 import { requireStore } from './db/index.js';
-import { filesDir, sendStoredFile, storeBuffer, storeUpload } from './files.js';
+import { readStoredFile, sendStoredFile, storeBuffer, storeUpload } from './files.js';
 import { googleFeatures, jerusalemDate, uploadBufferToDrive } from './google.js';
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 
 const TOKEN_RE = /^[A-Za-z0-9]{12,64}$/;
 const uid = (prefix) => `${prefix}${randomBytes(6).toString('hex')}`;
@@ -287,7 +285,7 @@ export async function serviceRequest(ctx) {
   const unit = body.unitId ? store.get('units', String(body.unitId)) : undefined;
   if (body.unitId && (!unit || unit.customerId !== k.customerId)) throw new HttpError(400, 'validation_error', 'המזגן לא נמצא', { fields: [{ field: 'unitId' }] });
   const contract = store.list('contracts').find((c) => c.customerId === k.customerId && c.status !== 'cancelled' && c.status !== 'expired' && (!unit || (c.unitIds ?? []).includes(unit.id)));
-  const { from } = store.reserve('service', 1);
+  const { from } = await store.reserve('service', 1);
   const code = symptom === 'error_code' && typeof body.errorCode === 'string' && body.errorCode.trim() ? body.errorCode.trim().slice(0, 20).toUpperCase() : undefined;
   const sc = {
     id: uid('sc'),
@@ -328,7 +326,7 @@ export async function uploadFromPortal(ctx) {
   const driveFolder = k.driveFolders?.customer;
   if (driveFolder && googleFeatures(ctx.cfg).drive) {
     try {
-      const d = await uploadBufferToDrive(ctx.cfg, { name: meta.name, mime: meta.mime, data: await readFile(join(filesDir(ctx.cfg), meta.id)), folderId: driveFolder });
+      const d = await uploadBufferToDrive(ctx.cfg, { name: meta.name, mime: meta.mime, data: await readStoredFile(ctx.cfg, meta.id), folderId: driveFolder });
       doc.driveFileId = d.id;
       doc.webViewLink = d.webViewLink;
     } catch {
@@ -423,7 +421,7 @@ export async function createLead(ctx) {
   };
   const contact = { id: uid('ct'), customerId: customer.id, name, phone, primary: true };
   const numbering = store.get('config', 'org')?.caseNumbering ?? {};
-  const { from } = store.reserve('case', 1);
+  const { from } = await store.reserve('case', 1);
   const yy = today().slice(2, 4);
   const number = `${numbering.prefix ?? 'GN-'}${yy}${String(from).padStart(Number(numbering.pad) || 4, '0')}`;
   const title = `${TITLES[type] ?? 'פנייה כללית'} — ${name}${city ? `, ${city}` : ''}`;

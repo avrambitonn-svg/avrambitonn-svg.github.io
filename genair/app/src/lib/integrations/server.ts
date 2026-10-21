@@ -1,8 +1,8 @@
-// לקוח לשרת האינטגרציות (genair/server). בלי כתובת שרת המערכת עובדת במצב הדגמה.
-// במצב משותף נשלח גם הטוקן של המשתמש המחובר, כך שהשרת יודע מי מבקש (ו-APP_TOKEN לא חובה).
+// לקוח לאינטגרציות. במסד המשותף: פונקציית ה-Edge של Supabase (`${functionsBase}/api/...`) עם הטוקן של המשתמש.
+// בהדגמה: שרת אינטגרציות אופציונלי (genair/server) לפי כתובת והאסימון APP_TOKEN; בלי כתובת — מצב הדגמה.
 import { app } from '../store'
-import { readSyncConfig, writeSyncConfig } from '../sync/bridge'
-import { useSession } from '../sync/session'
+import { authFetch, type SyncError } from '../sync/session'
+import { serverMode } from '../sync/supabase'
 
 export class ServerError extends Error {
   status: number
@@ -15,22 +15,23 @@ export class ServerError extends Error {
 }
 
 export function serverConfigured() {
-  return Boolean(app().settings.serverUrl.trim())
-}
-
-function authHeaders(): Record<string, string> {
-  const sc = readSyncConfig()
-  const token = useSession.getState().token
-  return sc.mode === 'server' && token ? { authorization: `Bearer ${token}` } : {}
+  return serverMode || Boolean(app().settings.serverUrl.trim())
 }
 
 export async function api<T>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
+  if (serverMode) {
+    try {
+      return await authFetch<T>(path, init)
+    } catch (e) {
+      const err = e as SyncError
+      throw new ServerError(err.message, err.status ?? 0, err.code)
+    }
+  }
   const { serverUrl, appToken } = app().settings
   if (!serverUrl.trim()) throw new ServerError('לא הוגדר שרת אינטגרציות (הגדרות ← חיבורים)', 0, 'no_server')
-  const headers: Record<string, string> = { ...authHeaders(), ...(init.headers as Record<string, string>) }
+  const headers: Record<string, string> = { ...(init.headers as Record<string, string>) }
   if (init.json !== undefined) headers['content-type'] = 'application/json'
-  // במסד המשותף מספיק טוקן ההתחברות; אסימון הגישה (APP_TOKEN) רק בלי מסד משותף
-  if (appToken && readSyncConfig().mode !== 'server') headers['x-app-token'] = appToken
+  if (appToken) headers['x-app-token'] = appToken
   let res: Response
   try {
     res = await fetch(serverUrl.replace(/\/$/, '') + path, {
@@ -40,11 +41,6 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
     })
   } catch {
     throw new ServerError('אין חיבור לשרת האינטגרציות', 0, 'network')
-  }
-  const fresh = res.headers.get('x-auth-token')
-  if (fresh && headers.authorization) {
-    writeSyncConfig({ token: fresh })
-    useSession.setState({ token: fresh })
   }
   const text = await res.text()
   let body: unknown = null
@@ -65,7 +61,7 @@ export interface Health {
   ok: boolean
   version?: string
   features?: { priority: 'off' | 'demo' | 'live'; priorityWrite: boolean; ai: boolean; whatsapp: boolean; google: { calendar: boolean; drive: boolean } }
-  db?: { mode: 'file' | 'memory' | 'off'; ready?: boolean; bootstrapped?: boolean; bootstrapToken?: boolean }
+  db?: { mode: 'supabase' | 'file' | 'memory' | 'off'; ready?: boolean; bootstrapped?: boolean; bootstrapToken?: boolean }
 }
 
 export const health = () => api<Health>('/api/health')

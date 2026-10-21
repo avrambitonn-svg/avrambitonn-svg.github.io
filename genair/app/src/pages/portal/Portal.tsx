@@ -18,7 +18,7 @@ import type { Address, Appointment, CatalogItem, Case, Doc, InstalledUnit, Messa
 import { Wordmark } from '../../components/Layout'
 import { Callout, Field, Modal, SignaturePad, toast } from '../../components/ui'
 import { appUrl, caseContact, customerQuote, firstName, viaMethod, greetName, groupByRoom, isQuoteExpired } from '../../features/quotes/util'
-import { publicServerUrl } from '../../lib/sync/bridge'
+import { publicHeaders, publicServerUrl } from '../../lib/sync/bridge'
 import { docBlob, saveLocalBlob, sizeLabel } from '../../lib/files'
 import './portal.css'
 
@@ -263,7 +263,7 @@ interface RemoteData {
 async function call<T>(server: string, path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
   let res: Response
   try {
-    res = await fetch(server + path, { ...init, headers: { ...(init.json !== undefined ? { 'content-type': 'application/json' } : {}), ...(init.headers as Record<string, string>) }, body: init.json !== undefined ? JSON.stringify(init.json) : init.body })
+    res = await fetch(server + path, { ...init, headers: { ...publicHeaders(), ...(init.json !== undefined ? { 'content-type': 'application/json' } : {}), ...(init.headers as Record<string, string>) }, body: init.json !== undefined ? JSON.stringify(init.json) : init.body })
   } catch {
     throw Object.assign(new Error('אין חיבור. בדקו את האינטרנט ונסו שוב.'), { status: 0 })
   }

@@ -1,15 +1,17 @@
 // הגשר בין מאגר הנתונים (store.ts) למנוע הסנכרון. בלי תלות ב-store, כדי שלא תהיה תלות מעגלית.
-// כאן נשמרים גם מצב העבודה (הדגמה מקומית / מסד נתונים משותף), כתובת השרת והחיבור של המשתמש.
+// כאן נשמרים גם מצב העבודה (הדגמה מקומית / מסד נתונים משותף, לפי הבנייה) והמשתמש המחובר.
+import { SUPABASE_KEY, functionsBase, serverMode } from './supabase'
 
 export type SyncMode = 'local' | 'server'
 
 export interface SyncConfig {
   mode: SyncMode
   serverUrl: string
+  userId?: string // המשתמש (users) של ההתחברות השמורה
+  mustChange?: boolean // נכנס עם סיסמה זמנית ועוד לא בחר סיסמה משלו
+  // נשמרו כאן בגרסאות קודמות (השרת הקודם); נמחקים בטעינה
   token?: string
-  userId?: string
   expiresAt?: string
-  // נשמרו כאן בגרסאות קודמות; נמחקים בטעינה (store.ts)
   appToken?: string
   anthropicKey?: string
 }
@@ -25,9 +27,11 @@ export interface Op {
 }
 
 const KEY = 'genair-sync-v1'
-// בבנייה לייצור: VITE_SERVER_URL קובע שרת ברירת מחדל, והמערכת נפתחת במצב משותף עם התחברות
-export const ENV_SERVER = String(import.meta.env.VITE_SERVER_URL ?? '').trim().replace(/\/$/, '')
 
+/**
+ * הגדרות החיבור של המכשיר. המצב נקבע בבנייה: עם VITE_SUPABASE_URL המערכת תמיד במסד המשותף,
+ * ובלעדיו תמיד הדגמה בדפדפן. serverUrl במצב משותף = בסיס פונקציית ה-Edge של Supabase.
+ */
 export function readSyncConfig(): SyncConfig {
   let c: Partial<SyncConfig> = {}
   try {
@@ -35,8 +39,8 @@ export function readSyncConfig(): SyncConfig {
   } catch {
     c = {}
   }
-  const mode: SyncMode = c.mode ?? (ENV_SERVER ? 'server' : 'local')
-  return { ...c, mode, serverUrl: (c.serverUrl || ENV_SERVER || '').replace(/\/$/, '') }
+  const mode: SyncMode = serverMode ? 'server' : 'local'
+  return { ...c, mode, serverUrl: serverMode ? functionsBase : '' }
 }
 
 export function writeSyncConfig(p: Partial<SyncConfig>): SyncConfig {
@@ -53,16 +57,17 @@ export function writeSyncConfig(p: Partial<SyncConfig>): SyncConfig {
 const isLocalhost = (u: string) => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(u)
 
 /**
- * השרת שמשמש את הדפים הציבוריים (אזור אישי, טופס פנייה). ?server= בקישור מתקבל רק אם הוא השרת שהוגדר בבנייה,
- * השרת שכבר מוגדר בדפדפן הזה, או שרת מקומי לפיתוח — כדי שאי אפשר יהיה להפנות לקוח לשרת זר דרך הדומיין שלנו.
+ * השרת שמשמש את הדפים הציבוריים (אזור אישי, טופס פנייה): בבנייה מול Supabase — פונקציית ה-Edge (?server= לא משנה).
+ * בהדגמה: ריק (הדפים עובדים מהנתונים שבדפדפן), או שרת מקומי לפיתוח דרך ?server=.
  */
 export function publicServerUrl(param?: string | null): string {
-  const c = readSyncConfig()
-  const known = [ENV_SERVER, c.mode === 'server' ? c.serverUrl : ''].filter(Boolean)
+  if (serverMode) return functionsBase
   const q = (param ?? '').trim().replace(/\/$/, '')
-  if (q && (known.includes(q) || isLocalhost(q))) return q
-  return known[0] ?? ''
+  return q && isLocalhost(q) ? q : ''
 }
+
+/** כותרות לקריאה ציבורית לפונקציית ה-Edge (בלי התחברות) */
+export const publicHeaders = (): Record<string, string> => (serverMode ? { apikey: SUPABASE_KEY } : {})
 
 type Listener = (ops: Op[]) => void
 

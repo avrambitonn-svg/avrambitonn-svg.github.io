@@ -301,7 +301,7 @@ export function strongPortal(portal) {
   return p;
 }
 
-function validSnapshot(snap) {
+export function validSnapshot(snap) {
   const bad = (message) => new HttpError(400, 'validation_error', message);
   if (!snap || typeof snap !== 'object' || Array.isArray(snap)) throw bad('חסר snapshot');
   const collections = {};

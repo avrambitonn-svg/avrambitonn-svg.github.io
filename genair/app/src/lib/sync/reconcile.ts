@@ -10,7 +10,7 @@ import { pushCustomer, pushOrder, serverSync } from '../integrations/priority'
 import { createDriveFolder } from '../integrations/google'
 import { onCaseCreated, onStageChanged } from '../../features/flow/engine'
 import { bridge } from './bridge'
-import { authFetch } from './session'
+import { rpc } from './session'
 import { onRemoteApplied } from './engine'
 
 const tried = new Set<string>()
@@ -19,9 +19,9 @@ let started = false
 
 async function claim(collection: 'quotes' | 'cases', id: string, field: 'portalFollowupsAt' | 'leadFollowupsAt' | 'commissionFollowupsAt'): Promise<boolean> {
   const at = nowIso()
-  const r = await authFetch<{ results: { status: string }[] }>('/api/db/ops', {
-    method: 'POST',
-    json: { ops: [{ op: 'patch', collection, id, data: { [field]: at, followupsBy: app().currentUserId }, at: bridge.clock(), ifUnset: field }] },
+  const r = await rpc<{ results: { status: string }[] }>('db_ops', {
+    ops: [{ op: 'patch', collection, id, data: { [field]: at, followupsBy: app().currentUserId }, at: bridge.clock(), ifUnset: field }],
+    client_id: null,
   })
   return r.results[0]?.status === 'ok'
 }

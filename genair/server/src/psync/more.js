@@ -39,7 +39,7 @@ export async function pushAgent(e, u, now) {
   let code = existing?.AGENTCODE;
   if (!code) {
     const base = cut(String(u.initials || '').toUpperCase().replace(/[^A-Z0-9]/g, '') || 'GN', 6);
-    code = await P.createAgent(e.client, { AGENTCODE: `${base}${String(e.store.reserve('priorityAgent', 1).from).padStart(3, '0')}`.slice(0, 16), AGENTNAME: name, ...(u.email ? { EMAIL: cut(u.email, 68) } : {}), ...(u.phone ? { CELLPHONE: cut(u.phone, 20) } : {}) });
+    code = await P.createAgent(e.client, { AGENTCODE: `${base}${String((await e.store.reserve('priorityAgent', 1)).from).padStart(3, '0')}`.slice(0, 16), AGENTNAME: name, ...(u.email ? { EMAIL: cut(u.email, 68) } : {}), ...(u.phone ? { CELLPHONE: cut(u.phone, 20) } : {}) });
     e.activity(`הסוכן ${u.name} נוסף ב-Priority (${code})`);
   }
   e.patch('users', u.id, { priorityAgent: String(code) });

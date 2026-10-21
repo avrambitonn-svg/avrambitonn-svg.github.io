@@ -355,7 +355,7 @@ export class PrioritySync {
     const prefix = this.cfg.customerPrefix;
     if (!prefix) return P.createCustomer(this.client, payload);
     for (let i = 0; i < 20; i++) {
-      const { from } = this.store.reserve('priorityCustomer', 1);
+      const { from } = await this.store.reserve('priorityCustomer', 1);
       const custname = `${prefix}${String(from).padStart(6, '0')}`;
       if (await P.getCustomer(this.client, custname)) continue;
       return P.createCustomer(this.client, { CUSTNAME: custname, ...payload });

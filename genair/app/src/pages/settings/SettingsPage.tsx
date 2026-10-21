@@ -281,12 +281,20 @@ function IntegrationsTab() {
 
       <SyncSettingsCard />
       <Card title={<div className="row"><Cloud size={17} /><h2>שרת האינטגרציות</h2></div>} actions={<Status on={!!h?.ok} label={h?.ok ? 'מחובר' : s.serverUrl ? 'לא נבדק' : 'לא הוגדר'} />} pad>
-        <p className="small muted">חיבורים שדורשים מפתח (Priority, AI, וואטסאפ עסקי, Google) עוברים דרך שרת קטן שמחזיק את המפתחות בצורה מאובטחת. הקוד שלו נמצא בתיקיית server. בלי שרת, המערכת עובדת במצב הדגמה.</p>
-        <div className="grid g2 mt12">
-          <Field label="כתובת השרת"><input className="input ltr" placeholder={`https://api.${brand.domain}`} value={s.serverUrl} onChange={(e) => set({ serverUrl: e.target.value.trim() })} /></Field>
-          {/* במסד המשותף ההתחברות של המשתמש מספיקה, ואסימון הגישה לא נשמר ולא נשלח */}
-          {bridge.mode !== 'server' && <Field label="אסימון גישה (APP_TOKEN)" hint="רק לשרת בלי מסד משותף. נשמר בדפדפן הזה"><input className="input ltr" type="password" value={s.appToken} onChange={(e) => set({ appToken: e.target.value })} /></Field>}
-        </div>
+        {bridge.mode === 'server' ? (
+          <>
+            <p className="small muted">חיבורים שדורשים מפתח (Priority, AI, וואטסאפ עסקי, Google) עוברים דרך פונקציית ה-Edge של Supabase, שמחזיקה את המפתחות בצורה מאובטחת (בסודות של הפונקציה). ההתחברות של המשתמש מספיקה, בלי אסימון גישה.</p>
+            <div className="small mt12"><span className="muted">כתובת: </span><span className="ltr">{s.serverUrl}/api</span></div>
+          </>
+        ) : (
+          <>
+            <p className="small muted">חיבורים שדורשים מפתח (Priority, AI, וואטסאפ עסקי, Google) עוברים דרך שרת שמחזיק את המפתחות בצורה מאובטחת. בגרסה לייצור זו פונקציית ה-Edge של Supabase; בהדגמה אפשר לחבר שרת לבדיקה. בלי שרת, המערכת עובדת במצב הדגמה.</p>
+            <div className="grid g2 mt12">
+              <Field label="כתובת השרת"><input className="input ltr" placeholder={`https://api.${brand.domain}`} value={s.serverUrl} onChange={(e) => set({ serverUrl: e.target.value.trim() })} /></Field>
+              <Field label="אסימון גישה (APP_TOKEN)" hint="נשמר בדפדפן הזה"><input className="input ltr" type="password" value={s.appToken} onChange={(e) => set({ appToken: e.target.value })} /></Field>
+            </div>
+          </>
+        )}
         <div className="row wrap mt12">
           <button className="btn sm" disabled={!s.serverUrl || checking} onClick={async () => {
             setChecking(true)

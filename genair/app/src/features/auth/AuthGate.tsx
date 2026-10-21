@@ -1,4 +1,5 @@
-// מסך התחברות כשהמערכת עובדת מול שרת עם מסד נתונים משותף. במצב הדגמה מציג את האפליקציה כמו שהיא.
+// מסך התחברות כשהמערכת עובדת מול המסד המשותף (Supabase). במצב הדגמה מציג את האפליקציה כמו שהיא.
+// כשהמסד עוד ריק, במקום הכניסה מוצגת ההקמה הראשונה.
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Eye, EyeOff, LogIn, RefreshCw, WifiOff } from 'lucide-react'
@@ -6,7 +7,9 @@ import { brand } from '../../brand'
 import { useApp } from '../../lib/store'
 import { Wordmark } from '../../components/Layout'
 import { Callout, Field } from '../../components/ui'
-import { bridge, changePassword, login, readSyncConfig, signOut, startPlatform, switchMode, syncNow, useSession, useSync } from '../../lib/sync'
+import { SUPABASE_URL, bridge, changePassword, login, serverHealth, signOut, startPlatform, syncNow, useSession, useSync } from '../../lib/sync'
+import type { ServerHealth } from '../../lib/sync/session'
+import { FirstSetup } from './FirstSetup'
 import './auth.css'
 
 export function AuthGate({ children }: { children: ReactNode }) {
@@ -54,14 +57,10 @@ function Shell({ children, foot }: { children: ReactNode; foot?: ReactNode }) {
   )
 }
 
-function ServerFoot() {
-  const url = readSyncConfig().serverUrl
-  return (
-    <>
-      <div>שרת: <span className="ltr">{url || 'לא הוגדר'}</span></div>
-      <button type="button" onClick={() => switchMode('local')}>מעבר לגרסת ההדגמה</button>
-    </>
-  )
+const host = SUPABASE_URL.replace(/^https?:\/\//, '')
+
+function ServerFoot({ status }: { status?: string }) {
+  return <div>שרת: <span className="ltr">{host || 'לא הוגדר'}</span>{status ? ` · ${status}` : ''}</div>
 }
 
 function LoginScreen() {
@@ -72,34 +71,48 @@ function LoginScreen() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const notice = useSession((s) => s.notice)
-  const serverUrl = readSyncConfig().serverUrl
+  const [health, setHealth] = useState<ServerHealth | null>(null)
+  const [down, setDown] = useState(false)
+
+  // המסד עוד ריק? אז במקום כניסה — הקמה ראשונה
+  useEffect(() => {
+    let alive = true
+    serverHealth(true)
+      .then((h) => alive && (setHealth(h), setDown(false)))
+      .catch(() => alive && setDown(true))
+    return () => {
+      alive = false
+    }
+  }, [])
 
   async function submit(e: FormEvent) {
     e.preventDefault()
-    if (!id.trim() || !pw) return setErr('צריך טלפון או אימייל וסיסמה')
+    if (!id.trim() || !pw) return setErr('צריך טלפון נייד (או אימייל) וסיסמה')
     setBusy(true)
     setErr('')
     try {
-      tempPassword = pw // לפני הכניסה: מסך הסיסמה החדשה עולה מיד כשהשרת מבקש
-      const r = await login(serverUrl, id.trim(), pw)
-      if (!r.mustChange) tempPassword = ''
+      const r = await login(id.trim(), pw)
       useApp.setState({ currentUserId: r.user.id })
       nav(r.user.role === 'installer' ? '/field' : '/', { replace: true })
     } catch (e2) {
-      tempPassword = ''
       setErr((e2 as Error).message)
     } finally {
       setBusy(false)
     }
   }
 
+  const status = down ? 'אין חיבור' : health?.ok ? 'מחובר' : ''
+  if (health?.db && health.db.bootstrapped === false) {
+    return <Shell foot={<ServerFoot status={status} />}><FirstSetup /></Shell>
+  }
+
   return (
-    <Shell foot={<ServerFoot />}>
+    <Shell foot={<ServerFoot status={status} />}>
       <div className="auth-card">
         <h1>כניסה למערכת</h1>
         <div className="sub">{brand.name} · ניהול תפעול, לקוחות ושטח</div>
         <form onSubmit={submit} noValidate>
-          <Field label="טלפון או אימייל">
+          <Field label="טלפון נייד" hint="(או אימייל, למי שאין טלפון במערכת)">
             <input className="input" dir="ltr" style={{ textAlign: 'right' }} autoComplete="username" inputMode="email" value={id} onChange={(e) => setId(e.target.value)} autoFocus placeholder="050-0000000" />
           </Field>
           <Field label="סיסמה">
@@ -117,14 +130,9 @@ function LoginScreen() {
   )
 }
 
-// הסיסמה הזמנית שהוקלדה הרגע (רק בזיכרון), כדי לא לבקש אותה שוב
-let tempPassword = ''
-
 function NewPassword() {
   const [pw, setPw] = useState('')
   const [pw2, setPw2] = useState('')
-  const [current, setCurrent] = useState(tempPassword)
-  const [known] = useState(Boolean(tempPassword))
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   async function submit(e: FormEvent) {
@@ -134,8 +142,7 @@ function NewPassword() {
     setBusy(true)
     setErr('')
     try {
-      await changePassword(current, pw)
-      tempPassword = ''
+      await changePassword(pw)
     } catch (e2) {
       setErr((e2 as Error).message)
     } finally {
@@ -148,7 +155,6 @@ function NewPassword() {
         <h1>סיסמה חדשה</h1>
         <div className="sub">נכנסתם עם סיסמה זמנית. בחרו סיסמה משלכם כדי להמשיך.</div>
         <form onSubmit={submit} noValidate>
-          {!known && <Field label="הסיסמה הזמנית"><input className="input ltr" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} /></Field>}
           <Field label="סיסמה חדשה" hint="לפחות 8 תווים"><input className="input ltr" type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} /></Field>
           <Field label="שוב, לאימות"><input className="input ltr" type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} /></Field>
           {err && <Callout tone="danger">{err}</Callout>}

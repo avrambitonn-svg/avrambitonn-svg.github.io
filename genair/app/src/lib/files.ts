@@ -1,9 +1,10 @@
 // קבצי מסמכים: במצב הדגמה הקובץ נשמר ב-IndexedDB של הדפדפן (מפתח משלו, לא בתוך המאגר),
-// במצב משותף הוא עולה לשרת (ומשם לתיקיית התיק ב-Drive כשמחובר). כאן גם הורדה ותצוגה מקדימה.
+// במצב משותף הוא עולה לפונקציית ה-Edge (/api/files → Supabase Storage, ומשם לתיקיית התיק ב-Drive כשמחובר).
+// כאן גם הורדה ותצוגה מקדימה: קובץ מהשרת נטען עם הטוקן (fetch → Blob), לא כקישור ישיר.
 import { get as idbGet, set as idbSet, del as idbDel } from 'idb-keyval'
 import type { Doc } from './types'
 import { bridge } from './sync/bridge'
-import { serverBase, useSession } from './sync/session'
+import { edgeHeaders, serverBase } from './sync/session'
 import { download, safeHref } from './integrations/links'
 
 export const LOCAL_MAX_BYTES = 25 * 1024 * 1024
@@ -31,12 +32,12 @@ export interface UploadResult {
 }
 
 /** העלאה לשרת עם התקדמות (XHR, כי ל-fetch אין התקדמות העלאה) */
-export function uploadToServer(file: File, opts: { caseId?: string; folder?: string; driveFolderId?: string }, onProgress?: (pct: number) => void): Promise<UploadResult> {
+export async function uploadToServer(file: File, opts: { caseId?: string; folder?: string; driveFolderId?: string }, onProgress?: (pct: number) => void): Promise<UploadResult> {
+  const auth = await edgeHeaders()
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('POST', `${serverBase()}/api/files`)
-    const token = useSession.getState().token
-    if (token) xhr.setRequestHeader('authorization', `Bearer ${token}`)
+    for (const [k, v] of Object.entries(auth)) xhr.setRequestHeader(k, v)
     xhr.setRequestHeader('content-type', file.type || 'application/octet-stream')
     xhr.setRequestHeader('x-file-name', encodeURIComponent(file.name))
     if (opts.caseId) xhr.setRequestHeader('x-case-id', opts.caseId)
@@ -65,7 +66,7 @@ export async function docBlob(d: Doc): Promise<Blob | null> {
     if (b) return b
   }
   if (d.fileId && serverBase()) {
-    const res = await fetch(`${serverBase()}/api/files/${encodeURIComponent(d.fileId)}`, { headers: { authorization: `Bearer ${useSession.getState().token ?? ''}` } })
+    const res = await fetch(`${serverBase()}/api/files/${encodeURIComponent(d.fileId)}`, { headers: await edgeHeaders() })
     if (!res.ok) throw new Error(res.status === 404 ? 'הקובץ לא נמצא בשרת' : 'ההורדה נכשלה')
     return res.blob()
   }
