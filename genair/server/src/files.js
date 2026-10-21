@@ -2,7 +2,7 @@
 // signed-in users (or through a portal link when the doc is visible to the customer), and copied
 // into a Google Drive folder when the request names one and Drive is configured.
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
@@ -13,6 +13,7 @@ import { requireStore } from './db/index.js';
 import { requireSession } from './auth.js';
 import { googleFeatures, knownDriveFolder, safeFileName, safeMime, uploadBufferToDrive } from './google.js';
 import { createWindowLimiter } from './limiter.js';
+import { looksLike } from './filetype.js';
 
 const FILE_ID_RE = /^f[a-f0-9]{24}$/;
 const INLINE = /^(image\/(png|jpe?g|gif|webp|avif|bmp|heic|heif)|application\/pdf|text\/plain|video\/[a-z0-9.+-]+|audio\/[a-z0-9.+-]+)$/;
@@ -56,7 +57,7 @@ const tooLarge = (limit) =>
   new HttpError(413, 'payload_too_large', `הקובץ גדול מדי (מקסימום ${Math.round(limit / 1024 / 1024)}MB)`, { limitBytes: limit });
 
 /** Streams the request body into a new file. Returns its meta ({ id, name, mime, size, ... }). */
-export async function storeUpload(req, cfg, { maxBytes = cfg.db.filesMaxBytes, meta = {} } = {}) {
+export async function storeUpload(req, cfg, { maxBytes = cfg.db.filesMaxBytes, meta = {}, checkType = false } = {}) {
   const declared = Number(req.headers['content-length']);
   if (Number.isFinite(declared) && declared > maxBytes) throw tooLarge(maxBytes);
   const dir = filesDir(cfg);
@@ -89,10 +90,20 @@ export async function storeUpload(req, cfg, { maxBytes = cfg.db.filesMaxBytes, m
     await rm(tmp, { force: true });
     throw new HttpError(400, 'validation_error', 'הקובץ ריק');
   }
+  const mime = safeMime(req.headers['content-type']);
+  if (checkType) {
+    const fh = await open(tmp, 'r');
+    const head = Buffer.alloc(16);
+    await fh.read(head, 0, 16, 0).finally(() => fh.close());
+    if (!looksLike(mime, head)) {
+      await rm(tmp, { force: true });
+      throw new HttpError(415, 'type_mismatch', 'תוכן הקובץ לא תואם לסוג שלו. אפשר להעלות תמונה או PDF');
+    }
+  }
   const info = {
     id,
     name: safeFileName(req.headers['x-file-name']),
-    mime: safeMime(req.headers['content-type']),
+    mime,
     size,
     at: new Date().toISOString(),
     ...meta,

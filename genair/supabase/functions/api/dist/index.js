@@ -811,6 +811,15 @@ async function aiMessages({ req, res, cfg }) {
 
 // ../../server/src/whatsapp.js
 import { createHmac } from "node:crypto";
+
+// api/src/db.js
+function getStore(cfg) {
+  if (!cfg?.edge) throw new HttpError(500, "internal_error", "\u05E9\u05D2\u05D9\u05D0\u05D4 \u05E4\u05E0\u05D9\u05DE\u05D9\u05EA \u05D1\u05E9\u05E8\u05EA");
+  return cfg.edge.store();
+}
+var requireStore = (cfg) => getStore(cfg);
+
+// ../../server/src/whatsapp.js
 var SERVICE3 = { code: "whatsapp", label: "\u05D5\u05D5\u05D0\u05D8\u05E1\u05D0\u05E4", to: "\u05DC\u05D5\u05D5\u05D0\u05D8\u05E1\u05D0\u05E4" };
 var GRAPH = "https://graph.facebook.com";
 function normalizePhone(input) {
@@ -871,12 +880,22 @@ function whatsappHttpError(status, data) {
   }
   return new HttpError(502, "whatsapp_error", "\u05D5\u05D5\u05D0\u05D8\u05E1\u05D0\u05E4 \u05D3\u05D7\u05D4 \u05D0\u05EA \u05E9\u05DC\u05D9\u05D7\u05EA \u05D4\u05D4\u05D5\u05D3\u05E2\u05D4", details);
 }
+function knownPhone(store, to) {
+  for (const c of ["customers", "contacts", "users"]) {
+    for (const x of store.list(c)) if (x.phone && normalizePhone(x.phone) === to) return true;
+  }
+  return false;
+}
 async function sendWhatsapp({ req, cfg }) {
   const wa = cfg.whatsapp;
   if (!wa.token || !wa.phoneNumberId) {
     throw new HttpError(503, "whatsapp_not_configured", "\u05D5\u05D5\u05D0\u05D8\u05E1\u05D0\u05E4 \u05DC\u05D0 \u05D4\u05D5\u05D2\u05D3\u05E8 \u05D1\u05E9\u05E8\u05EA (\u05D7\u05E1\u05E8\u05D9\u05DD WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID)");
   }
   const payload = buildSendPayload(await readJson(req));
+  const store = cfg.db.mode === "off" ? null : await getStore(cfg);
+  if (store && !store.isEmpty() && !knownPhone(store, payload.to)) {
+    throw new HttpError(403, "unknown_recipient", "\u05D0\u05E4\u05E9\u05E8 \u05DC\u05E9\u05DC\u05D5\u05D7 \u05E8\u05E7 \u05DC\u05DE\u05E1\u05E4\u05E8\u05D9\u05DD \u05E9\u05DC \u05DC\u05E7\u05D5\u05D7\u05D5\u05EA, \u05D0\u05E0\u05E9\u05D9 \u05E7\u05E9\u05E8 \u05D5\u05E2\u05D5\u05D1\u05D3\u05D9\u05DD \u05E9\u05E8\u05E9\u05D5\u05DE\u05D9\u05DD \u05D1\u05DE\u05E2\u05E8\u05DB\u05EA");
+  }
   const url = `${GRAPH}/${encodeURIComponent(wa.graphVersion)}/${encodeURIComponent(wa.phoneNumberId)}/messages`;
   const res = await fetchUpstream(
     url,
@@ -972,15 +991,6 @@ async function webhookVerify({ url, cfg }) {
 
 // ../../server/src/google.js
 import { createSign, randomBytes } from "node:crypto";
-
-// api/src/db.js
-function getStore(cfg) {
-  if (!cfg?.edge) throw new HttpError(500, "internal_error", "\u05E9\u05D2\u05D9\u05D0\u05D4 \u05E4\u05E0\u05D9\u05DE\u05D9\u05EA \u05D1\u05E9\u05E8\u05EA");
-  return cfg.edge.store();
-}
-var requireStore = (cfg) => getStore(cfg);
-
-// ../../server/src/google.js
 var SERVICE4 = { code: "google", label: "Google", to: "\u05DC-Google" };
 var TOKEN_URL = "https://oauth2.googleapis.com/token";
 var CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
@@ -1312,6 +1322,23 @@ import { randomBytes as randomBytes3 } from "node:crypto";
 import { randomBytes as randomBytes2 } from "node:crypto";
 import { Readable as Readable2 } from "node:stream";
 import { pipeline } from "node:stream/promises";
+
+// ../../server/src/filetype.js
+var SIGNATURES = {
+  "image/jpeg": (b) => b[0] === 255 && b[1] === 216 && b[2] === 255,
+  "image/png": (b) => b.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])),
+  "image/gif": (b) => b.subarray(0, 4).toString("latin1") === "GIF8",
+  "image/webp": (b) => b.subarray(0, 4).toString("latin1") === "RIFF" && b.subarray(8, 12).toString("latin1") === "WEBP",
+  "image/heic": (b) => b.subarray(4, 8).toString("latin1") === "ftyp",
+  "image/heif": (b) => b.subarray(4, 8).toString("latin1") === "ftyp",
+  "application/pdf": (b) => b.subarray(0, 5).toString("latin1") === "%PDF-"
+};
+function looksLike(mime, head) {
+  const test = SIGNATURES[mime];
+  return Boolean(test && head && head.length >= 12 && test(head));
+}
+
+// api/src/files.js
 var FILE_ID_RE = /^f[a-f0-9]{24}$/;
 var INLINE = /^(image\/(png|jpe?g|gif|webp|avif|bmp|heic|heif)|application\/pdf|text\/plain|video\/[a-z0-9.+-]+|audio\/[a-z0-9.+-]+)$/;
 var uploadsByUser = createWindowLimiter({ max: 120, windowMs: 10 * 6e4 });
@@ -1329,11 +1356,13 @@ async function save(cfg, data, { name, mime, meta }) {
   });
   return info;
 }
-async function storeUpload(req, cfg, { maxBytes = cfg.db.filesMaxBytes, meta = {} } = {}) {
+async function storeUpload(req, cfg, { maxBytes = cfg.db.filesMaxBytes, meta = {}, checkType = false } = {}) {
   const data = Buffer.isBuffer(req.rawBody) ? req.rawBody : Buffer.alloc(0);
   if (data.length > maxBytes) throw tooLarge(maxBytes);
   if (!data.length) throw new HttpError(400, "validation_error", "\u05D4\u05E7\u05D5\u05D1\u05E5 \u05E8\u05D9\u05E7");
-  return save(cfg, data, { name: safeFileName(req.headers["x-file-name"]), mime: safeMime(req.headers["content-type"]), meta });
+  const mime = safeMime(req.headers["content-type"]);
+  if (checkType && !looksLike(mime, data.subarray(0, 16))) throw new HttpError(415, "type_mismatch", "\u05EA\u05D5\u05DB\u05DF \u05D4\u05E7\u05D5\u05D1\u05E5 \u05DC\u05D0 \u05EA\u05D5\u05D0\u05DD \u05DC\u05E1\u05D5\u05D2 \u05E9\u05DC\u05D5. \u05D0\u05E4\u05E9\u05E8 \u05DC\u05D4\u05E2\u05DC\u05D5\u05EA \u05EA\u05DE\u05D5\u05E0\u05D4 \u05D0\u05D5 PDF");
+  return save(cfg, data, { name: safeFileName(req.headers["x-file-name"]), mime, meta });
 }
 async function storeBuffer(cfg, data, { name, mime, meta = {} }) {
   if (data.length > cfg.db.filesMaxBytes) throw tooLarge(cfg.db.filesMaxBytes);
@@ -1678,7 +1707,7 @@ async function uploadFromPortal(ctx) {
   if (!/^image\/(jpeg|png|webp|heic|heif|gif)$/.test(mime) && mime !== "application/pdf") {
     throw new HttpError(415, "unsupported_type", "\u05D0\u05E4\u05E9\u05E8 \u05DC\u05D4\u05E2\u05DC\u05D5\u05EA \u05EA\u05DE\u05D5\u05E0\u05D4 \u05D0\u05D5 PDF");
   }
-  const meta = await storeUpload(ctx.req, ctx.cfg, { maxBytes: Math.min(ctx.cfg.db.filesMaxBytes, 10 * 1024 * 1024), meta: { caseId: k2.id, folder: "customer", source: "portal" } });
+  const meta = await storeUpload(ctx.req, ctx.cfg, { maxBytes: Math.min(ctx.cfg.db.filesMaxBytes, 10 * 1024 * 1024), meta: { caseId: k2.id, folder: "customer", source: "portal" }, checkType: true });
   const doc = { id: uid("d"), caseId: k2.id, customerId: k2.customerId, folder: "customer", name: meta.name, mime: meta.mime, size: meta.size, fileId: meta.id, uploadedAt: nowIso(), source: "portal", customerVisible: true };
   const driveFolder = k2.driveFolders?.customer;
   if (driveFolder && googleFeatures(ctx.cfg).drive) {
@@ -1806,6 +1835,7 @@ async function createLead(ctx) {
   const docs = [];
   for (const [i, dataUrl] of photos.entries()) {
     const [, mime, b642] = /^data:(image\/[a-z]+);base64,(.+)$/.exec(dataUrl);
+    if (!looksLike(mime, Buffer.from(b642.slice(0, 32), "base64"))) throw new HttpError(400, "validation_error", "\u05D0\u05D7\u05EA \u05D4\u05EA\u05DE\u05D5\u05E0\u05D5\u05EA \u05D0\u05D9\u05E0\u05D4 \u05E7\u05D5\u05D1\u05E5 \u05EA\u05DE\u05D5\u05E0\u05D4 \u05EA\u05E7\u05D9\u05DF", { fields: [{ field: "photos" }] });
     const name2 = `\u05EA\u05DE\u05D5\u05E0\u05D4 \u05DE\u05D4\u05DC\u05E7\u05D5\u05D7 ${i + 1}.${mime === "image/jpeg" ? "jpg" : mime.slice(6)}`;
     const meta = await storeBuffer(ctx.cfg, Buffer.from(b642, "base64"), { name: name2, mime, meta: { caseId: k2.id, folder: "customer", source: "lead" } });
     docs.push({ id: uid("d"), caseId: k2.id, customerId: customer.id, folder: "customer", name: meta.name, mime: meta.mime, size: meta.size, fileId: meta.id, uploadedAt: at, source: "portal", customerVisible: true });
@@ -4412,21 +4442,21 @@ function aiProxy(ctx) {
 }
 var ROUTES = [
   { method: "GET", path: "/api/health", handle: health, access: "public" },
-  { method: "GET", path: "/api/priority/test", handle: priorityTest, limit: "priority" },
-  { method: "GET", path: "/api/priority/customers", handle: listCustomers, limit: "priority" },
-  { method: "POST", path: "/api/priority/customers", handle: createCustomer, limit: "priority" },
-  { method: "GET", path: "/api/priority/items", handle: listItems, limit: "priority" },
-  { method: "GET", path: "/api/priority/pricelists", handle: listPricelists, limit: "priority" },
-  { method: "POST", path: "/api/priority/quotes", handle: createQuote, limit: "priority" },
-  { method: "POST", path: "/api/priority/orders", handle: createOrder, limit: "priority" },
+  { method: "GET", path: "/api/priority/test", handle: priorityTest, limit: "priority", noInstaller: true },
+  { method: "GET", path: "/api/priority/customers", handle: listCustomers, limit: "priority", noInstaller: true },
+  { method: "POST", path: "/api/priority/customers", handle: createCustomer, limit: "priority", noInstaller: true },
+  { method: "GET", path: "/api/priority/items", handle: listItems, limit: "priority", noInstaller: true },
+  { method: "GET", path: "/api/priority/pricelists", handle: listPricelists, limit: "priority", noInstaller: true },
+  { method: "POST", path: "/api/priority/quotes", handle: createQuote, limit: "priority", noInstaller: true },
+  { method: "POST", path: "/api/priority/orders", handle: createOrder, limit: "priority", noInstaller: true },
   { method: "GET", path: "/api/priority/sync/status", handle: syncStatus },
   { method: "POST", path: "/api/priority/sync/run", handle: syncRun },
-  { method: "POST", path: "/api/priority/webhook", handle: syncWebhook, access: "public" },
-  { method: "POST", path: "/api/priority/cron", handle: syncCron, access: "public" },
-  { method: "POST", path: "/api/ai/messages", handle: aiProxy, limit: "ai" },
+  { method: "POST", path: "/api/priority/webhook", handle: syncWebhook, access: "public", audit: "priority_webhook" },
+  { method: "POST", path: "/api/priority/cron", handle: syncCron, access: "public", audit: "priority_cron" },
+  { method: "POST", path: "/api/ai/messages", handle: aiProxy, limit: "ai", noInstaller: true },
   { method: "POST", path: "/api/whatsapp/send", handle: sendWhatsapp, limit: "whatsapp" },
   { method: "GET", path: "/api/whatsapp/webhook", handle: webhookVerify, access: "public" },
-  { method: "POST", path: "/api/whatsapp/webhook", handle: webhookReceive, access: "public" },
+  { method: "POST", path: "/api/whatsapp/webhook", handle: webhookReceive, access: "public", audit: "whatsapp_webhook" },
   { method: "GET", path: "/api/whatsapp/inbox", handle: inboxList },
   { method: "POST", path: "/api/google/calendar/events", handle: createCalendarEvent, limit: "google" },
   { method: "PATCH", path: "/api/google/calendar/events/:id", handle: updateCalendarEvent, limit: "google" },
@@ -4435,9 +4465,9 @@ var ROUTES = [
   { method: "POST", path: "/api/google/drive/files", handle: uploadDriveFile, limit: "google" },
   { method: "POST", path: "/api/google/drive/files/:id/move", handle: moveDriveFile, limit: "google" },
   { method: "POST", path: "/api/google/drive/files/:id/trash", handle: trashDriveFile, limit: "google" },
-  { method: "POST", path: "/api/auth/bootstrap", handle: bootstrap, access: "public" },
+  { method: "POST", path: "/api/auth/bootstrap", handle: bootstrap, access: "public", audit: "bootstrap" },
   { method: "GET", path: "/api/auth/users", handle: listCredentials },
-  { method: "POST", path: "/api/auth/users/:id/password", handle: setUserPassword },
+  { method: "POST", path: "/api/auth/users/:id/password", handle: setUserPassword, audit: "password_set" },
   { method: "POST", path: "/api/files", handle: uploadFile },
   { method: "GET", path: "/api/files/:id", handle: downloadFile },
   { method: "GET", path: "/api/portal/:token", handle: getPortal, access: "public" },
@@ -4509,8 +4539,25 @@ function edgeConfig(env, opts = {}) {
   return cfg;
 }
 var routePath = (pathname) => pathname.replace(/^\/functions\/v1(?=\/)/, "").replace(/\/+$/, "") || "/";
+async function audit(cfg, action, actor, detail) {
+  await cfg.edge.rpc("sys_audit", { p_action: action, p_actor: actor ?? null, p_detail: detail ?? {} }).catch((e) => console.error("[genair-api] audit failed:", e?.message ?? e));
+}
+function auditedRoute(cfg, request) {
+  try {
+    return findRoute(request.method, routePath(new URL(request.url).pathname)).route.audit ?? null;
+  } catch {
+    return null;
+  }
+}
+function securityHeaders(res) {
+  res.setHeader("x-content-type-options", "nosniff");
+  res.setHeader("x-frame-options", "DENY");
+  res.setHeader("referrer-policy", "no-referrer");
+  res.setHeader("strict-transport-security", "max-age=31536000");
+}
 async function serve(request, res, env, opts) {
   let cfg;
+  securityHeaders(res);
   try {
     cfg = edgeConfig(env, opts);
     const u = new URL(request.url);
@@ -4529,10 +4576,12 @@ async function serve(request, res, env, opts) {
     req.rawBody = await readRequestBody(request);
     const caller = route.access === "member" ? await requireMember(cfg, req) : void 0;
     const ip = clientIp(req, 0);
+    if (route.noInstaller && caller?.user?.role === "installer") throw new HttpError(403, "forbidden", "\u05D0\u05D9\u05DF \u05D4\u05E8\u05E9\u05D0\u05D4 \u05DC\u05E4\u05E2\u05D5\u05DC\u05D4 \u05D4\u05D6\u05D5");
     rateLimit(route, caller, ip);
     const url = new URL(req.url, "http://localhost");
     const result = await route.handle({ req, res, url, cfg, params, caller, ip });
     await cfg.edge.persist();
+    if (route.audit === "bootstrap" || route.audit === "password_set") await audit(cfg, route.audit, caller?.user?.id ?? result?.body?.user?.id, { ip, target: params.id });
     if (!result || res.headersSent) return;
     if (result.text !== void 0) {
       res.writeHead(result.status, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
@@ -4542,6 +4591,10 @@ async function serve(request, res, env, opts) {
     sendJson(res, result.status, result.body);
   } catch (err) {
     await cfg?.edge.persist().catch((e) => console.error("[genair-api] saving failed:", e?.message ?? e));
+    if (cfg && err instanceof HttpError && (err.status === 401 || err.status === 403)) {
+      const route = auditedRoute(cfg, request);
+      if (route || err.details?.reason === "revoked") await audit(cfg, `${route ?? "access"}_rejected`, null, { code: err.code, path: new URL(request.url).pathname });
+    }
     sendError(res, err);
   } finally {
     if (!res.headersSent) sendError(res, new Error("no response"));

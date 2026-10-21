@@ -531,3 +531,29 @@ test('portal upload: a photo from the customer, filed under the case', async () 
   const exe = await call('POST', `/api/portal/${s.portalToken}/upload`, { raw: Buffer.from('MZ'), headers: { 'content-type': 'application/x-msdownload' } });
   assert.equal(exe.status, 415);
 });
+
+// ------------------------------------------------------------ hardening
+
+test('portal upload: bytes that do not match the declared type are refused', async () => {
+  const r = await call('POST', `/api/portal/${s.portalToken}/upload`, { raw: Buffer.from('<html><script>alert(1)</script></html>'), headers: { 'content-type': 'image/png', 'x-file-name': 'a.png' } });
+  assert.equal(r.status, 415);
+  assert.equal(r.json.error.code, 'type_mismatch');
+});
+
+test('installers have no AI or Priority routes; answers carry security headers', async () => {
+  const token = await fake.member('u-nologin', 'nologin@test.local'); // an installer
+  const ai = await call('POST', '/api/ai/messages', { token, body: {} });
+  assert.equal(ai.status, 403);
+  assert.equal((await call('GET', '/api/priority/items', { token })).status, 403);
+  assert.equal(ai.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(ai.headers.get('x-frame-options'), 'DENY');
+});
+
+test('security log: a wrong cron key and a password set by the admin are recorded', async () => {
+  await call('POST', '/api/priority/cron', { headers: { 'x-cron-key': 'wrong' } });
+  await call('POST', '/api/auth/users/u-agent/password', { token: s.admin, body: { password: 'agent-pass-2' } });
+  const rows = (await fake.pool.query('select action, actor, detail from app.audit order by id')).rows;
+  assert.ok(rows.some((r) => r.action === 'priority_cron_rejected'), JSON.stringify(rows));
+  assert.ok(rows.some((r) => r.action === 'password_set' && r.actor === 'u-admin' && r.detail.target === 'u-agent'));
+  assert.ok(rows.some((r) => r.action === 'bootstrap'));
+});

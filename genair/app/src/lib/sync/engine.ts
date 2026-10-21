@@ -433,6 +433,22 @@ function signedOut(reason: EndReason = 'revoked') {
 setSignedOutHandler((reason) => signedOut(reason))
 
 /** מוחק מהמכשיר את העותק המקומי של נתוני הארגון, את התור ואת המספרים השמורים */
+const OWNER_KEY = 'genair-data-owner'
+function readOwner(): string {
+  try {
+    return localStorage.getItem(OWNER_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+function writeOwner(userId: string) {
+  try {
+    localStorage.setItem(OWNER_KEY, userId)
+  } catch {
+    /* מצב גלישה פרטית */
+  }
+}
+
 async function wipeLocal() {
   await queue.clear()
   try {
@@ -451,6 +467,14 @@ export async function startSync(): Promise<void> {
   const { token, userId } = useSession.getState()
   if (!token || !userId) return
   running = true
+  // the device's copy belongs to whoever last synced it: another user signing in on the same device (after the
+  // previous session expired, which keeps the data) starts from a clean copy and never sees what that user saw
+  const owner = readOwner()
+  if (owner && owner !== userId) {
+    await wipeLocal()
+    asRemote(() => useApp.setState({ currentUserId: userId }))
+  }
+  writeOwner(userId)
   queue.onChange = () => {
     useSync.setState({ pending: queue.size })
     scheduleFlush()

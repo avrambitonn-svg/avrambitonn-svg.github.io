@@ -79,21 +79,21 @@ function aiProxy(ctx) {
 //                              routes that need a secret (cron, webhooks, bootstrap) check it themselves
 const ROUTES = [
   { method: 'GET', path: '/api/health', handle: health, access: 'public' },
-  { method: 'GET', path: '/api/priority/test', handle: priority.priorityTest, limit: 'priority' },
-  { method: 'GET', path: '/api/priority/customers', handle: priority.listCustomers, limit: 'priority' },
-  { method: 'POST', path: '/api/priority/customers', handle: priority.createCustomer, limit: 'priority' },
-  { method: 'GET', path: '/api/priority/items', handle: priority.listItems, limit: 'priority' },
-  { method: 'GET', path: '/api/priority/pricelists', handle: priority.listPricelists, limit: 'priority' },
-  { method: 'POST', path: '/api/priority/quotes', handle: priority.createQuote, limit: 'priority' },
-  { method: 'POST', path: '/api/priority/orders', handle: priority.createOrder, limit: 'priority' },
+  { method: 'GET', path: '/api/priority/test', handle: priority.priorityTest, limit: 'priority', noInstaller: true },
+  { method: 'GET', path: '/api/priority/customers', handle: priority.listCustomers, limit: 'priority', noInstaller: true },
+  { method: 'POST', path: '/api/priority/customers', handle: priority.createCustomer, limit: 'priority', noInstaller: true },
+  { method: 'GET', path: '/api/priority/items', handle: priority.listItems, limit: 'priority', noInstaller: true },
+  { method: 'GET', path: '/api/priority/pricelists', handle: priority.listPricelists, limit: 'priority', noInstaller: true },
+  { method: 'POST', path: '/api/priority/quotes', handle: priority.createQuote, limit: 'priority', noInstaller: true },
+  { method: 'POST', path: '/api/priority/orders', handle: priority.createOrder, limit: 'priority', noInstaller: true },
   { method: 'GET', path: '/api/priority/sync/status', handle: psync.syncStatus },
   { method: 'POST', path: '/api/priority/sync/run', handle: psync.syncRun },
-  { method: 'POST', path: '/api/priority/webhook', handle: psync.syncWebhook, access: 'public' },
-  { method: 'POST', path: '/api/priority/cron', handle: psync.syncCron, access: 'public' },
-  { method: 'POST', path: '/api/ai/messages', handle: aiProxy, limit: 'ai' },
+  { method: 'POST', path: '/api/priority/webhook', handle: psync.syncWebhook, access: 'public', audit: 'priority_webhook' },
+  { method: 'POST', path: '/api/priority/cron', handle: psync.syncCron, access: 'public', audit: 'priority_cron' },
+  { method: 'POST', path: '/api/ai/messages', handle: aiProxy, limit: 'ai', noInstaller: true },
   { method: 'POST', path: '/api/whatsapp/send', handle: whatsapp.sendWhatsapp, limit: 'whatsapp' },
   { method: 'GET', path: '/api/whatsapp/webhook', handle: whatsapp.webhookVerify, access: 'public' },
-  { method: 'POST', path: '/api/whatsapp/webhook', handle: inbox.webhookReceive, access: 'public' },
+  { method: 'POST', path: '/api/whatsapp/webhook', handle: inbox.webhookReceive, access: 'public', audit: 'whatsapp_webhook' },
   { method: 'GET', path: '/api/whatsapp/inbox', handle: inbox.inboxList },
   { method: 'POST', path: '/api/google/calendar/events', handle: google.createCalendarEvent, limit: 'google' },
   { method: 'PATCH', path: '/api/google/calendar/events/:id', handle: google.updateCalendarEvent, limit: 'google' },
@@ -103,9 +103,9 @@ const ROUTES = [
   { method: 'POST', path: '/api/google/drive/files/:id/move', handle: google.moveDriveFile, limit: 'google' },
   { method: 'POST', path: '/api/google/drive/files/:id/trash', handle: google.trashDriveFile, limit: 'google' },
 
-  { method: 'POST', path: '/api/auth/bootstrap', handle: users.bootstrap, access: 'public' },
+  { method: 'POST', path: '/api/auth/bootstrap', handle: users.bootstrap, access: 'public', audit: 'bootstrap' },
   { method: 'GET', path: '/api/auth/users', handle: users.listCredentials },
-  { method: 'POST', path: '/api/auth/users/:id/password', handle: users.setUserPassword },
+  { method: 'POST', path: '/api/auth/users/:id/password', handle: users.setUserPassword, audit: 'password_set' },
   { method: 'POST', path: '/api/files', handle: files.uploadFile },
   { method: 'GET', path: '/api/files/:id', handle: files.downloadFile },
 
@@ -187,8 +187,30 @@ export function edgeConfig(env, opts = {}) {
 // Supabase serves the function at /functions/v1/api/...; inside it the path starts at /api
 const routePath = (pathname) => pathname.replace(/^\/functions\/v1(?=\/)/, '').replace(/\/+$/, '') || '/';
 
+/** Writes to app.audit; never fails the request. */
+async function audit(cfg, action, actor, detail) {
+  await cfg.edge.rpc('sys_audit', { p_action: action, p_actor: actor ?? null, p_detail: detail ?? {} }).catch((e) => console.error('[genair-api] audit failed:', e?.message ?? e));
+}
+
+function auditedRoute(cfg, request) {
+  try {
+    return findRoute(request.method, routePath(new URL(request.url).pathname)).route.audit ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Every answer: no sniffing, no framing, no referrer, HTTPS only (files add their own sandbox CSP). */
+function securityHeaders(res) {
+  res.setHeader('x-content-type-options', 'nosniff');
+  res.setHeader('x-frame-options', 'DENY');
+  res.setHeader('referrer-policy', 'no-referrer');
+  res.setHeader('strict-transport-security', 'max-age=31536000');
+}
+
 async function serve(request, res, env, opts) {
   let cfg;
+  securityHeaders(res);
   try {
     cfg = edgeConfig(env, opts);
     const u = new URL(request.url);
@@ -209,11 +231,14 @@ async function serve(request, res, env, opts) {
     req.rawBody = await readRequestBody(request);
     const caller = route.access === 'member' ? await requireMember(cfg, req) : undefined;
     const ip = clientIp(req, 0);
+    if (route.noInstaller && caller?.user?.role === 'installer') throw new HttpError(403, 'forbidden', 'אין הרשאה לפעולה הזו');
     rateLimit(route, caller, ip);
 
     const url = new URL(req.url, 'http://localhost');
     const result = await route.handle({ req, res, url, cfg, params, caller, ip });
     await cfg.edge.persist(); // before the answer: what the response reports is in the database
+    // the security log: first setup and passwords set by an admin (cron rounds succeed every minute: not logged)
+    if (route.audit === 'bootstrap' || route.audit === 'password_set') await audit(cfg, route.audit, caller?.user?.id ?? result?.body?.user?.id, { ip, target: params.id });
     if (!result || res.headersSent) return; // the handler streamed its own response
     if (result.text !== undefined) {
       res.writeHead(result.status, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
@@ -224,6 +249,11 @@ async function serve(request, res, env, opts) {
   } catch (err) {
     // writes made before the error are kept, as the server's store would have kept them
     await cfg?.edge.persist().catch((e) => console.error('[genair-api] saving failed:', e?.message ?? e));
+    // rejected keys, signatures and setup codes, and members whose access was revoked, go to the security log
+    if (cfg && err instanceof HttpError && (err.status === 401 || err.status === 403)) {
+      const route = auditedRoute(cfg, request);
+      if (route || err.details?.reason === 'revoked') await audit(cfg, `${route ?? 'access'}_rejected`, null, { code: err.code, path: new URL(request.url).pathname });
+    }
     sendError(res, err);
   } finally {
     if (!res.headersSent) sendError(res, new Error('no response'));

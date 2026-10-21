@@ -52,6 +52,9 @@ export function readFilter(user) {
       case 'catalog':
         data = omit(data, ['cost']);
         break;
+      case 'contracts':
+        if (role === 'installer') data = omit(data, ['pricePerYear']);
+        break;
       case 'customers':
         data = omit(data, role === 'installer' ? ['balance', 'idNumber'] : ['balance']);
         break;

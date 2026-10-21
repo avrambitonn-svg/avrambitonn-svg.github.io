@@ -203,3 +203,27 @@ test('database writes are rate limited per user', async (t) => {
   for (let i = 0; i < 1201; i++) last = await ops(agent, [{ op: 'patch', collection: 'tasks', id: `t${i}`, data: { title: 'x' } }]);
   assert.equal(last.status, 429);
 });
+
+test('installers have no AI or Priority routes; WhatsApp only to known numbers', async (t) => {
+  const { s, installer, admin } = await org(t, { ANTHROPIC_API_KEY: 'sk-test', WHATSAPP_TOKEN: 't', WHATSAPP_PHONE_NUMBER_ID: '1' });
+  assert.equal((await s.request('POST', '/api/ai/messages', { headers: bearer(installer), body: {} })).status, 403);
+  assert.equal((await s.request('GET', '/api/priority/items', { headers: bearer(installer) })).status, 403);
+  const r = await s.request('POST', '/api/whatsapp/send', { headers: bearer(admin), body: { to: '0549999999', text: 'שלום' } });
+  assert.equal(r.status, 403);
+  assert.equal(r.json.error.code, 'unknown_recipient');
+});
+
+test('activity log: managers cannot rewrite it, only an admin deletes', async (t) => {
+  const { admin, ops } = await org(t);
+  await ops(admin, [{ op: 'upsert', collection: 'activities', id: 'a1', data: { kind: 'note', text: 'x' } }]);
+  const r = await ops(admin, [{ op: 'patch', collection: 'activities', id: 'a1', data: { text: 'y' } }, { op: 'remove', collection: 'activities', id: 'a1' }]);
+  assert.deepEqual(r.json.results.map((x) => x.status), ['denied', 'ok']);
+});
+
+test('API answers carry security headers', async (t) => {
+  useEnv(t, {});
+  const s = await startServer(t);
+  const r = await s.request('GET', '/api/health');
+  assert.equal(r.headers['x-content-type-options'], 'nosniff');
+  assert.equal(r.headers['x-frame-options'], 'DENY');
+});

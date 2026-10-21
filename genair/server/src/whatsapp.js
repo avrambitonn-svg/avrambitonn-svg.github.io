@@ -1,6 +1,7 @@
 // WhatsApp Business Cloud API (Meta): send messages, receive webhooks, poll an inbox.
 import { createHmac } from 'node:crypto';
 import { HttpError, fetchUpstream, parseJson, readBody, readJson, readUpstream, safeEqual } from './http.js';
+import { getStore } from './db/index.js';
 
 const SERVICE = { code: 'whatsapp', label: 'וואטסאפ', to: 'לוואטסאפ' };
 const GRAPH = 'https://graph.facebook.com';
@@ -79,12 +80,25 @@ function whatsappHttpError(status, data) {
   return new HttpError(502, 'whatsapp_error', 'וואטסאפ דחה את שליחת ההודעה', details);
 }
 
+/** The number (already in WhatsApp's 972... form) belongs to a customer, a contact or a user. */
+export function knownPhone(store, to) {
+  for (const c of ['customers', 'contacts', 'users']) {
+    for (const x of store.list(c)) if (x.phone && normalizePhone(x.phone) === to) return true;
+  }
+  return false;
+}
+
 export async function sendWhatsapp({ req, cfg }) {
   const wa = cfg.whatsapp;
   if (!wa.token || !wa.phoneNumberId) {
     throw new HttpError(503, 'whatsapp_not_configured', 'וואטסאפ לא הוגדר בשרת (חסרים WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID)');
   }
   const payload = buildSendPayload(await readJson(req));
+  // only to people the system knows (customers, their contacts, staff): the business number is no open relay
+  const store = cfg.db.mode === 'off' ? null : await getStore(cfg);
+  if (store && !store.isEmpty() && !knownPhone(store, payload.to)) {
+    throw new HttpError(403, 'unknown_recipient', 'אפשר לשלוח רק למספרים של לקוחות, אנשי קשר ועובדים שרשומים במערכת');
+  }
   const url = `${GRAPH}/${encodeURIComponent(wa.graphVersion)}/${encodeURIComponent(wa.phoneNumberId)}/messages`;
   const res = await fetchUpstream(
     url,

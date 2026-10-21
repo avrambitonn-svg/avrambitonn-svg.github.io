@@ -33,7 +33,7 @@ before(async () => {
 after(() => pool?.end());
 
 beforeEach(async () => {
-  await pool.query('truncate app.entities, app.counters, app.members, app.files, app.inbox, storage.objects');
+  await pool.query('truncate app.entities, app.counters, app.members, app.files, app.inbox, app.audit, storage.objects');
   await sys([
     up('users', 'u-admin', { name: 'דוד', role: 'admin', active: true }),
     up('users', 'u-office', { name: 'משה', role: 'office', active: true }),
@@ -343,4 +343,38 @@ test('server functions refuse signed-in users even if a grant lets them call', a
   } finally {
     c.release();
   }
+});
+
+test('activity log: nobody rewrites it (managers too), only an admin deletes; the server signs the author', async () => {
+  await sys([up('activities', 'a1', { kind: 'note', text: 'מקור' })]);
+  assert.equal((await ops(U.office, [pa('activities', 'a1', { text: 'שוכתב' })])).results[0].error, 'append_only');
+  assert.equal((await ops(U.office, [rm('activities', 'a1')])).results[0].error, 'admin_only');
+  assert.equal((await ops(U.admin, [rm('activities', 'a1')])).results[0].status, 'ok');
+  await ops(U.agent, [up('activities', 'a2', { kind: 'note', text: 'x', by: 'u-admin' })]);
+  assert.equal((await get('activities', 'a2')).by, 'u-agent', 'the device cannot claim someone else wrote it');
+});
+
+test('installer: no writes to sync state; contracts without the yearly price', async () => {
+  const van = 'רכב — סאמר חלבי';
+  await sys([up('serviceCalls', 'sc1', { status: 'open', sync: { status: 'pending' } }), up('contracts', 'ct1', { customerId: 'c1', pricePerYear: 900, status: 'active' })]);
+  const r = await ops(U.installer, [
+    pa('serviceCalls', 'sc1', { sync: { status: 'synced' } }),
+    pa('serviceCalls', 'sc1', { status: 'done' }),
+    up('stockMoves', 'sm1', { kind: 'use', itemId: 'i1', qty: 1, from: van, sync: { status: 'disabled' } }),
+  ]);
+  assert.deepEqual(statuses(r), ['denied', 'ok', 'denied']);
+  const i = await snapshot(U.installer);
+  assert.equal(i.collections.contracts[0].pricePerYear, undefined);
+  assert.equal((await snapshot(U.office)).collections.contracts[0].pricePerYear, 900);
+});
+
+test('security log: denied writes are recorded; managers read the log', async () => {
+  await ops(U.agent, [up('settings', 'org', { depositPct: 1 })]);
+  const log = await as(U.admin, 'select public.db_audit(10)');
+  assert.equal(log[0].action, 'op_denied');
+  assert.equal(log[0].actor, 'u-agent');
+  assert.equal(log[0].detail.reason, 'manager_only');
+  await assert.rejects(as(U.agent, 'select public.db_audit(10)'), /manager_only/);
+  await pool.query(`select public.sys_audit('bootstrap', 'u-admin', '{"ok":true}')`);
+  assert.equal((await as(U.admin, 'select public.db_audit(1)'))[0].action, 'bootstrap');
 });

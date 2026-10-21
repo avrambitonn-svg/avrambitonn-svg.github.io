@@ -42,6 +42,14 @@ export function checkOp(op, current, user, store, files) {
 
   if (c === 'users') return checkUser(op, current, user, store);
 
+  // the activity log is a record of what happened: nobody rewrites it, only an admin deletes an entry
+  if (c === 'activities') {
+    if (op.op === 'remove') return role === 'admin' ? null : 'admin_only';
+    if (current) return 'append_only';
+  }
+  // sync state is the Priority engine's (an installer setting "synced" would keep a record from going out)
+  if (role === 'installer' && ((op.data && 'sync' in op.data && JSON.stringify(op.data.sync) !== JSON.stringify(current?.sync)) || op.unset?.includes('sync'))) return 'installer_scope';
+
   if (role === 'installer' && !INSTALLER.has(c)) {
     const allowed = INSTALLER_PATCH[c];
     if (c === 'contracts' && op.op === 'upsert' && !current && op.data?.status === 'proposed') return null;
@@ -56,8 +64,6 @@ export function checkOp(op, current, user, store, files) {
   }
 
   if (!manager) {
-    // the activity log is a record of what happened: add to it, never rewrite it
-    if (c === 'activities' && (op.op !== 'upsert' || current)) return 'append_only';
     // chat: write as yourself; edit or delete only your own messages
     if (c === 'chat') {
       if (current && isMarkRead(op, current, user)) return null;

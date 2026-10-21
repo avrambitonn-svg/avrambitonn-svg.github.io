@@ -9,6 +9,7 @@ import { pipeline } from 'node:stream/promises';
 import { HttpError } from '../../../../server/src/http.js';
 import { googleFeatures, knownDriveFolder, safeFileName, safeMime, uploadBufferToDrive } from '../../../../server/src/google.js';
 import { createWindowLimiter } from '../../../../server/src/limiter.js';
+import { looksLike } from '../../../../server/src/filetype.js';
 import { getStore } from './db.js';
 
 const FILE_ID_RE = /^f[a-f0-9]{24}$/;
@@ -40,11 +41,14 @@ async function save(cfg, data, { name, mime, meta }) {
 }
 
 /** The request body as a new stored file. Returns its meta ({ id, name, mime, size, ... }). */
-export async function storeUpload(req, cfg, { maxBytes = cfg.db.filesMaxBytes, meta = {} } = {}) {
+export async function storeUpload(req, cfg, { maxBytes = cfg.db.filesMaxBytes, meta = {}, checkType = false } = {}) {
   const data = Buffer.isBuffer(req.rawBody) ? req.rawBody : Buffer.alloc(0);
   if (data.length > maxBytes) throw tooLarge(maxBytes);
   if (!data.length) throw new HttpError(400, 'validation_error', 'הקובץ ריק');
-  return save(cfg, data, { name: safeFileName(req.headers['x-file-name']), mime: safeMime(req.headers['content-type']), meta });
+  const mime = safeMime(req.headers['content-type']);
+  // from the public portal the type is a stranger's claim: the bytes must agree with it
+  if (checkType && !looksLike(mime, data.subarray(0, 16))) throw new HttpError(415, 'type_mismatch', 'תוכן הקובץ לא תואם לסוג שלו. אפשר להעלות תמונה או PDF');
+  return save(cfg, data, { name: safeFileName(req.headers['x-file-name']), mime, meta });
 }
 
 /** Saves bytes the function already holds (a photo from the lead form) as a stored file. */

@@ -156,7 +156,7 @@ test('leads: validation, honeypot, customer + contact + case on the server', asy
   const bot = await s.request('POST', '/api/public/leads', { body: { name: 'בוט', phone: '0541234567', type: 'apartment', website: 'http://spam' } });
   assert.equal(bot.status, 201);
   assert.equal(bot.json.number, null);
-  const photo = `data:image/jpeg;base64,${Buffer.from('jpeg').toString('base64')}`;
+  const photo = `data:image/jpeg;base64,${Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(16)]).toString('base64')}`;
   const r = await s.request('POST', '/api/public/leads', { body: { name: 'נועה כהן', phone: '+972-54-1234567', city: 'מודיעין', type: 'apartment', text: '4 חדרים', photos: [photo], source: 'facebook' } });
   assert.equal(r.status, 201);
   assert.match(r.json.number, /^GN-\d{2}0143$/);
@@ -215,4 +215,12 @@ test('portal without a shared database answers 503', async (t) => {
   const s = await startServer(t);
   assert.equal((await s.request('GET', '/api/portal/TokenK1abcdefgh')).status, 503);
   assert.equal((await s.request('GET', '/api/health')).json.db.mode, 'off');
+});
+
+test('portal upload: the bytes must match the declared type', async (t) => {
+  const { s } = await org(t);
+  const fake = await s.request('POST', '/api/portal/TokenK1abcdefgh/upload', { headers: { 'content-type': 'image/png', 'x-file-name': 'a.png' }, body: Buffer.from('<html><script>alert(1)</script></html>') });
+  assert.equal(fake.status, 415);
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(32)]);
+  assert.equal((await s.request('POST', '/api/portal/TokenK1abcdefgh/upload', { headers: { 'content-type': 'image/png', 'x-file-name': 'a.png' }, body: png })).status, 201);
 });

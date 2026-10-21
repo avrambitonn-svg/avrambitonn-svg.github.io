@@ -6,6 +6,7 @@ import { HttpError, clientIp, readJson } from './http.js';
 import { createWindowLimiter } from './limiter.js';
 import { requireStore } from './db/index.js';
 import { readStoredFile, sendStoredFile, storeBuffer, storeUpload } from './files.js';
+import { looksLike } from './filetype.js';
 import { googleFeatures, jerusalemDate, uploadBufferToDrive } from './google.js';
 
 const TOKEN_RE = /^[A-Za-z0-9]{12,64}$/;
@@ -321,7 +322,7 @@ export async function uploadFromPortal(ctx) {
   if (!/^image\/(jpeg|png|webp|heic|heif|gif)$/.test(mime) && mime !== 'application/pdf') {
     throw new HttpError(415, 'unsupported_type', 'אפשר להעלות תמונה או PDF');
   }
-  const meta = await storeUpload(ctx.req, ctx.cfg, { maxBytes: Math.min(ctx.cfg.db.filesMaxBytes, 10 * 1024 * 1024), meta: { caseId: k.id, folder: 'customer', source: 'portal' } });
+  const meta = await storeUpload(ctx.req, ctx.cfg, { maxBytes: Math.min(ctx.cfg.db.filesMaxBytes, 10 * 1024 * 1024), meta: { caseId: k.id, folder: 'customer', source: 'portal' }, checkType: true });
   const doc = { id: uid('d'), caseId: k.id, customerId: k.customerId, folder: 'customer', name: meta.name, mime: meta.mime, size: meta.size, fileId: meta.id, uploadedAt: nowIso(), source: 'portal', customerVisible: true };
   const driveFolder = k.driveFolders?.customer;
   if (driveFolder && googleFeatures(ctx.cfg).drive) {
@@ -436,6 +437,7 @@ export async function createLead(ctx) {
   const docs = [];
   for (const [i, dataUrl] of photos.entries()) {
     const [, mime, b64] = /^data:(image\/[a-z]+);base64,(.+)$/.exec(dataUrl);
+    if (!looksLike(mime, Buffer.from(b64.slice(0, 32), 'base64'))) throw new HttpError(400, 'validation_error', 'אחת התמונות אינה קובץ תמונה תקין', { fields: [{ field: 'photos' }] });
     const name = `תמונה מהלקוח ${i + 1}.${mime === 'image/jpeg' ? 'jpg' : mime.slice(6)}`;
     const meta = await storeBuffer(ctx.cfg, Buffer.from(b64, 'base64'), { name, mime, meta: { caseId: k.id, folder: 'customer', source: 'lead' } });
     docs.push({ id: uid('d'), caseId: k.id, customerId: customer.id, folder: 'customer', name: meta.name, mime: meta.mime, size: meta.size, fileId: meta.id, uploadedAt: at, source: 'portal', customerVisible: true });

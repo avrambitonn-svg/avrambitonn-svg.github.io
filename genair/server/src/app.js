@@ -72,17 +72,17 @@ async function health({ req, cfg }) {
 //         'session'     - a signed-in user (the route checks it itself, with the role it needs)
 const ROUTES = [
   { method: 'GET', path: '/api/health', handle: health, access: 'public' },
-  { method: 'GET', path: '/api/priority/test', handle: priority.priorityTest, limit: 'priority' },
-  { method: 'GET', path: '/api/priority/customers', handle: priority.listCustomers, limit: 'priority' },
-  { method: 'POST', path: '/api/priority/customers', handle: priority.createCustomer, limit: 'priority' },
-  { method: 'GET', path: '/api/priority/items', handle: priority.listItems, limit: 'priority' },
-  { method: 'GET', path: '/api/priority/pricelists', handle: priority.listPricelists, limit: 'priority' },
-  { method: 'POST', path: '/api/priority/quotes', handle: priority.createQuote, limit: 'priority' },
-  { method: 'POST', path: '/api/priority/orders', handle: priority.createOrder, limit: 'priority' },
+  { method: 'GET', path: '/api/priority/test', handle: priority.priorityTest, limit: 'priority', noInstaller: true },
+  { method: 'GET', path: '/api/priority/customers', handle: priority.listCustomers, limit: 'priority', noInstaller: true },
+  { method: 'POST', path: '/api/priority/customers', handle: priority.createCustomer, limit: 'priority', noInstaller: true },
+  { method: 'GET', path: '/api/priority/items', handle: priority.listItems, limit: 'priority', noInstaller: true },
+  { method: 'GET', path: '/api/priority/pricelists', handle: priority.listPricelists, limit: 'priority', noInstaller: true },
+  { method: 'POST', path: '/api/priority/quotes', handle: priority.createQuote, limit: 'priority', noInstaller: true },
+  { method: 'POST', path: '/api/priority/orders', handle: priority.createOrder, limit: 'priority', noInstaller: true },
   { method: 'GET', path: '/api/priority/sync/status', handle: psync.syncStatus, access: 'session' },
   { method: 'POST', path: '/api/priority/sync/run', handle: psync.syncRun, access: 'session' },
   { method: 'POST', path: '/api/priority/webhook', handle: psync.syncWebhook, access: 'public' },
-  { method: 'POST', path: '/api/ai/messages', handle: aiMessages, limit: 'ai' },
+  { method: 'POST', path: '/api/ai/messages', handle: aiMessages, limit: 'ai', noInstaller: true },
   { method: 'POST', path: '/api/whatsapp/send', handle: whatsapp.sendWhatsapp, limit: 'whatsapp' },
   { method: 'GET', path: '/api/whatsapp/webhook', handle: whatsapp.webhookVerify, access: 'public' },
   { method: 'POST', path: '/api/whatsapp/webhook', handle: whatsapp.webhookReceive, access: 'public' },
@@ -122,6 +122,14 @@ const ROUTES = [
   { method: 'GET', path: '/api/portal/:token/files/:docId', handle: portal.portalFile, access: 'public' },
   { method: 'POST', path: '/api/public/leads', handle: portal.createLead, access: 'public' },
 ].map((r) => ({ ...r, ...compile(r.path) }));
+
+/** Every API answer: no sniffing, no framing, no referrer, HTTPS only (files add their own sandbox CSP). */
+export function securityHeaders(res) {
+  res.setHeader('x-content-type-options', 'nosniff');
+  res.setHeader('x-frame-options', 'DENY');
+  res.setHeader('referrer-policy', 'no-referrer');
+  res.setHeader('strict-transport-security', 'max-age=31536000');
+}
 
 function compile(path) {
   const names = [];
@@ -198,6 +206,7 @@ async function checkIntegration(req, cfg) {
 export async function handler(req, res) {
   try {
     const cfg = loadConfig();
+    securityHeaders(res);
     const url = new URL(req.url ?? '/', 'http://localhost');
     const path = url.pathname.replace(/\/+$/, '') || '/';
 
@@ -213,6 +222,7 @@ export async function handler(req, res) {
     const { route, params } = findRoute(req.method, path);
     const caller = route.access ? undefined : await checkIntegration(req, cfg);
     const ip = clientIp(req, cfg.db.trustProxy);
+    if (route.noInstaller && caller?.user?.role === 'installer') throw new HttpError(403, 'forbidden', 'אין הרשאה לפעולה הזו');
     rateLimit(route, caller, ip);
 
     const result = await route.handle({ req, res, url, cfg, params, caller, ip });
