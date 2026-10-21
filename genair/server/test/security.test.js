@@ -140,27 +140,45 @@ test('a session cannot be renewed forever: it ends AUTH_MAX_SESSION_HOURS after 
 
 // ------------------------------------------------------------ who reads what
 
-test('reads: an installer gets no money, quotes, contracts, suppliers, purchasing or sync state', async (t) => {
+test('reads: an installer gets what the job needs without the money', async (t) => {
   const { s, admin, inst } = await org(t);
   await ops(admin, [
     { op: 'upsert', collection: 'money', id: 'm1', data: { caseId: 'k1', kind: 'payment', amount: 5000 } },
-    { op: 'upsert', collection: 'suppliers', id: 'su1', data: { name: 'ספק' } },
+    { op: 'upsert', collection: 'suppliers', id: 'su1', data: { name: 'ספק', phone: '0501111111', email: 'sup@x.io', vatNum: '515' } },
     { op: 'upsert', collection: 'catalog', id: 'i1', data: { name: 'מזגן', price: 3000, cost: 2000 } },
+    { op: 'upsert', collection: 'contracts', id: 'ctr1', data: { customerId: 'c1', status: 'active', pricePerYear: 1800, nextVisit: '2030-01-01', unitIds: ['un1'] } },
+    { op: 'upsert', collection: 'purchaseOrders', id: 'po1', data: { supplierId: 'su1', status: 'sent', number: 'PO-1', totalCost: 9000, lines: [{ itemId: 'i1', qty: 3, unitCost: 2000 }] } },
+    { op: 'patch', collection: 'customers', id: 'c1', data: { balance: { obligo: 12000 } } },
   ], s);
   const store = await getStore(loadConfig());
   store.applyOps([{ op: 'upsert', collection: 'integrations', id: 'priority', at: now(), data: { engine: { active: true } } }], { clientId: 'priority-sync' });
   const a = (await s.request('GET', '/api/db/snapshot', { headers: bearer(admin) })).json.collections;
   const i = (await s.request('GET', '/api/db/snapshot', { headers: bearer(inst) })).json.collections;
-  for (const c of ['money', 'quotes', 'suppliers', 'integrations']) assert.ok(a[c]?.length, `admin sees ${c}`);
-  for (const c of ['money', 'quotes', 'contracts', 'suppliers', 'purchaseOrders', 'integrations']) assert.equal(i[c], undefined, `installer does not see ${c}`);
+  for (const c of ['money', 'quotes', 'suppliers', 'integrations', 'contracts', 'purchaseOrders']) assert.ok(a[c]?.length, `admin sees ${c}`);
+  for (const c of ['money', 'projects', 'integrations']) assert.equal(i[c], undefined, `installer does not see ${c}`);
   assert.ok(i.cases.length && i.appointments.length, 'field data is there');
-  const item = i.catalog.find((x) => x.id === 'i1');
-  assert.equal(item.price, undefined);
-  assert.equal(item.cost, undefined);
+  // quotes: only approved ones, lines without prices
+  await ops(admin, [{ op: 'patch', collection: 'quotes', id: 'q1', data: { status: 'approved' } }], s);
+  const approved = (await s.request('GET', '/api/db/snapshot', { headers: bearer(inst) })).json.collections.quotes;
+  assert.deepEqual(approved.map((q) => q.id), ['q1'], 'a draft or a sent quote is not for the field');
+  assert.equal(approved[0].lines[0].description, 'מזגן 1.5 כ״ס');
+  assert.equal(approved[0].lines[0].qty, 2);
+  const flat = JSON.stringify(approved);
+  for (const hidden of ['unitPrice', 'discountPct', 'vatPct', 'terms', 'aiReason', 'createdBy', 'signature', 'deposit']) assert.ok(!flat.includes(hidden), `quote shows no ${hidden}`);
+  assert.equal(i.catalog.find((x) => x.id === 'i1').cost, undefined);
+  assert.equal(i.catalog.find((x) => x.id === 'i1').price, 3000, 'the customer price list is known to the field');
+  assert.equal(i.contracts[0].pricePerYear, undefined);
+  assert.equal(i.contracts[0].nextVisit, '2030-01-01');
+  assert.equal(i.purchaseOrders[0].totalCost, undefined);
+  assert.equal(i.purchaseOrders[0].lines[0].unitCost, undefined);
+  assert.equal(i.purchaseOrders[0].lines[0].qty, 3);
+  assert.deepEqual(Object.keys(i.suppliers[0]).sort(), ['id', 'name'].sort(), 'a supplier is a name');
+  assert.equal(i.customers.find((x) => x.id === 'c1').balance, undefined, 'the customer\'s debt is not for the field');
+  assert.equal(a.customers.find((x) => x.id === 'c1').balance.obligo, 12000);
   assert.equal(i.users.find((u) => u.id === 'u-admin').email, undefined, 'staff e-mail addresses are not for the field');
   assert.equal(a.users.find((u) => u.id === 'u-admin').email, 'david@genair.co.il');
   // the same through fetch
-  const f = await s.request('POST', '/api/db/fetch', { headers: bearer(inst), body: { items: [{ c: 'money', id: 'm1' }, { c: 'integrations', id: 'priority' }, { c: 'cases', id: 'k1' }] } });
+  const f = await s.request('POST', '/api/db/fetch', { headers: bearer(inst), body: { items: [{ c: 'money', id: 'm1' }, { c: 'integrations', id: 'priority' }, { c: 'cases', id: 'k1' }, { c: 'quotes', id: 'q0' }] } });
   assert.deepEqual(f.json.items.map((x) => x.c), ['cases']);
 });
 

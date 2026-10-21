@@ -14,6 +14,7 @@ import { PurchaseOrderDialog } from './PurchaseOrderDialog'
 import type { ID } from '../../lib/types'
 import '../../features/ops/ops.css'
 import './suppliers.css'
+import { safeHref } from '../../lib/safeUrl'
 
 type Tab = 'orders' | 'expenses' | 'docs' | 'details'
 
@@ -141,7 +142,7 @@ export default function SupplierPage({ id: idProp, onBack, onOpenPo }: { id?: ID
             <div><span className="muted">איש קשר: </span>{sup.contactName ?? '—'}</div>
             <div><span className="muted">טלפון: </span>{sup.phone ? <a href={telLink(sup.phone)} className="ltr">{fmtPhone(sup.phone)}</a> : '—'}</div>
             <div><span className="muted">אימייל: </span>{sup.email ? <a href={`mailto:${sup.email}`} className="ltr">{sup.email}</a> : '—'}</div>
-            <div><span className="muted">אתר: </span>{sup.website ? <a href={sup.website} target="_blank" rel="noreferrer" className="ltr"><Globe size={13} /> {sup.website.replace(/^https?:\/\//, '')} <ExternalLink size={12} /></a> : '—'}</div>
+            <div><span className="muted">אתר: </span>{safeHref(sup.website) ? <a href={safeHref(sup.website)} target="_blank" rel="noreferrer noopener" className="ltr"><Globe size={13} /> {safeHref(sup.website)!.replace(/^https?:\/\//, '')} <ExternalLink size={12} /></a> : (sup.website ?? '—')}</div>
             <div><span className="muted">כתובת: </span>{sup.address ? <a href={`https://waze.com/ul?q=${encodeURIComponent(sup.address)}&navigate=yes`} target="_blank" rel="noreferrer"><MapPin size={13} /> {sup.address}</a> : '—'}</div>
             <div><span className="muted">ח״פ / עוסק: </span><span className="ltr">{sup.vatNum ?? '—'}</span></div>
             <div><span className="muted">תנאי תשלום: </span>{sup.paymentTerms ?? '—'}</div>

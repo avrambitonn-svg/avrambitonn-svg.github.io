@@ -18,6 +18,7 @@ import { forecast, weatherIcon, type DayForecast } from '../lib/integrations/wea
 import { useInboxPolling } from '../lib/integrations/inbox'
 import { bridge } from '../lib/sync/bridge'
 import { useNotificationAlerts } from '../lib/sync/notify'
+import { appPath } from '../lib/safeUrl'
 
 interface NavItem { to: string; label: string; icon: ReactNode; roles?: Role[]; count?: (s: ReturnType<typeof useApp.getState>) => number }
 
@@ -171,7 +172,7 @@ function Notifications() {
             <div className="list">
               {list.slice(0, 20).map((n) => (
                 <button key={n.id} className="list-item click" style={{ border: 0, background: n.read ? 'none' : '#f2fbff', textAlign: 'start', width: '100%' }}
-                  onClick={() => { patch('notifications', n.id, { read: true }); setOpen(false); if (n.link) nav(n.link) }}>
+                  onClick={() => { patch('notifications', n.id, { read: true }); setOpen(false); const to = appPath(n.link); if (to) nav(to) }}>
                   <div className="grow">
                     <div className="small" style={{ fontWeight: n.read ? 400 : 700 }}>{n.text}</div>
                     <div className="tiny muted">{relative(n.at)}</div>

@@ -5,6 +5,7 @@ import type { Doc } from './types'
 import { bridge } from './sync/bridge'
 import { serverBase, useSession } from './sync/session'
 import { download } from './integrations/links'
+import { openSafe } from './safeUrl'
 
 export const LOCAL_MAX_BYTES = 25 * 1024 * 1024
 export const SERVER_MAX_BYTES = 25 * 1024 * 1024
@@ -78,7 +79,10 @@ export const externalLink = (d: Doc) => (!d.blobKey && !d.fileId && !d.dataUrl ?
 
 export async function downloadDoc(d: Doc) {
   const link = externalLink(d)
-  if (link) return void window.open(link, '_blank', 'noopener')
+  if (link) {
+    if (!openSafe(link)) throw new Error('הקישור של המסמך לא תקין')
+    return
+  }
   const b = await docBlob(d)
   if (!b) throw new Error('אין קובץ שמור למסמך הזה')
   download(b, d.name)

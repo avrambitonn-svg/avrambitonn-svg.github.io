@@ -2,6 +2,7 @@ import { lazy, Suspense, type ReactNode } from 'react'
 import { HashRouter, Route, Routes } from 'react-router-dom'
 import { Layout } from './components/Layout'
 import { Toaster } from './components/ui'
+import { RoleGate } from './components/RoleGate'
 import { useApp } from './lib/store'
 import { AuthGate } from './features/auth/AuthGate'
 import { DemoPlayer } from './features/demo/DemoPlayer'
@@ -62,17 +63,17 @@ export default function App() {
           <Route path="service" element={<S><ServicePage /></S>} />
           <Route path="service/:id" element={<S><ServiceCallPage /></S>} />
           <Route path="contracts" element={<S><ContractsPage /></S>} />
-          <Route path="projects" element={<S><ProjectsPage /></S>} />
-          <Route path="projects/:id" element={<S><ProjectPage /></S>} />
+          <Route path="projects" element={<RoleGate roles={['admin', 'office', 'agent', 'engineer']}><S><ProjectsPage /></S></RoleGate>} />
+          <Route path="projects/:id" element={<RoleGate roles={['admin', 'office', 'agent', 'engineer']}><S><ProjectPage /></S></RoleGate>} />
           <Route path="inventory" element={<S><InventoryPage /></S>} />
-          <Route path="reports" element={<S><ReportsPage /></S>} />
-          <Route path="settings" element={<S><SettingsPage /></S>} />
-          <Route path="settings/priority" element={<S><PrioritySync /></S>} />
+          <Route path="reports" element={<RoleGate roles={['admin', 'office']}><S><ReportsPage /></S></RoleGate>} />
+          <Route path="settings" element={<RoleGate roles={['admin', 'office']}><S><SettingsPage /></S></RoleGate>} />
+          <Route path="settings/priority" element={<RoleGate roles={['admin', 'office']}><S><PrioritySync /></S></RoleGate>} />
           <Route path="tasks" element={<S><TasksPage /></S>} />
           <Route path="leave" element={<S><LeavePage /></S>} />
-          <Route path="suppliers" element={<S><SuppliersPage /></S>} />
-          <Route path="suppliers/:id" element={<S><SupplierPage /></S>} />
-          <Route path="users" element={<S><UsersPage /></S>} />
+          <Route path="suppliers" element={<RoleGate roles={['admin', 'office', 'engineer']}><S><SuppliersPage /></S></RoleGate>} />
+          <Route path="suppliers/:id" element={<RoleGate roles={['admin', 'office', 'engineer']}><S><SupplierPage /></S></RoleGate>} />
+          <Route path="users" element={<RoleGate roles={['admin', 'office']}><S><UsersPage /></S></RoleGate>} />
           <Route path="*" element={<div className="empty">העמוד לא נמצא</div>} />
         </Route>
       </Routes>

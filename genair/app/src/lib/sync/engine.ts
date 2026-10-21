@@ -311,7 +311,7 @@ async function connect() {
           scheduleFlush(0)
         } else if (ev.event === 'changes') applyChanges(data.changes, data.seq)
         else if (ev.event === 'reset') await pullSnapshot().catch(() => {})
-        else if (ev.event === 'signout') return signedOut()
+        else if (ev.event === 'signout') return signedOut((data as { reason?: string }).reason)
       }
     }
   } catch {
@@ -422,10 +422,31 @@ function onHide() {
   queue.save(true)
 }
 
-function signedOut() {
+/**
+ * The server ended the session. When time simply ran out the device keeps its copy (the person signs in again and goes on
+ * working, offline changes included). When the session was revoked (password changed, user switched off, signed out
+ * elsewhere) the copy of the organisation's data is removed from this device.
+ */
+function signedOut(reason?: string) {
   stopSync()
   clearSession()
+  if (reason === 'revoked') void wipeLocal()
 }
+
+/** Removes the organisation's data, the waiting changes and the reserved numbers from this device. */
+async function wipeLocal() {
+  await queue.clear()
+  try {
+    localStorage.removeItem(blocksKey())
+  } catch {
+    /* */
+  }
+  blocks = {}
+  asRemote(() => useApp.setState({ db: emptyDB(), syncSeq: 0, currentUserId: '' }))
+  useSync.setState({ pending: 0, error: undefined, droppedOps: undefined, ready: false })
+}
+
+const ownerKey = () => `genair-sync-owner:${serverBase()}`
 
 /** מפעיל את הסנכרון אחרי כניסה (או בפתיחה, כשיש חיבור שמור) */
 export async function startSync(): Promise<void> {
@@ -435,7 +456,7 @@ export async function startSync(): Promise<void> {
   running = true
   transport = 'sse'
   sseFailures = 0
-  setSignedOutHandler(() => signedOut())
+  setSignedOutHandler((reason) => signedOut(reason))
   queue.onChange = () => {
     useSync.setState({ pending: queue.size })
     scheduleFlush()
@@ -445,6 +466,15 @@ export async function startSync(): Promise<void> {
   bridge.resync = () => void pullSnapshot().catch(() => {})
   const dropped = await queue.load(`genair-sync-queue:${serverBase()}`, userId, bridge.early.splice(0))
   useSync.setState({ droppedOps: dropped || undefined, pending: queue.size })
+  // the copy on this device belongs to whoever signed in last; someone else (with other permissions) starts clean
+  let owner: string | null = null
+  try {
+    owner = localStorage.getItem(ownerKey())
+    localStorage.setItem(ownerKey(), userId)
+  } catch {
+    /* private mode */
+  }
+  if (owner !== userId) asRemote(() => useApp.setState({ db: emptyDB(), syncSeq: 0 }))
   loadBlocks()
 
   const s = useApp.getState()
@@ -527,15 +557,12 @@ export async function signOut() {
   if (running) await flush().catch(() => {})
   await logoutApi()
   stopSync()
-  await queue.clear()
+  await wipeLocal()
   try {
-    localStorage.removeItem(blocksKey())
+    localStorage.removeItem(ownerKey())
   } catch {
     /* */
   }
-  blocks = {}
-  asRemote(() => useApp.setState({ db: emptyDB(), syncSeq: 0, currentUserId: '' }))
-  useSync.setState({ pending: 0, error: undefined, droppedOps: undefined })
 }
 
 /** ישויות ששמורות כרגע רק במכשיר (לבדיקה לפני יציאה) */

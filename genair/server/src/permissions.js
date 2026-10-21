@@ -5,9 +5,11 @@
 //   installer: field work only (appointments, service calls, stock, docs, messages, chat, tasks, notifications,
 //   leaves, units, activities), plus the few case / contract fields that closing a job updates.
 //   Nobody but the server writes the sync state (Priority links, statuses) or the audit trail's past.
-// Reads (canRead / readFilter): everyone signed in sees the working data; money, quotes, contracts, suppliers and
-//   purchase orders are not for installers, the Priority sync state is for managers only, people see only their own
-//   notifications and leave requests (managers see all leaves), and a direct message only reaches its two people.
+// Reads (canRead / redact): everyone signed in sees the working data. An installer gets what the job needs without
+//   the money: no income / expense lines or building projects, approved quotes with lines but no prices, contracts
+//   and purchase orders without prices, suppliers by name only, the catalogue without cost. The Priority sync state is
+//   for managers only, people see only their own notifications and leave requests (managers see all leaves), and a
+//   direct message only reaches its two people.
 import { ROLES } from './auth.js';
 import { SYSTEM } from './db/store.js';
 import { cleanLinks } from './http.js';
@@ -19,7 +21,7 @@ const INSTALLER = new Set(['appointments', 'serviceCalls', 'stock', 'stockMoves'
 const INSTALLER_PATCH = { cases: new Set(['stage', 'updatedAt', 'closedAt', 'flow', 'installerIds']), contracts: new Set(['nextVisit']) };
 
 // What an installer does not see at all (prices, margins, contracts, purchasing)
-const INSTALLER_NO_READ = new Set(['money', 'quotes', 'contracts', 'suppliers', 'purchaseOrders', 'projects']);
+const INSTALLER_NO_READ = new Set(['money', 'projects']);
 const MANAGER_READ_ONLY = new Set(['integrations']);
 
 const fieldsOf = (op) => [...Object.keys(op.data ?? {}), ...(op.unset ?? [])].filter((f) => f !== 'id');
@@ -155,6 +157,7 @@ export function canRead(c, record, user) {
   if (MANAGER_READ_ONLY.has(c) && !manager) return false;
   if (role === 'installer' && INSTALLER_NO_READ.has(c)) return false;
   if (!record) return true;
+  if (role === 'installer' && c === 'quotes') return record.status === 'approved'; // "what are we installing" - nothing else
   if (c === 'notifications') return record.userId === user.id;
   if (c === 'leaves') return manager || record.userId === user.id;
   if (c === 'chat') {
@@ -165,7 +168,18 @@ export function canRead(c, record, user) {
   return true;
 }
 
-/** What a record looks like to this user: people lose the contact details and cost data they have no use for. */
+// anything that names an amount of money
+const MONEY_KEY = /price|cost|total|amount|discount|vat|deposit|balance|obligo|commission|margin|iban|bank|salary|fee/i;
+
+function withoutMoney(v, depth = 0) {
+  if (Array.isArray(v)) return depth > 2 ? v : v.map((x) => withoutMoney(x, depth + 1));
+  if (!v || typeof v !== 'object' || depth > 2) return v;
+  const out = {};
+  for (const [k, x] of Object.entries(v)) if (!MONEY_KEY.test(k)) out[k] = withoutMoney(x, depth + 1);
+  return out;
+}
+
+/** What a record looks like to this user: people lose the contact details and the money they have no use for. */
 export function redact(c, record, user) {
   if (!record) return record;
   const manager = MANAGERS.has(user?.role);
@@ -173,11 +187,29 @@ export function redact(c, record, user) {
     const { email: _e, idNumber: _i, address: _a, birthDate: _b, salary: _s, ...rest } = record;
     return rest;
   }
-  if (c === 'catalog' && user?.role === 'installer') {
-    const { cost: _c, price: _p, ...rest } = record;
-    return rest;
+  if (user?.role !== 'installer') return record;
+  switch (c) {
+    case 'catalog': {
+      const { cost: _c, ...rest } = record;
+      return rest;
+    }
+    case 'quotes':
+      return {
+        id: record.id, caseId: record.caseId, number: record.number, version: record.version, status: record.status,
+        lines: (record.lines ?? []).map((l) => ({ id: l.id, itemId: l.itemId, description: l.description, qty: l.qty, unit: l.unit, room: l.room })),
+      };
+    case 'suppliers':
+      return { id: record.id, name: record.name, active: record.active };
+    case 'customers': {
+      const { balance: _b, ...rest } = record;
+      return rest;
+    }
+    case 'contracts':
+    case 'purchaseOrders':
+      return withoutMoney(record);
+    default:
+      return record;
   }
-  return record;
 }
 
 /** Applies canRead + redact to a snapshot's collections. */

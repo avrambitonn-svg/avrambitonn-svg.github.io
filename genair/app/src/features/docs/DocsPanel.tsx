@@ -11,6 +11,7 @@ import { deleteLocalBlob, docBlob, downloadDoc, externalLink, filesOnServer, has
 import { createDriveFolder, ensureCaseFolder, googleApiMode, moveDriveFile, trashDriveFile, uploadToDrive } from '../../lib/integrations/google'
 import type { Doc, ID, ListOption } from '../../lib/types'
 import './docs.css'
+import { safeHref } from '../../lib/safeUrl'
 
 const DOC_MIME = 'application/x-genair-doc'
 const OTHER = '__other'
@@ -143,7 +144,7 @@ export function DocsPanel({ caseId, customerId, supplierId }: { caseId?: ID; cus
             {drive ? ' הם עולים גם לתיקיית התיק ב-Google Drive.' : filesOnServer() ? ' כשמחברים את Google Drive, לכל תיק נפתחת תיקייה עם אותן תיקיות משנה.' : ''}
             {' '}גוררים קבצים לתיקייה, או לוחצים על "העלאה".
           </span>
-          {drive && kase?.driveFolderUrl && <a className="btn sm" href={kase.driveFolderUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} /> התיקייה ב-Drive</a>}
+          {drive && safeHref(kase?.driveFolderUrl) && <a className="btn sm" href={safeHref(kase?.driveFolderUrl)} target="_blank" rel="noreferrer noopener"><ExternalLink size={14} /> התיקייה ב-Drive</a>}
           {drive && kase && !kase.driveFolderId && <button className="btn sm" onClick={() => void createDriveFolder(kase).then(() => toast.success('נפתחה תיקייה ב-Drive'))}><FolderPlus size={14} /> פתיחת תיקייה ב-Drive</button>}
         </div>
       </Callout>
@@ -316,7 +317,7 @@ function Preview({ d, onClose }: { d: Doc; onClose: () => void }) {
       onClose={onClose}
       footer={
         <>
-          {link && <a className="btn" href={link} target="_blank" rel="noreferrer"><ExternalLink size={15} /> פתיחה</a>}
+          {link && safeHref(link) && <a className="btn" href={safeHref(link)} target="_blank" rel="noreferrer noopener"><ExternalLink size={15} /> פתיחה</a>}
           {!link && <button className="btn" onClick={() => void downloadDoc(d).catch((e) => toast.error((e as Error).message))}><Download size={15} /> הורדה</button>}
           <button className="btn primary" onClick={onClose}>סגירה</button>
         </>

@@ -2,6 +2,7 @@
 import { useEffect, useRef } from 'react'
 import type { Notification as AppNotification } from '../types'
 import { brand } from '../../brand'
+import { appPath } from '../safeUrl'
 
 export const browserNotifySupported = () => typeof window !== 'undefined' && 'Notification' in window
 export const browserNotifyPermission = (): NotificationPermission | 'unsupported' => (browserNotifySupported() ? Notification.permission : 'unsupported')
@@ -49,7 +50,7 @@ export function useNotificationAlerts(list: AppNotification[], open: (link?: str
           const shown = new Notification(brand.name, { body: n.text, tag: n.id, silent: true, icon: './favicon.svg', lang: 'he', dir: 'rtl' })
           shown.onclick = () => {
             window.focus()
-            openRef.current(n.link)
+            openRef.current(appPath(n.link))
             shown.close()
           }
         } catch {

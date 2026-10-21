@@ -6,10 +6,13 @@ import { readSyncConfig, writeSyncConfig } from './bridge'
 export class SyncError extends Error {
   status: number
   code?: string
-  constructor(message: string, status: number, code?: string) {
+  /** why a 401 happened: 'expired' (time ran out), 'revoked' (signed out elsewhere, password changed, user switched off) or 'missing' */
+  reason?: string
+  constructor(message: string, status: number, code?: string, reason?: string) {
     super(message)
     this.status = status
     this.code = code
+    this.reason = reason
   }
 }
 
@@ -32,8 +35,8 @@ function saveToken(token: string) {
   useSession.setState({ token })
 }
 
-let onSignedOut: (() => void) | null = null
-export const setSignedOutHandler = (fn: () => void) => {
+let onSignedOut: ((reason?: string) => void) | null = null
+export const setSignedOutHandler = (fn: (reason?: string) => void) => {
   onSignedOut = fn
 }
 
@@ -51,8 +54,8 @@ async function parse(res: Response) {
     body = text
   }
   if (!res.ok) {
-    const err = (body as { error?: { message?: string; code?: string } })?.error
-    throw new SyncError(err?.message || `שגיאה ${res.status}`, res.status, err?.code)
+    const err = (body as { error?: { message?: string; code?: string; details?: { reason?: string } } })?.error
+    throw new SyncError(err?.message || `שגיאה ${res.status}`, res.status, err?.code, err?.details?.reason)
   }
   return body
 }
@@ -74,8 +77,9 @@ export async function authFetch<T>(path: string, init: RequestInit & { json?: un
   const fresh = res.headers.get('x-auth-token')
   if (fresh && token && !init.anonymous) saveToken(fresh)
   if (res.status === 401 && token && !init.anonymous) {
+    const reason = await res.clone().json().then((b: { error?: { details?: { reason?: string } } }) => b?.error?.details?.reason).catch(() => undefined)
     clearSession()
-    onSignedOut?.()
+    onSignedOut?.(reason)
   }
   return (await parse(res)) as T
 }

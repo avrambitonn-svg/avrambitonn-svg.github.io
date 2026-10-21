@@ -29,7 +29,8 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
   if (!serverUrl.trim()) throw new ServerError('לא הוגדר שרת אינטגרציות (הגדרות ← חיבורים)', 0, 'no_server')
   const headers: Record<string, string> = { ...authHeaders(), ...(init.headers as Record<string, string>) }
   if (init.json !== undefined) headers['content-type'] = 'application/json'
-  if (appToken) headers['x-app-token'] = appToken
+  // a signed-in person is identified by their session; the shared token is only for a server with no database
+  if (appToken && !headers.authorization) headers['x-app-token'] = appToken
   let res: Response
   try {
     res = await fetch(serverUrl.replace(/\/$/, '') + path, {

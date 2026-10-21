@@ -156,7 +156,7 @@ function LocalMode() {
                   </select>
                 </Field>
                 {db.bootstrapToken ? (
-                  <Field label="קוד הקמה" hint="BOOTSTRAP_TOKEN מהגדרות השרת"><input className="input ltr" value={code} onChange={(e) => setCode(e.target.value)} /></Field>
+                  <Field label="קוד הקמה" hint="מופיע ביומן השרת בהפעלה (שורת [setup]), או BOOTSTRAP_TOKEN אם הוגדר"><input className="input ltr" value={code} onChange={(e) => setCode(e.target.value)} /></Field>
                 ) : <div />}
                 <Field label="סיסמה למנהל" hint="לפחות 8 תווים"><input className="input ltr" type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} /></Field>
                 <Field label="שוב, לאימות"><input className="input ltr" type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} /></Field>

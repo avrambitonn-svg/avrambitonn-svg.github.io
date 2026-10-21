@@ -21,6 +21,7 @@ import { appUrl, caseContact, customerQuote, firstName, viaMethod, greetName, gr
 import { publicServerUrl } from '../../lib/sync/bridge'
 import { docBlob, saveLocalBlob, sizeLabel } from '../../lib/files'
 import './portal.css'
+import { safeMediaSrc } from '../../lib/safeUrl'
 
 // כל כניסה נרשמת פעם אחת לכל ביקור בדף
 const seen = new Set<string>()
@@ -228,7 +229,7 @@ function LocalPortal({ token }: { token: string }) {
       staff().forEach((u) => s.notify(u, `הודעה מ${customer?.name ?? 'הלקוח'}: ${body.slice(0, 60)}`, `/cases/${k.id}`))
     },
     openDoc: async (d) => {
-      if (d.href) return void window.open(d.href, '_blank', 'noopener')
+      { const h = safeMediaSrc(d.href); if (h) return void window.open(h, '_blank', 'noopener') }
       const b = d.doc && (await docBlob(d.doc))
       if (!b) return openWhatsApp(`שלום, אשמח לקבל את המסמך "${d.name}" (תיק ${k?.number}). תודה!`)
       const url = URL.createObjectURL(b)
@@ -363,7 +364,7 @@ function RemotePortal({ token, server }: { token: string; server: string }) {
       await load()
     },
     openDoc: async (d) => {
-      if (d.href) return void window.open(d.href, '_blank', 'noopener')
+      { const h = safeMediaSrc(d.href); if (h) return void window.open(h, '_blank', 'noopener') }
       openWhatsApp(`שלום, אשמח לקבל את המסמך "${d.name}" (תיק ${data?.case.number}). תודה!`)
     },
     printQuote: () => {
@@ -564,7 +565,7 @@ function QuoteSection({ m, a }: { m: Model; a: Actions }) {
               {quote.deposit?.paidAt
                 ? `המקדמה (${money(quote.deposit.amount)}) התקבלה${quote.deposit.method ? ` ${viaMethod(quote.deposit.method)}` : ''}.`
                 : quote.deposit
-                  ? `המקדמה (${money(quote.deposit.amount)}) ממתינה. פרטי ההעברה נשלחו אליכם.`
+                  ? `המקדמה (${money(quote.deposit.amount)}) ממתינה לתשלום. ${quote.deposit.method === 'transfer' ? 'פרטי ההעברה נשלחו אליכם.' : 'המשרד ייצור איתכם קשר לביצוע התשלום.'}`
                   : 'נחזור אליכם לתיאום ההתקנה.'}
             </div>
           </div>
@@ -683,7 +684,7 @@ function ApproveFlow({ quote, a, total, deposit, depositPct, defaultName, terms,
           <>
             <button className="btn" onClick={() => setStep('sign')} disabled={busy}>חזרה</button>
             <button className="btn primary" onClick={() => void confirm()} disabled={busy}>
-              {busy ? 'מאשר...' : method === 'transfer' ? 'אישור ההזמנה' : `אישור ותשלום ${money(deposit)}`}
+              {busy ? 'מאשר...' : method === 'transfer' ? 'אישור ההזמנה' : `אישור ההזמנה (מקדמה ${money(deposit)})`}
             </button>
           </>
         ) : (

@@ -1,5 +1,6 @@
 # שרת ג'נאייר: אינטגרציות + מסד נתונים משותף. בלי תלויות, ולכן בלי npm install.
-FROM node:22-alpine
+# הגרסה מקובעת לשורת תיקוני אבטחה של Node 22; לקבע ל-digest (node:22.22-alpine@sha256:...) בפריסה לייצור, ולעדכן עם כל תיקון
+FROM node:22.22-alpine
 WORKDIR /app
 ENV NODE_ENV=production PORT=8787 HOST=0.0.0.0 DB_MODE=file DATA_DIR=/data
 COPY package.json ./

@@ -11,6 +11,7 @@ import {
 } from './chat'
 import '../ops/ops.css'
 import './chat.css'
+import { safeMediaSrc } from '../../lib/safeUrl'
 
 const MAX_FILE = 1_500_000
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -43,7 +44,7 @@ function Atts({ list }: { list?: Attachment[] }) {
     <>
       {list.map((a, i) => {
         const doc = a.docId ? docs.find((d) => d.id === a.docId) : undefined
-        const href = a.dataUrl ?? doc?.dataUrl ?? doc?.url ?? doc?.webViewLink
+        const href = safeMediaSrc(a.dataUrl ?? doc?.dataUrl ?? doc?.url ?? doc?.webViewLink)
         const mime = a.mime ?? doc?.mime ?? ''
         if (href && mime.startsWith('image/')) return <a key={i} href={href} download={a.name} title={a.name}><img className="cm-img" src={href} alt={a.name} /></a>
         const inner = <><FileText size={15} /> <span>{a.name}</span>{doc && <small>מסמכי התיק</small>}</>
