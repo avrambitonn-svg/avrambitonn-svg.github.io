@@ -82,6 +82,7 @@ export class EdgeResponse extends Writable {
 
   writeHead(status, headers = {}) {
     if (this.headersSent) return this;
+    if (this.mapStatus) status = this.mapStatus(status);
     this.statusCode = status;
     for (const [k, v] of Object.entries(headers)) if (v !== undefined) this.setHeader(k, v);
     this.headersSent = true;

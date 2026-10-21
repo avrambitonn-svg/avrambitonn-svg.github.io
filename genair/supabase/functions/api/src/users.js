@@ -89,6 +89,7 @@ export async function setUserPassword({ req, cfg, params, caller }) {
   const members = (await cfg.edge.rpc('sys_members')) ?? [];
   if (members.some((m) => m.loginEmail === email && m.userId !== target.id)) throw loginTaken();
   const mine = members.find((m) => m.userId === target.id);
+  // a password set through the admin API ends every session of that account (GoTrue: UpdatePassword -> Logout)
   const account = mine
     ? await cfg.edge.sb.updateUser(mine.authId, { email, password, email_confirm: true })
     : await cfg.edge.sb.upsertUser(email, password);
@@ -126,6 +127,7 @@ export async function bootstrap({ req, cfg }) {
   const resume = !empty && !((await rpc('sys_members')) ?? []).length;
   if (!empty && !resume) throw already();
   const body = await readJson(req);
+  if (!String(body.bootstrapToken ?? '').trim()) throw new HttpError(403, 'bootstrap_token_required', 'צריך להזין את קוד ההקמה (BOOTSTRAP_TOKEN)');
   if (!safeEqual(String(body.bootstrapToken ?? ''), secret)) {
     failuresByIp.hit(ip);
     throw new HttpError(401, 'invalid_bootstrap_token', 'קוד ההקמה (BOOTSTRAP_TOKEN) שגוי');

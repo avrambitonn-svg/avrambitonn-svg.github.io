@@ -3325,15 +3325,16 @@ function peekClaims(token) {
     return null;
   }
 }
-var unauthorized = (reason) => new HttpError(401, "unauthorized", reason === "expired" ? "\u05E4\u05D2 \u05EA\u05D5\u05E7\u05E3 \u05D4\u05D4\u05EA\u05D7\u05D1\u05E8\u05D5\u05EA, \u05E6\u05E8\u05D9\u05DA \u05DC\u05D4\u05EA\u05D7\u05D1\u05E8 \u05E9\u05D5\u05D1" : "\u05E6\u05E8\u05D9\u05DA \u05DC\u05D4\u05EA\u05D7\u05D1\u05E8 \u05DC\u05DE\u05E2\u05E8\u05DB\u05EA", { reason });
+var unauthorized = (reason, message) => new HttpError(401, "unauthorized", message, { reason });
+var noToken = () => unauthorized("expired", "\u05E6\u05E8\u05D9\u05DA \u05DC\u05D4\u05EA\u05D7\u05D1\u05E8 \u05DC\u05DE\u05E2\u05E8\u05DB\u05EA");
 async function resolve(cfg, req) {
   const token = bearer(req);
   const claims = token && token.split(".").length === 3 ? peekClaims(token) : null;
-  if (!token || claims && !claims.sub || /^sb_(publishable|secret)_/.test(token)) throw unauthorized("missing");
+  if (!token || claims && !claims.sub || /^sb_(publishable|secret)_/.test(token)) throw noToken();
   const user = await cfg.edge.sb.getUser(token);
-  if (!user) throw unauthorized("expired");
+  if (!user) throw unauthorized("expired", "\u05E4\u05D2 \u05EA\u05D5\u05E7\u05E3 \u05D4\u05D4\u05EA\u05D7\u05D1\u05E8\u05D5\u05EA, \u05E6\u05E8\u05D9\u05DA \u05DC\u05D4\u05EA\u05D7\u05D1\u05E8 \u05E9\u05D5\u05D1");
   const m = await cfg.edge.rpc("sys_member_by_auth", { p_auth_id: user.id });
-  if (!m?.user) throw unauthorized("revoked");
+  if (!m?.user) throw unauthorized("revoked", "\u05D4\u05DE\u05E9\u05EA\u05DE\u05E9 \u05DC\u05D0 \u05E4\u05E2\u05D9\u05DC \u05D1\u05DE\u05E2\u05E8\u05DB\u05EA");
   return { user: m.user, authId: user.id, mustChange: Boolean(m.mustChange) };
 }
 async function requireMember(cfg, req) {
@@ -4123,6 +4124,7 @@ async function bootstrap({ req, cfg }) {
   const resume = !empty && !(await rpc("sys_members") ?? []).length;
   if (!empty && !resume) throw already();
   const body = await readJson(req);
+  if (!String(body.bootstrapToken ?? "").trim()) throw new HttpError(403, "bootstrap_token_required", "\u05E6\u05E8\u05D9\u05DA \u05DC\u05D4\u05D6\u05D9\u05DF \u05D0\u05EA \u05E7\u05D5\u05D3 \u05D4\u05D4\u05E7\u05DE\u05D4 (BOOTSTRAP_TOKEN)");
   if (!safeEqual(String(body.bootstrapToken ?? ""), secret)) {
     failuresByIp2.hit(ip);
     throw new HttpError(401, "invalid_bootstrap_token", "\u05E7\u05D5\u05D3 \u05D4\u05D4\u05E7\u05DE\u05D4 (BOOTSTRAP_TOKEN) \u05E9\u05D2\u05D5\u05D9");
@@ -4306,6 +4308,7 @@ var EdgeResponse = class extends Writable {
   }
   writeHead(status, headers = {}) {
     if (this.headersSent) return this;
+    if (this.mapStatus) status = this.mapStatus(status);
     this.statusCode = status;
     for (const [k2, v] of Object.entries(headers)) if (v !== void 0) this.setHeader(k2, v);
     this.headersSent = true;
@@ -4403,6 +4406,10 @@ async function health({ req, cfg }) {
     }
   };
 }
+function aiProxy(ctx) {
+  ctx.res.mapStatus = (status) => status === 401 ? 502 : status;
+  return aiMessages(ctx);
+}
 var ROUTES = [
   { method: "GET", path: "/api/health", handle: health, access: "public" },
   { method: "GET", path: "/api/priority/test", handle: priorityTest, limit: "priority" },
@@ -4416,7 +4423,7 @@ var ROUTES = [
   { method: "POST", path: "/api/priority/sync/run", handle: syncRun },
   { method: "POST", path: "/api/priority/webhook", handle: syncWebhook, access: "public" },
   { method: "POST", path: "/api/priority/cron", handle: syncCron, access: "public" },
-  { method: "POST", path: "/api/ai/messages", handle: aiMessages, limit: "ai" },
+  { method: "POST", path: "/api/ai/messages", handle: aiProxy, limit: "ai" },
   { method: "POST", path: "/api/whatsapp/send", handle: sendWhatsapp, limit: "whatsapp" },
   { method: "GET", path: "/api/whatsapp/webhook", handle: webhookVerify, access: "public" },
   { method: "POST", path: "/api/whatsapp/webhook", handle: webhookReceive, access: "public" },
@@ -4476,6 +4483,7 @@ function findRoute(method, path) {
 function edgeConfig(env, opts = {}) {
   const cfg = loadConfig(env);
   cfg.db = { ...cfg.db, mode: "supabase", trustProxy: 0 };
+  cfg.allowedOrigins = [.../* @__PURE__ */ new Set([...cfg.allowedOrigins, "null"])];
   const sb = createSupabase(env, opts.fetch);
   let store = null;
   cfg.edge = {

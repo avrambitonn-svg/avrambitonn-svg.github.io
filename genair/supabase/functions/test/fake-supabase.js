@@ -123,7 +123,11 @@ export async function startFakeSupabase({ db = 'genair_edge' } = {}) {
           const attrs = JSON.parse(body);
           if (attrs.email && taken(attrs.email, user.id)) return send(res, 422, { code: 422, error_code: 'email_exists', msg: 'email taken' });
           if (attrs.email) user.email = attrs.email;
-          if (attrs.password) user.password = attrs.password;
+          if (attrs.password) {
+            user.password = attrs.password;
+            // like GoTrue (UpdatePassword -> Logout): every session of the account ends
+            for (const [t, id] of auth.tokens) if (id === user.id) auth.tokens.delete(t);
+          }
           return send(res, 200, publicUser(user));
         }
       }

@@ -35,6 +35,7 @@ before(async () => {
   deno = spawn(DENO, ['run', '--allow-net', '--allow-env', '--allow-read', '--no-prompt', main], {
     env: { ...env, ...fake.env, BOOTSTRAP_TOKEN: 'boot-deno-1', PRIORITY_MODE: 'off', PRIORITY_CRON_SECRET: 'cron-deno' },
     stdio: ['ignore', 'pipe', 'inherit'],
+    detached: true, // its own process group: a launcher script (npm's deno) and the real binary go down together
   });
   base = await new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error('deno did not start')), 30_000);
@@ -50,11 +51,17 @@ before(async () => {
 });
 
 after(async () => {
-  deno?.kill();
+  if (deno?.pid) {
+    try {
+      process.kill(-deno.pid, 'SIGTERM');
+    } catch {
+      /* gone */
+    }
+  }
   await fake?.close();
 });
 
-test('under Deno: health, bootstrap, file upload and download, portal, cron key', { skip: !hasDeno && 'deno is not installed' }, async () => {
+test('under Deno: health, bootstrap, file upload and download, portal, cron key', { skip: !hasDeno && 'deno is not installed', timeout: 60_000 }, async () => {
   const health = await (await fetch(`${base}/api/health`)).json();
   assert.deepEqual(health, { ok: true, db: { mode: 'supabase', ready: true, bootstrapped: false, bootstrapToken: true } });
 

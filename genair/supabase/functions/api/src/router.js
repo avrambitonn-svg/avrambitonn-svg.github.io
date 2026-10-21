@@ -68,6 +68,12 @@ async function health({ req, cfg }) {
   };
 }
 
+/** The server's AI proxy; a 401 from Anthropic (wrong ANTHROPIC_API_KEY) goes out as 502: here 401 means "sign in again". */
+function aiProxy(ctx) {
+  ctx.res.mapStatus = (status) => (status === 401 ? 502 : status);
+  return aiMessages(ctx);
+}
+
 // access: 'member' (default) - a signed-in member of the organization (Supabase access token)
 //         'public'           - no credentials (health, webhooks, first setup, the customer portal, the lead form);
 //                              routes that need a secret (cron, webhooks, bootstrap) check it themselves
@@ -84,7 +90,7 @@ const ROUTES = [
   { method: 'POST', path: '/api/priority/sync/run', handle: psync.syncRun },
   { method: 'POST', path: '/api/priority/webhook', handle: psync.syncWebhook, access: 'public' },
   { method: 'POST', path: '/api/priority/cron', handle: psync.syncCron, access: 'public' },
-  { method: 'POST', path: '/api/ai/messages', handle: aiMessages, limit: 'ai' },
+  { method: 'POST', path: '/api/ai/messages', handle: aiProxy, limit: 'ai' },
   { method: 'POST', path: '/api/whatsapp/send', handle: whatsapp.sendWhatsapp, limit: 'whatsapp' },
   { method: 'GET', path: '/api/whatsapp/webhook', handle: whatsapp.webhookVerify, access: 'public' },
   { method: 'POST', path: '/api/whatsapp/webhook', handle: inbox.webhookReceive, access: 'public' },
@@ -150,6 +156,9 @@ function findRoute(method, path) {
 export function edgeConfig(env, opts = {}) {
   const cfg = loadConfig(env);
   cfg.db = { ...cfg.db, mode: 'supabase', trustProxy: 0 };
+  // ALLOWED_ORIGINS (default localhost:5173 / 4173) plus "null": the single-file Windows install runs from file://.
+  // Access is by bearer token, never cookies, so a page without a token gains nothing from CORS.
+  cfg.allowedOrigins = [...new Set([...cfg.allowedOrigins, 'null'])];
   const sb = createSupabase(env, opts.fetch);
   let store = null;
   cfg.edge = {

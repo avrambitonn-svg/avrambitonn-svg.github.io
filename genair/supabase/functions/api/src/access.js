@@ -17,18 +17,20 @@ function peekClaims(token) {
   }
 }
 
-const unauthorized = (reason) =>
-  new HttpError(401, 'unauthorized', reason === 'expired' ? 'פג תוקף ההתחברות, צריך להתחבר שוב' : 'צריך להתחבר למערכת', { reason });
+// 401 means exactly this (the app signs out on it): 'expired' - no token or one Supabase Auth does not accept
+// (keep the device's data, sign in again); 'revoked' - not a member or deactivated (wipe it)
+const unauthorized = (reason, message) => new HttpError(401, 'unauthorized', message, { reason });
+const noToken = () => unauthorized('expired', 'צריך להתחבר למערכת');
 
 async function resolve(cfg, req) {
   const token = bearer(req);
   // no token, or the publishable / anon key that supabase-js sends when nobody is signed in
   const claims = token && token.split('.').length === 3 ? peekClaims(token) : null;
-  if (!token || (claims && !claims.sub) || /^sb_(publishable|secret)_/.test(token)) throw unauthorized('missing');
+  if (!token || (claims && !claims.sub) || /^sb_(publishable|secret)_/.test(token)) throw noToken();
   const user = await cfg.edge.sb.getUser(token);
-  if (!user) throw unauthorized('expired');
+  if (!user) throw unauthorized('expired', 'פג תוקף ההתחברות, צריך להתחבר שוב');
   const m = await cfg.edge.rpc('sys_member_by_auth', { p_auth_id: user.id });
-  if (!m?.user) throw unauthorized('revoked');
+  if (!m?.user) throw unauthorized('revoked', 'המשתמש לא פעיל במערכת');
   return { user: m.user, authId: user.id, mustChange: Boolean(m.mustChange) };
 }
 

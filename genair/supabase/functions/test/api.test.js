@@ -74,6 +74,12 @@ test('CORS: preflight from an allowed origin, refusal for another', async () => 
   assert.equal(ok.headers.get('access-control-allow-origin'), 'http://localhost:5173');
   const allow = ok.headers.get('access-control-allow-headers');
   for (const h of ['apikey', 'x-client-info', 'authorization', 'content-type', 'x-file-name', 'x-case-id', 'x-folder', 'x-drive-folder-id', 'anthropic-beta']) assert.match(allow, new RegExp(`\\b${h}\\b`));
+  // the single-file Windows install runs from file:// (Origin: null)
+  const file = await call('OPTIONS', '/api/ai/messages', { headers: { origin: 'null', 'access-control-request-method': 'POST' } });
+  assert.equal(file.status, 204);
+  assert.equal(file.headers.get('access-control-allow-origin'), 'null');
+  const prod = await call('OPTIONS', '/api/files', { env: { ...env, ALLOWED_ORIGINS: 'https://genair.vercel.app' }, headers: { origin: 'https://genair.vercel.app' } });
+  assert.equal(prod.headers.get('access-control-allow-origin'), 'https://genair.vercel.app');
   const bad = await call('GET', '/api/health', { headers: { origin: 'https://evil.example' } });
   assert.equal(bad.status, 403);
   assert.equal(bad.json.error.code, 'origin_not_allowed');
@@ -97,6 +103,9 @@ test('bootstrap: needs the BOOTSTRAP_TOKEN secret and the right code', async () 
   const noSecret = await call('POST', '/api/auth/bootstrap', { body, env: { ...env, BOOTSTRAP_TOKEN: '' } });
   assert.equal(noSecret.status, 403);
   assert.equal(noSecret.json.error.code, 'bootstrap_token_required');
+  const noCode = await call('POST', '/api/auth/bootstrap', { body: { ...body, bootstrapToken: '' } });
+  assert.equal(noCode.status, 403);
+  assert.equal(noCode.json.error.code, 'bootstrap_token_required');
   const wrong = await call('POST', '/api/auth/bootstrap', { body: { ...body, bootstrapToken: 'nope' } });
   assert.equal(wrong.status, 401);
   assert.equal(wrong.json.error.code, 'invalid_bootstrap_token');
@@ -149,9 +158,10 @@ test('health: setup done; members also see the version and features', async () =
 test('signed-in routes: missing, invalid and revoked tokens', async () => {
   const none = await call('GET', '/api/whatsapp/inbox');
   assert.equal(none.status, 401);
-  assert.equal(none.json.error.details.reason, 'missing');
+  assert.equal(none.json.error.details.reason, 'expired');
   const anonKey = await call('GET', '/api/whatsapp/inbox', { token: 'sb_publishable_abc' });
-  assert.equal(anonKey.json.error.details.reason, 'missing');
+  assert.equal(anonKey.status, 401);
+  assert.equal(anonKey.json.error.details.reason, 'expired');
   const bad = await call('GET', '/api/whatsapp/inbox', { token: 'eyJ.eyJzdWIiOiJ4In0.sig' });
   assert.equal(bad.status, 401);
   assert.equal(bad.json.error.details.reason, 'expired');
@@ -227,6 +237,17 @@ test('users screen: managers see who can sign in, with the login and last sign-i
   assert.equal((await call('GET', '/api/auth/users', { token: s.agent })).status, 403);
 });
 
+test('a password set by the admin ends the user\'s existing sessions', async () => {
+  assert.equal((await call('GET', '/api/whatsapp/inbox', { token: s.agent })).status, 200);
+  const r = await call('POST', '/api/auth/users/u-agent/password', { token: s.admin, body: { password: 'agent-pass-4' } });
+  assert.equal(r.status, 200);
+  const old = await call('GET', '/api/whatsapp/inbox', { token: s.agent });
+  assert.equal(old.status, 401);
+  assert.equal(old.json.error.details.reason, 'expired');
+  s.agent = await signIn('0523334444@phone.genair.app', 'agent-pass-4');
+  assert.equal((await call('GET', '/api/whatsapp/inbox', { token: s.agent })).status, 200);
+});
+
 // ------------------------------------------------------------ customer portal and lead form
 
 test('portal: the customer sees their case and approves the quote (deposit pending)', async () => {
@@ -280,7 +301,8 @@ test('lead form: customer pending review, case, photos stored as files', async (
   assert.match(file.path, new RegExp(`^portal/${k.id}/${docs[0].fileId}-`));
   assert.deepEqual(fake.storage.get(file.path).data, Buffer.from(PNG, 'base64'));
   // the customer opens the photo through their portal link
-  const img = await call('GET', `/api/portal/${r.json.portalToken}/files/${docs[0].id}`);
+  // opened as a plain link: no apikey, no Authorization
+  const img = await call('GET', `/api/portal/${r.json.portalToken}/files/${docs[0].id}`, { headers: {} });
   assert.equal(img.status, 200);
   assert.equal(img.headers.get('content-type'), 'image/png');
   assert.deepEqual(img.buf, Buffer.from(PNG, 'base64'));
@@ -460,6 +482,7 @@ test('AI proxy: the server\'s module streams Anthropic\'s server-sent events thr
   globalThis.fetch = async (url, init) => {
     if (!String(url).startsWith('https://api.anthropic.com/')) return realFetch(url, init);
     seen = { url: String(url), headers: init.headers, body: Buffer.from(init.body).toString('utf8') };
+    if (init.headers['x-api-key'] === 'sk-wrong') return new Response('{"type":"error","error":{"type":"authentication_error"}}', { status: 401, headers: { 'content-type': 'application/json' } });
     const enc = new TextEncoder();
     const body = new ReadableStream({
       async start(c) {
@@ -484,6 +507,10 @@ test('AI proxy: the server\'s module streams Anthropic\'s server-sent events thr
     const bad = await call('POST', '/api/ai/messages', { token: s.office, env: e, body: { ...req, model: 'other' } });
     assert.equal(bad.status, 400);
     assert.equal((await call('POST', '/api/ai/messages', { env: e, body: req })).status, 401);
+    // a wrong ANTHROPIC_API_KEY is not the user's session: never 401 on a signed-in call
+    const key = await call('POST', '/api/ai/messages', { token: s.office, env: { ...env, ANTHROPIC_API_KEY: 'sk-wrong' }, body: req });
+    assert.equal(key.status, 502);
+    assert.equal(key.json.error.type, 'authentication_error');
   } finally {
     globalThis.fetch = realFetch;
   }
