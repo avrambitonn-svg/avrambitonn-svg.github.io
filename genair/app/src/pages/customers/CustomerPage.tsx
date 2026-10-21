@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { BadgeCheck, FolderPlus, MessageCircle, Pencil, RefreshCw, ShieldCheck, Wrench } from 'lucide-react'
 import { useApp, useMe } from '../../lib/store'
-import { Badge, Card, Empty, Field, Modal, toast } from '../../components/ui'
+import { Badge, Callout, Card, Empty, Field, Modal, toast } from '../../components/ui'
 import { AlertTriangle } from 'lucide-react'
 import { QuickContact } from '../../components/extras'
 import { contractTypeLabel, customerTypeLabel, serviceStatusLabel, serviceStatusTone, stageLabel, stageTone, syncLabel, syncTone } from '../../lib/labels'
@@ -10,6 +10,8 @@ import { date, daysBetween, money, phone, relative, uid } from '../../lib/format
 import { totals } from '../../lib/quote'
 import { addressText } from '../../lib/integrations/links'
 import { pushCustomer } from '../../lib/integrations/priority'
+import { approveCustomerReview } from '../../lib/actions'
+import { canOpen } from '../../lib/access'
 import { sendMessage } from '../../lib/messaging'
 import type { CustomerType } from '../../lib/types'
 import { convertToPermanent, missingDetails } from './customerUtil'
@@ -34,6 +36,9 @@ export default function CustomerPage() {
 
   if (!c) return <Card><Empty title="הלקוח לא נמצא"><Link to="/customers">לרשימת הלקוחות</Link></Empty></Card>
   const contacts = db.contacts.filter((x) => x.customerId === c.id)
+  const canReview = me.role === 'admin' || me.role === 'office' || me.role === 'agent'
+  const digits = (p?: string) => (p ?? '').replace(/\D/g, '').replace(/^972/, '0')
+  const dupes = c.pendingReview && digits(c.phone).length >= 9 ? db.customers.filter((x) => x.id !== c.id && digits(x.phone) === digits(c.phone)) : []
   const missing = missingDetails(c)
   const revenue = db.quotes.filter((q) => q.status === 'approved' && cases.some((k) => k.id === q.caseId)).reduce((s, q) => s + totals(q).net, 0)
 
@@ -46,13 +51,14 @@ export default function CustomerPage() {
               <Badge>{customerTypeLabel[c.type]}</Badge>
               <Badge tone={syncTone[c.sync.status]}>{syncLabel[c.sync.status]} ב-Priority{c.sync.priorityId ? ` · ${c.sync.priorityId}` : ''}</Badge>
               {c.temp && <Badge tone="warning">לקוח זמני</Badge>}
+              {c.pendingReview && <Badge tone="warning">פנייה מהאתר — לבדיקה</Badge>}
               {c.tags?.map((t) => <Badge key={t} tone="brand">{t}</Badge>)}
             </div>
             <h1 className="mt8">{c.name}</h1>
             <div className="small muted mt8">
               <span className="ltr">{phone(c.phone)}</span>{c.email ? ` · ${c.email}` : ''}{c.idNumber ? ` · ת״ז/ח״פ ${c.idNumber}` : ''} · לקוח מ-{date(c.createdAt)}
             </div>
-            {c.sync.error && <div className="small mt8" style={{ color: 'var(--danger)' }}>{c.sync.error}</div>}
+            {c.sync?.error && !c.pendingReview && <div className="small mt8" style={{ color: 'var(--danger)' }}>{c.sync.error}</div>}
             {missing.length > 0 && <div className="small mt8 txt-warning row" style={{ gap: 6 }}><AlertTriangle size={15} /> חסרים פרטים: {missing.join(', ')} <button className="btn sm ghost" onClick={() => setEdit(true)}>השלמה</button></div>}
           </div>
           <div className="col" style={{ alignItems: 'flex-end' }}>
@@ -66,6 +72,21 @@ export default function CustomerPage() {
           </div>
         </div>
       </Card>
+
+      {c.pendingReview && (
+        <Callout tone="warning">
+          <div className="row between wrap" style={{ gap: 8 }}>
+            <div className="col" style={{ gap: 4 }}>
+              <b>לקוח שנפתח מטופס הפנייה באתר</b>
+              <span className="small">הוא לא יישלח ל-Priority (גם לא אנשי הקשר, ההצעות והקריאות שלו) עד שתאשרו אותו. קודם בודקים שאין כבר לקוח עם אותו טלפון.</span>
+              {dupes.length > 0 ? (
+                <span className="small">לקוחות עם אותו טלפון: {dupes.map((d, i) => <span key={d.id}>{i > 0 && ', '}<Link to={`/customers/${d.id}`}>{d.name}</Link></span>)}</span>
+              ) : <span className="small muted">לא נמצא לקוח אחר עם אותו טלפון.</span>}
+            </div>
+            {canReview && <button className="btn sm primary" onClick={() => { approveCustomerReview(c.id); toast.success('הלקוח אושר') }}><BadgeCheck size={15} /> אישור הלקוח</button>}
+          </div>
+        </Callout>
+      )}
 
       <div className="grid g4">
         <div className="card stat"><div className="grow"><div className="lbl">תיקים</div><div className="val">{cases.length}</div></div></div>
@@ -156,7 +177,7 @@ export default function CustomerPage() {
               ))}
             </div>
           </Card>
-          <Card title="חוזי שירות" actions={<Link className="btn sm ghost" to="/contracts">לכל החוזים</Link>}>
+          <Card title="חוזי שירות" actions={canOpen('/contracts', me.role) && <Link className="btn sm ghost" to="/contracts">לכל החוזים</Link>}>
             {contracts.length === 0 ? <Empty title="אין חוזה שירות">כדאי להציע טיפול תקופתי</Empty> : (
               <div className="list">
                 {contracts.map((k) => (

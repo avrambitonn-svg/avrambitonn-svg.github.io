@@ -87,10 +87,32 @@ const SYSTEM = `אתה מעריך מחירים בכיר בחברת מיזוג א
 - questions: מה איש המכירות צריך לברר עם הלקוח או בשטח לפני שליחה.
 - לפעמים מצורפים מסמכי מקור (תוכנית אדריכל, כתב כמויות, מפרט טכני, הצעה של ספק או מתחרה). קח מהם חדרים, מידות, כמויות ודרישות, וב-reason ציין מאיזה מסמך הנתון (למשל "לפי התוכנית, עמ׳ 2"). אם המסמך סותר את הסקר בשטח, העדף את הסקר וכתוב את הסתירה ב-questions.`
 
+// פרטים מזהים לא נשלחים ל-AI: שם הלקוח ואנשי הקשר, טלפון, אימייל ורחוב. העיר, החדרים והמידות כן (צריך אותם להצעה)
+const PHONE_RE = /(?:\+?972[-\s]?|0)\d{1,2}[-\s]?\d{3}[-\s]?\d{4}/g
+const EMAIL_RE = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g
+export function redactor(c: Case): (t?: string) => string {
+  const d = app().db
+  const cust = d.customers.find((x) => x.id === c.customerId)
+  const contacts = d.contacts.filter((x) => x.customerId === c.customerId || c.contactIds?.includes(x.id))
+  const pairs: [string | undefined, string][] = [
+    [cust?.name, 'הלקוח'],
+    [cust?.name.replace(/^(משפחת|מר|גב׳|גברת)\s+/, ''), 'הלקוח'],
+    ...contacts.map((x): [string, string] => [x.name, 'איש הקשר']),
+    ...(cust?.addresses ?? []).map((a): [string, string] => [a.street, 'רחוב']),
+  ]
+  const words = pairs.map(([w, l]) => [w?.trim() ?? '', l] as const).filter(([w]) => w.length >= 2).sort((a, b) => b[0].length - a[0].length)
+  return (t = '') => {
+    let out = t.replace(EMAIL_RE, '[אימייל]').replace(PHONE_RE, '[טלפון]')
+    for (const [w, l] of words) out = out.split(w).join(`[${l}]`)
+    return out
+  }
+}
+
 function describe(c: Case, survey: Survey, catalog: CatalogItem[]) {
+  const safe = redactor(c)
   const rooms = survey.rooms.length
     ? survey.rooms
-        .map((r) => `- ${r.name}: ${r.areaSqm ?? '?'} מ״ר, תקרה ${r.ceilingM ?? 2.7} מ׳, חשיפה לשמש ${r.sunExposure ? sunLabel[r.sunExposure] : 'לא ידועה'}${r.floor !== undefined ? `, קומה ${r.floor}` : ''}${r.notes ? ` (${r.notes})` : ''}`)
+        .map((r) => `- ${safe(r.name)}: ${r.areaSqm ?? '?'} מ״ר, תקרה ${r.ceilingM ?? 2.7} מ׳, חשיפה לשמש ${r.sunExposure ? sunLabel[r.sunExposure] : 'לא ידועה'}${r.floor !== undefined ? `, קומה ${r.floor}` : ''}${r.notes ? ` (${safe(r.notes)})` : ''}`)
         .join('\n')
     : 'לא הוזנו חדרים.'
   const items = catalog
@@ -98,8 +120,8 @@ function describe(c: Case, survey: Survey, catalog: CatalogItem[]) {
     .map((i) => `${i.id} | ${i.name} | ${i.unit}${i.btu ? ` | ${i.btu} BTU` : ''}`)
     .join('\n')
   return `סוג פרויקט: ${projectTypeLabel[c.projectType]}
-כותרת התיק: ${c.title}
-${c.notes ? `הערות מהפנייה: ${c.notes}\n` : ''}
+כותרת התיק: ${safe(c.title)}
+${c.notes ? `הערות מהפנייה: ${safe(c.notes)}\n` : ''}
 חדרים:
 ${rooms}
 
@@ -109,7 +131,7 @@ ${rooms}
 - מנוף: ${survey.craneNeeded ? 'כן' : 'לא'}
 - לוח חשמל מוכן לנקודות חדשות: ${survey.electricalReady === undefined ? 'לא ידוע' : survey.electricalReady ? 'כן' : 'לא'}
 - מזגנים קיימים לפירוק: ${survey.existingUnitsToRemove ?? 0}
-${survey.voiceNotes ? `- הערות קוליות מהסקר: ${survey.voiceNotes}\n` : ''}${survey.notes ? `- הערות: ${survey.notes}\n` : ''}
+${survey.voiceNotes ? `- הערות קוליות מהסקר: ${safe(survey.voiceNotes)}\n` : ''}${survey.notes ? `- הערות: ${safe(survey.notes)}\n` : ''}
 קטלוג (itemId | שם | יחידה | תפוקה):
 ${items}`
 }
@@ -194,9 +216,10 @@ export async function draftQuote(c: Case, survey: Survey, catalog: CatalogItem[]
   const photos = survey.photos.slice(0, maxImages)
   const images = await Promise.all(photos.map((p) => toImageBlock(p, px)))
   const content: unknown[] = []
+  const safe = redactor(c)
   photos.forEach((p, i) => {
     if (images[i]) {
-      content.push({ type: 'text', text: `תמונה ${i + 1}: ${p.caption ?? 'ללא כיתוב'}` })
+      content.push({ type: 'text', text: `תמונה ${i + 1}: ${p.caption ? safe(p.caption) : 'ללא כיתוב'}` })
       content.push(images[i])
     }
   })

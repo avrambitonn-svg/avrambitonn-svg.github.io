@@ -11,6 +11,7 @@
     "build:single": "tsc -b && vite build --config vite.single.config.ts"
   },
   "dependencies": {
+    "@fontsource/assistant": "5.2.8",
     "idb-keyval": "6.3.0",
     "lucide-react": "1.46.0",
     "qrcode": "1.5.4",

@@ -5,6 +5,8 @@ import { Toaster } from './components/ui'
 import { useApp } from './lib/store'
 import { AuthGate } from './features/auth/AuthGate'
 import { DemoPlayer } from './features/demo/DemoPlayer'
+import { RequireRole } from './components/RequireRole'
+import { routeRoles } from './lib/access'
 
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const CasesPage = lazy(() => import('./pages/cases/CasesPage'))
@@ -36,6 +38,8 @@ const UsersPage = lazy(() => import('./pages/users/UsersPage'))
 
 const Loading = () => <div className="empty">טוען...</div>
 const S = ({ children }: { children: ReactNode }) => <Suspense fallback={<Loading />}>{children}</Suspense>
+// מסך שמוגבל לתפקידים (כמו בתפריט): routeRoles ב-lib/access.ts
+const G = ({ r, children }: { r: keyof typeof routeRoles; children: ReactNode }) => <RequireRole roles={routeRoles[r]}><S>{children}</S></RequireRole>
 
 export default function App() {
   const hydrated = useApp((s) => s.hydrated)
@@ -50,29 +54,29 @@ export default function App() {
 
         <Route element={<AuthGate><Layout /></AuthGate>}>
           <Route index element={<S><Dashboard /></S>} />
-          <Route path="cases" element={<S><CasesPage /></S>} />
-          <Route path="cases/new" element={<S><NewCase /></S>} />
+          <Route path="cases" element={<G r="cases"><CasesPage /></G>} />
+          <Route path="cases/new" element={<G r="cases"><NewCase /></G>} />
           <Route path="cases/:id" element={<S><CasePage /></S>} />
-          <Route path="quotes/:id" element={<S><QuoteEditor /></S>} />
-          <Route path="customers" element={<S><CustomersPage /></S>} />
+          <Route path="quotes/:id" element={<G r="quotes"><QuoteEditor /></G>} />
+          <Route path="customers" element={<G r="customers"><CustomersPage /></G>} />
           <Route path="customers/:id" element={<S><CustomerPage /></S>} />
           <Route path="calendar" element={<S><CalendarPage /></S>} />
           <Route path="field" element={<S><FieldApp /></S>} />
           <Route path="field/:id" element={<S><FieldJob /></S>} />
           <Route path="service" element={<S><ServicePage /></S>} />
           <Route path="service/:id" element={<S><ServiceCallPage /></S>} />
-          <Route path="contracts" element={<S><ContractsPage /></S>} />
-          <Route path="projects" element={<S><ProjectsPage /></S>} />
-          <Route path="projects/:id" element={<S><ProjectPage /></S>} />
-          <Route path="inventory" element={<S><InventoryPage /></S>} />
-          <Route path="reports" element={<S><ReportsPage /></S>} />
-          <Route path="settings" element={<S><SettingsPage /></S>} />
-          <Route path="settings/priority" element={<S><PrioritySync /></S>} />
+          <Route path="contracts" element={<G r="contracts"><ContractsPage /></G>} />
+          <Route path="projects" element={<G r="projects"><ProjectsPage /></G>} />
+          <Route path="projects/:id" element={<G r="projects"><ProjectPage /></G>} />
+          <Route path="inventory" element={<G r="inventory"><InventoryPage /></G>} />
+          <Route path="reports" element={<G r="reports"><ReportsPage /></G>} />
+          <Route path="settings" element={<G r="settings"><SettingsPage /></G>} />
+          <Route path="settings/priority" element={<G r="settings"><PrioritySync /></G>} />
           <Route path="tasks" element={<S><TasksPage /></S>} />
           <Route path="leave" element={<S><LeavePage /></S>} />
-          <Route path="suppliers" element={<S><SuppliersPage /></S>} />
-          <Route path="suppliers/:id" element={<S><SupplierPage /></S>} />
-          <Route path="users" element={<S><UsersPage /></S>} />
+          <Route path="suppliers" element={<G r="suppliers"><SuppliersPage /></G>} />
+          <Route path="suppliers/:id" element={<G r="suppliers"><SupplierPage /></G>} />
+          <Route path="users" element={<G r="users"><UsersPage /></G>} />
           <Route path="*" element={<div className="empty">העמוד לא נמצא</div>} />
         </Route>
       </Routes>

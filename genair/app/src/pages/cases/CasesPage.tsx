@@ -176,7 +176,7 @@ export default function CasesPage() {
                         <div className="strong small">{k.title}</div>
                         <div className="tiny muted num">{k.number}</div>
                       </td>
-                      <td className="small">{c?.name}{c?.temp && <> <Badge tone="warning">זמני</Badge></>}</td>
+                      <td className="small">{c?.name}{c?.temp && <> <Badge tone="warning">זמני</Badge></>}{c?.pendingReview && <> <Badge tone="warning">פנייה מהאתר — לבדיקה</Badge></>}</td>
                       <td className="small hide-mobile">{projectTypeLabel[k.projectType]}</td>
                       <td><Badge tone={stageTone[k.stage]} dot>{stageLabel[k.stage]}</Badge></td>
                       <td className="hide-mobile">{a ? <span className="row" style={{ gap: 6 }}><Avatar user={a} /><span className="small">{a.name}</span></span> : <span className="muted small">—</span>}</td>

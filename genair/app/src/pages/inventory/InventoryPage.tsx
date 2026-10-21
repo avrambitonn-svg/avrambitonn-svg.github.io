@@ -26,6 +26,8 @@ export default function InventoryPage() {
   const [adjust, setAdjust] = useState<StockEntry | 'new' | null>(null)
   const [transfer, setTransfer] = useState<Transfer | null>(null)
   const [poView, setPoView] = useState<ID | null>(null)
+  // רכש ועלויות: רק למשרד ולהנהלה (למתקין השרת לא שולח ספקים, הזמנות רכש ועלויות)
+  const buyer = me.role === 'admin' || me.role === 'office'
 
   const item = (id: ID) => catalog.find((c) => c.id === id)
   const low = useMemo(() => stock.filter((e) => e.qty < e.min), [stock])
@@ -69,7 +71,7 @@ export default function InventoryPage() {
       <div className="stat-row">
         <Stat icon={<Boxes size={20} />} label="פריטים במעקב" value={stats.items} delta={`${stock.length} רשומות ב-${locations.length} מיקומים`} />
         <Stat icon={<AlertTriangle size={20} />} label="מתחת למינימום" value={low.length} tone={low.length ? 'danger' : 'success'} onClick={() => setOnlyLow(true)} />
-        <Stat icon={<Coins size={20} />} label="שווי מלאי (עלות)" value={<span style={{ fontSize: 22 }}>{money(stats.value)}</span>} tone="violet" delta={`במחסן: ${money(stats.whValue)}`} />
+        {buyer && <Stat icon={<Coins size={20} />} label="שווי מלאי (עלות)" value={<span style={{ fontSize: 22 }}>{money(stats.value)}</span>} tone="violet" delta={`במחסן: ${money(stats.whValue)}`} />}
         <Stat icon={<Truck size={20} />} label="רכבים" value={stats.vans} tone="warning" delta="מלאי שיוצא איתם לשטח" />
       </div>
 
@@ -78,7 +80,7 @@ export default function InventoryPage() {
           <Callout tone="warning">
             <div className="row between wrap" style={{ gap: 8 }}>
               <span><b>{low.length} פריטים</b> מתחת למינימום</span>
-              <button className="btn sm" onClick={() => document.getElementById('po-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>להזמנת הרכש</button>
+              {buyer && <button className="btn sm" onClick={() => document.getElementById('po-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>להזמנת הרכש</button>}
             </div>
           </Callout>
         </div>
@@ -155,8 +157,8 @@ export default function InventoryPage() {
 
         <aside className="col" style={{ gap: 16 }}>
           <LowStockCard low={low} item={item} onRefill={(t) => setTransfer(t)} />
-          <div id="po-card" style={{ scrollMarginTop: 80 }}><PurchaseCard onOpenPo={setPoView} /></div>
-          <OpenOrdersCard onOpenPo={setPoView} />
+          {buyer && <div id="po-card" style={{ scrollMarginTop: 80 }}><PurchaseCard onOpenPo={setPoView} /></div>}
+          {buyer && <OpenOrdersCard onOpenPo={setPoView} />}
         </aside>
       </div>
 
@@ -243,13 +245,13 @@ function PurchaseCard({ onOpenPo }: { onOpenPo: (id: ID) => void }) {
   const active = useMemo(() => suppliers.filter((x) => x.active).sort((a, b) => Number(['units', 'materials'].includes(b.category)) - Number(['units', 'materials'].includes(a.category)) || a.name.localeCompare(b.name, 'he')), [suppliers])
   const sup = suppliers.find((x) => x.id === supplierId)
   const lines = sugg.filter((s) => !skip.includes(s.itemId)).map((s) => ({ ...s, qty: over[s.itemId] ?? s.qty })).filter((l) => l.qty > 0)
-  const total = lines.reduce((s, l) => s + l.qty * l.item!.cost, 0)
+  const total = lines.reduce((s, l) => s + l.qty * (l.item!.cost ?? 0), 0)
 
   const create = (send?: 'whatsapp' | 'email') => {
     if (!sup || !lines.length) return
     const po = createPurchaseOrder({
       supplierId: sup.id, toLocation: MAIN_WAREHOUSE, notes: 'השלמת מלאי לפי ההזמנה המוצעת',
-      lines: lines.map((l) => ({ itemId: l.itemId, description: l.item!.name, qty: l.qty, unitCost: l.item!.cost, unit: l.item!.unit })),
+      lines: lines.map((l) => ({ itemId: l.itemId, description: l.item!.name, qty: l.qty, unitCost: l.item!.cost ?? 0, unit: l.item!.unit })),
     })
     if (send === 'whatsapp') window.open(poWhatsapp(po, sup), '_blank', 'noopener')
     if (send === 'email') window.location.href = poMail(po, sup)

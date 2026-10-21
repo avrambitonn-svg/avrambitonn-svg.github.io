@@ -26,6 +26,10 @@ export function MissingIcon({ c, size = 15 }: { c: Customer; size?: number }) {
 
 // המרה ללקוח קבוע: שולחים ל-Priority (אותו תהליך של סנכרון לקוח). כשהחיבור כבוי, הלקוח נכנס לתור
 export async function convertToPermanent(c: Customer) {
+  if (c.pendingReview) {
+    toast.info('קודם מאשרים את הלקוח שהגיע מהאתר (בודקים שאינו כפילות), ורק אז הוא נפתח ב-Priority')
+    return
+  }
   const miss = missingDetails(c)
   if (miss.includes('ח״פ / מספר עוסק')) {
     toast.error('כדי לפתוח לקוח עסקי ב-Priority צריך ח״פ / מספר עוסק')

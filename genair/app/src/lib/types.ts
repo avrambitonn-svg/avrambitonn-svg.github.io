@@ -83,6 +83,7 @@ export interface Customer {
   idNumber?: string // ת"ז או ח"פ
   addresses: Address[]
   temp?: boolean // לקוח זמני, עד שנפתח ב-Priority
+  pendingReview?: boolean // [platform] נפתח מהטופס הציבורי: לא נשלח ל-Priority עד שהמשרד מאשר (בודקים שאינו כפילות)
   sync: SyncState
   balance?: PriorityBalance // [platform]
   addressCodes?: Record<ID, string> // [platform] כתובת נוספת -> קוד אתר ב-Priority (CUSTDESTS)
@@ -210,7 +211,7 @@ export interface CatalogItem {
   category: ItemCategory
   unit: string // יח׳, מ״א, שעה, פרויקט
   price: number // לפני מע"מ
-  cost: number
+  cost?: number // [platform] השרת לא שולח את העלות למי שאינו משרד או הנהלה
   btu?: number
   hp?: number
   warrantyMonths?: number
@@ -262,7 +263,8 @@ export interface Quote {
   terms: string
   ai?: AiMeta
   signature?: Signature
-  deposit?: { amount: number; paidAt?: ISO; method?: 'credit' | 'bit' | 'transfer' | 'check' }
+  // מקדמה: status 'pending' עד שהמשרד מאמת את התשלום (מהאזור האישי היא תמיד נרשמת כממתינה); paidAt = מתי אומתה
+  deposit?: { amount: number; paidAt?: ISO; method?: 'credit' | 'bit' | 'transfer' | 'check'; status?: 'pending' | 'paid'; paidBy?: ID }
   sentAt?: ISO
   viewedAt?: ISO
   decidedAt?: ISO
@@ -274,6 +276,8 @@ export interface Quote {
   approvedVia?: 'portal' // [platform] אושרה באזור האישי מול השרת; מכשיר של המשרד משלים עמלה, פלואו ו-Priority
   approvedFromStage?: CaseStage // [platform] שלב התיק לפני האישור
   portalFollowupsAt?: ISO // [platform] מתי ההשלמות רצו (פעם אחת)
+  commissionPending?: boolean // [platform] אושרה במכשיר שלא רואה עלויות; מכשיר של המשרד מחשב את העמלה
+  commissionFollowupsAt?: ISO // [platform] מתי העמלה חושבה (פעם אחת)
   followupsBy?: ID // [platform]
 }
 

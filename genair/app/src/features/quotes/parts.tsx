@@ -1,11 +1,47 @@
 // רכיבים קטנים שמשותפים לעורך ההצעה ולחלון ה-AI
 import { useEffect, useRef, useState } from 'react'
-import { Bot, Calculator, CircleHelp, Lightbulb } from 'lucide-react'
-import type { AiMeta, PriorityOrder, SyncState } from '../../lib/types'
-import { Badge } from '../../components/ui'
+import { BadgeCheck, Bot, Calculator, CircleHelp, Lightbulb } from 'lucide-react'
+import type { AiMeta, PriorityOrder, Quote, SyncState } from '../../lib/types'
+import { Badge, Confirm, toast } from '../../components/ui'
 import { syncLabel, syncTone } from '../../lib/labels'
-import { dateTime } from '../../lib/format'
-import { confidenceLabel, confidenceTone } from './util'
+import { dateTime, money } from '../../lib/format'
+import { useMe } from '../../lib/store'
+import { depositPending, markDepositPaid } from '../../lib/actions'
+import { confidenceLabel, confidenceTone, depositMethodLabel } from './util'
+
+/** מצב המקדמה: שולמה (אומתה), או ממתינה לאימות במשרד */
+export function depositText(q: Pick<Quote, 'deposit'>): string {
+  const d = q.deposit
+  if (!d) return 'לא נרשמה מקדמה'
+  const via = d.method ? ` (${depositMethodLabel[d.method]})` : ''
+  return d.paidAt ? `מקדמה של ${money(d.amount)} התקבלה${via}` : `מקדמה של ${money(d.amount)} ממתינה לאימות${via}`
+}
+
+export function DepositBadge({ q }: { q: Pick<Quote, 'deposit'> }) {
+  if (!q.deposit) return null
+  return q.deposit.paidAt ? <Badge tone="success">מקדמה שולמה</Badge> : <Badge tone="warning">מקדמה ממתינה לאימות</Badge>
+}
+
+/** משרד והנהלה: אחרי שבדקו שהכסף התקבל בפועל, מסמנים כשולמה (נרשם תקבול "מקדמה" בכספי התיק) */
+export function MarkDepositPaid({ q }: { q: Quote }) {
+  const me = useMe()
+  const [ask, setAsk] = useState(false)
+  if (!depositPending(q) || !(me.role === 'admin' || me.role === 'office')) return null
+  return (
+    <>
+      <button type="button" className="btn sm" onClick={() => setAsk(true)}><BadgeCheck size={15} /> סימון המקדמה כשולמה</button>
+      {ask && (
+        <Confirm
+          title="סימון המקדמה כשולמה"
+          text={`לסמן רק אחרי שבדקתם שהתשלום של ${money(q.deposit!.amount)} התקבל בפועל (בחברת הסליקה, ב-Bit או בבנק). התקבול יירשם בכספי התיק.`}
+          confirmLabel="סימון כשולמה"
+          onConfirm={() => { markDepositPaid(q.id); toast.success('המקדמה סומנה כשולמה') }}
+          onClose={() => setAsk(false)}
+        />
+      )}
+    </>
+  )
+}
 
 // שדה מספר שלא "קופץ" בזמן הקלדה (1. / ריק)
 export function NumInput({

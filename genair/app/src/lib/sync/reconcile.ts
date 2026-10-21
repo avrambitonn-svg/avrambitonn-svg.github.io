@@ -17,7 +17,7 @@ const tried = new Set<string>()
 let timer: ReturnType<typeof setTimeout> | undefined
 let started = false
 
-async function claim(collection: 'quotes' | 'cases', id: string, field: 'portalFollowupsAt' | 'leadFollowupsAt'): Promise<boolean> {
+async function claim(collection: 'quotes' | 'cases', id: string, field: 'portalFollowupsAt' | 'leadFollowupsAt' | 'commissionFollowupsAt'): Promise<boolean> {
   const at = nowIso()
   const r = await authFetch<{ results: { status: string }[] }>('/api/db/ops', {
     method: 'POST',
@@ -26,7 +26,7 @@ async function claim(collection: 'quotes' | 'cases', id: string, field: 'portalF
   return r.results[0]?.status === 'ok'
 }
 
-function quoteFollowups(q: Quote) {
+function addCommission(q: Quote) {
   const s = app()
   const k = s.db.cases.find((x) => x.id === q.caseId)
   if (!k) return
@@ -38,6 +38,13 @@ function quoteFollowups(q: Quote) {
       description: `${s.db.users.find((u) => u.id === k.agentId)?.name ?? ''} — ${com.label} (${q.number})`, amount: com.amount, at: ymd(), userId: k.agentId, agentId: k.agentId, status: 'pending',
     })
   }
+}
+
+function quoteFollowups(q: Quote) {
+  const s = app()
+  const k = s.db.cases.find((x) => x.id === q.caseId)
+  if (!k) return
+  addCommission(q)
   onStageChanged(k, (q.approvedFromStage ?? 'quote') as Case['stage'], 'approved')
   const cust = s.db.customers.find((c) => c.id === k.customerId)
   if (serverSync()) return
@@ -58,6 +65,16 @@ async function run() {
   if (!me || (me.role !== 'admin' && me.role !== 'office')) return
   const quotes = s.db.quotes.filter((q) => q.approvedVia === 'portal' && !q.portalFollowupsAt && !tried.has(q.id))
   const leads = s.db.cases.filter((k) => k.createdVia === 'lead' && !k.leadFollowupsAt && !tried.has(k.id))
+  // אושרו במכשיר של סוכן, שלא רואה עלויות: רק העמלה חסרה
+  const commissions = s.db.quotes.filter((q) => q.commissionPending && q.approvedVia !== 'portal' && !q.commissionFollowupsAt && !tried.has(`c:${q.id}`))
+  for (const q of commissions) {
+    tried.add(`c:${q.id}`)
+    try {
+      if (await claim('quotes', q.id, 'commissionFollowupsAt')) addCommission(app().db.quotes.find((x) => x.id === q.id) ?? q)
+    } catch {
+      tried.delete(`c:${q.id}`)
+    }
+  }
   for (const q of quotes) {
     tried.add(q.id)
     try {

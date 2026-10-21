@@ -16,7 +16,7 @@ import { addressText, mailLink, portalUrl, shareOrCopy } from '../../lib/integra
 import { brand } from '../../brand'
 import { Badge, Callout, Card, Confirm, Empty, Field, Modal, SignaturePad, toast } from '../../components/ui'
 import { AIQuoteDialog } from '../../features/quotes/AIQuoteDialog'
-import { AiInsights, NumInput, PrioritySyncBadge } from '../../features/quotes/parts'
+import { AiInsights, MarkDepositPaid, NumInput, PrioritySyncBadge, depositText } from '../../features/quotes/parts'
 import { MIN_MARGIN, appUrl, canSeeCost, caseContact, depositMethodLabel, greetName, isQuoteExpired, isQuoteLocked } from '../../features/quotes/util'
 import '../../features/quotes/quotes.css'
 import './editor.css'
@@ -173,13 +173,10 @@ export default function QuoteEditor() {
               <div className="grow">
                 <div className="strong">ההצעה אושרה ונחתמה{q.signature ? ` ע״י ${q.signature.name}` : ''}{q.decidedAt ? ` ב-${dateTime(q.decidedAt)}` : ''}</div>
                 <div>
-                  {q.deposit
-                    ? q.deposit.paidAt
-                      ? `מקדמה של ${money(q.deposit.amount)} התקבלה${q.deposit.method ? ` (${depositMethodLabel[q.deposit.method]})` : ''}.`
-                      : `מקדמה של ${money(q.deposit.amount)} ממתינה${q.deposit.method ? ` (${depositMethodLabel[q.deposit.method]})` : ''}.`
-                    : 'לא נרשמה מקדמה.'}{' '}
+                  {depositText(q)}.{' '}
                   ההצעה נעולה לעריכה. לשינוי פותחים גרסה חדשה.
                 </div>
+                <div className="mt8"><MarkDepositPaid q={q} /></div>
               </div>
               {q.signature && <img src={q.signature.dataUrl} alt={`חתימה של ${q.signature.name}`} />}
             </div>

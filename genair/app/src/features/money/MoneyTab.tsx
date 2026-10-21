@@ -11,6 +11,7 @@ import { choices } from '../../lib/config'
 import { commissionFor } from '../../lib/commission'
 import { download } from '../../lib/integrations/links'
 import type { CatalogItem, Config, ID, ListOption, MoneyLine, Quote, Supplier, User } from '../../lib/types'
+import { MarkDepositPaid, depositText } from '../quotes/parts'
 import '../../features/ops/ops.css'
 import './money.css'
 
@@ -127,6 +128,16 @@ export function MoneyTab({ caseId }: { caseId: ID }) {
             title={<div className="row" style={{ gap: 8 }}><span className="money-ico">{sectionIcon[kind]}</span><h2>{sectionTitle[kind]}</h2><Badge tone="muted">{list.length}</Badge><span className="small strong num">{money(sum(list))}</span></div>}
             actions={kind === 'invoice' ? <span className="tiny muted">מתעדכן אוטומטית מ-Priority</span> : <button className="btn sm" onClick={() => setEdit({ kind })}><Plus size={15} /> {kind === 'budget' ? 'סעיף' : kind === 'expense' ? 'הוצאה' : kind === 'commission' ? 'עמלה' : 'תשלום'}</button>}
           >
+            {kind === 'payment' && approved?.deposit && !approved.deposit.paidAt && (
+              <div className="card-body" style={{ paddingBottom: 0 }}>
+                <Callout tone="warning">
+                  <div className="row between wrap" style={{ gap: 8 }}>
+                    <span>{depositText(approved)} (הצעה <span className="ltr">{approved.number}</span>). התקבול נרשם כאן רק אחרי שמסמנים אותה כשולמה.</span>
+                    <MarkDepositPaid q={approved} />
+                  </div>
+                </Callout>
+              </div>
+            )}
             {kind === 'commission' && suggested && !hasRuleCommission && (
               <div className="card-body" style={{ paddingBottom: 0 }}>
                 <Callout>
@@ -354,7 +365,7 @@ function BudgetDialog({ caseId, quote, catalog, types, existing, onClose }: { ca
       const item = catalog.find((c) => c.id === l.itemId)
       let t = item ? typeByCategory[item.category] : fallback
       if (!activeTypes.some((x) => x.key === t)) t = fallback
-      const cost = l.qty * (item ? item.cost : l.unitPrice * 0.6)
+      const cost = l.qty * (item?.cost ?? l.unitPrice * 0.6)
       const cur = m.get(t) ?? { amount: 0, n: 0, sale: 0 }
       m.set(t, { amount: cur.amount + cost, n: cur.n + 1, sale: cur.sale + l.qty * l.unitPrice * factor })
     }

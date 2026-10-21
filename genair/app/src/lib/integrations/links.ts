@@ -3,6 +3,22 @@ import { brand } from '../../brand'
 import { intlPhone } from '../format'
 import type { Address } from '../types'
 
+/**
+ * קישור שנבנה מנתונים שמורים (אתר ספק, קישור למסמך, קובץ מצורף): רק http(s), mailto, tel, blob,
+ * ותמונה או PDF מוטמעים (data:). כל השאר (javascript: למשל) מחזיר undefined, והקישור לא מוצג.
+ */
+export function safeHref(u?: string | null): string | undefined {
+  const v = (u ?? '').trim()
+  if (!v) return undefined
+  if (/^data:/i.test(v)) return /^data:(image\/[\w.+-]+|application\/pdf)[;,]/i.test(v) ? v : undefined
+  try {
+    const p = new URL(v, window.location.href).protocol
+    return ['http:', 'https:', 'mailto:', 'tel:', 'blob:'].includes(p) ? v : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export const addressText = (a?: Address) =>
   a ? [a.street && `${a.street} ${a.number ?? ''}`.trim(), a.city].filter(Boolean).join(', ') : ''
 

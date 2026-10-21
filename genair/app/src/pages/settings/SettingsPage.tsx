@@ -10,6 +10,7 @@ import { QR } from '../../components/extras'
 import { categoryLabel, roleLabel, syncLabel, syncTone } from '../../lib/labels'
 import { uid } from '../../lib/format'
 import { health, type Health } from '../../lib/integrations/server'
+import { bridge } from '../../lib/sync/bridge'
 import { aiMode } from '../../lib/integrations/ai'
 import { pullPrices, priorityEnabled } from '../../lib/integrations/priority'
 import { download } from '../../lib/integrations/links'
@@ -208,8 +209,8 @@ function CatalogTab() {
                 <td><input className="input sm" style={{ minWidth: 220 }} value={i.name} onChange={(e) => patch('catalog', i.id, { name: e.target.value })} /></td>
                 <td className="hide-mobile"><input className="input sm" style={{ width: 64 }} value={i.unit} onChange={(e) => patch('catalog', i.id, { unit: e.target.value })} /></td>
                 <td><input className="input sm num" style={{ width: 96 }} type="number" value={i.price} onChange={(e) => patch('catalog', i.id, { price: Number(e.target.value) })} /></td>
-                <td><input className="input sm num" style={{ width: 96 }} type="number" value={i.cost} onChange={(e) => patch('catalog', i.id, { cost: Number(e.target.value) })} /></td>
-                <td className="small num hide-mobile">{i.price ? `${Math.round(((i.price - i.cost) / i.price) * 100)}%` : '—'}</td>
+                <td><input className="input sm num" style={{ width: 96 }} type="number" value={i.cost ?? ''} onChange={(e) => patch('catalog', i.id, { cost: Number(e.target.value) })} /></td>
+                <td className="small num hide-mobile">{i.price ? `${Math.round(((i.price - (i.cost ?? 0)) / i.price) * 100)}%` : '—'}</td>
                 <td className="hide-mobile"><Badge tone={syncTone[i.sync.status]}>{syncLabel[i.sync.status]}</Badge></td>
                 <td><input type="checkbox" checked={i.active} onChange={(e) => patch('catalog', i.id, { active: e.target.checked })} /></td>
               </tr>
@@ -283,22 +284,25 @@ function IntegrationsTab() {
         <p className="small muted">חיבורים שדורשים מפתח (Priority, AI, וואטסאפ עסקי, Google) עוברים דרך שרת קטן שמחזיק את המפתחות בצורה מאובטחת. הקוד שלו נמצא בתיקיית server. בלי שרת, המערכת עובדת במצב הדגמה.</p>
         <div className="grid g2 mt12">
           <Field label="כתובת השרת"><input className="input ltr" placeholder={`https://api.${brand.domain}`} value={s.serverUrl} onChange={(e) => set({ serverUrl: e.target.value.trim() })} /></Field>
-          <Field label="אסימון גישה (APP_TOKEN)"><input className="input ltr" type="password" value={s.appToken} onChange={(e) => set({ appToken: e.target.value })} /></Field>
+          {/* במסד המשותף ההתחברות של המשתמש מספיקה, ואסימון הגישה לא נשמר ולא נשלח */}
+          {bridge.mode !== 'server' && <Field label="אסימון גישה (APP_TOKEN)" hint="רק לשרת בלי מסד משותף. נשמר בדפדפן הזה"><input className="input ltr" type="password" value={s.appToken} onChange={(e) => set({ appToken: e.target.value })} /></Field>}
         </div>
         <div className="row wrap mt12">
           <button className="btn sm" disabled={!s.serverUrl || checking} onClick={async () => {
             setChecking(true)
             try { setH(await health()); toast.success('השרת עונה') } catch (e) { setH(null); toast.error((e as Error).message) } finally { setChecking(false) }
           }}><RefreshCw size={15} /> {checking ? 'בודק...' : 'בדיקת חיבור'}</button>
-          {h && (
+          {h?.features && (
             <div className="row wrap small" style={{ gap: 6 }}>
               <Badge tone={h.features.priority !== 'off' ? 'success' : 'muted'}>Priority: {h.features.priority === 'demo' ? 'סביבת דמו' : h.features.priority === 'live' ? 'חי' : 'כבוי'}</Badge>
               <Badge tone={h.features.ai ? 'success' : 'muted'}>AI {h.features.ai ? 'פעיל' : 'כבוי'}</Badge>
               <Badge tone={h.features.whatsapp ? 'success' : 'muted'}>WhatsApp API {h.features.whatsapp ? 'פעיל' : 'כבוי'}</Badge>
-              <Badge tone={h.features.google.calendar ? 'success' : 'muted'}>Calendar {h.features.google.calendar ? 'פעיל' : 'כבוי'}</Badge>
-              <Badge tone={h.features.google.drive ? 'success' : 'muted'}>Drive {h.features.google.drive ? 'פעיל' : 'כבוי'}</Badge>
+              <Badge tone={h.features.google?.calendar ? 'success' : 'muted'}>Calendar {h.features.google?.calendar ? 'פעיל' : 'כבוי'}</Badge>
+              <Badge tone={h.features.google?.drive ? 'success' : 'muted'}>Drive {h.features.google?.drive ? 'פעיל' : 'כבוי'}</Badge>
+              {h.version && <span className="tiny muted ltr">v{h.version}</span>}
             </div>
           )}
+          {h && !h.features && <span className="small muted">השרת עונה. פירוט החיבורים מוצג רק אחרי התחברות{bridge.mode !== 'server' ? ' או עם אסימון גישה' : ''}.</span>}
         </div>
       </Card>
 
@@ -310,9 +314,11 @@ function IntegrationsTab() {
               <option value="claude-sonnet-5-5">Claude Sonnet 5.5 — זול יותר בחצי</option>
             </select>
           </Field>
-          <Field label="מפתח API לבדיקה (רק בדפדפן הזה)" hint="לשימוש בהדגמה בלבד. בייצור המפתח נשמר בשרת ולא בדפדפן." className="mt12">
-            <input className="input ltr" type="password" placeholder="sk-ant-..." value={s.anthropicKey} onChange={(e) => set({ anthropicKey: e.target.value.trim() })} />
-          </Field>
+          {!s.serverUrl.trim() && (
+            <Field label="מפתח API לבדיקה (רק בלי שרת)" hint="נשמר רק בלשונית הזו ונמחק כשסוגרים אותה או את הדפדפן; לא נשמר במאגר. האפשרות הבטוחה היא שרת האינטגרציות, שמחזיק את המפתח אצלו." className="mt12">
+              <input className="input ltr" type="password" autoComplete="off" placeholder="sk-ant-..." value={s.anthropicKey} onChange={(e) => set({ anthropicKey: e.target.value.trim() })} />
+            </Field>
+          )}
           <div className="tiny muted mt12">בלי מפתח, הטיוטה נבנית במנוע חישוב מקומי לפי שטח, גובה תקרה וחשיפה לשמש. עם מפתח, ה-AI גם מנתח את תמונות הסקר. עלות משוערת: כ-7 עד 13 סנט להצעה.</div>
         </Card>
         <Card title={<div className="row"><MessageCircle size={17} color="#25d366" /><h2>וואטסאפ</h2></div>} actions={<Status on label={s.whatsappMode === 'link' ? 'בלחיצה' : 'WhatsApp Business API'} />} pad>

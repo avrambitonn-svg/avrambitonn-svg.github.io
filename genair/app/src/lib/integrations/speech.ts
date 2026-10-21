@@ -1,4 +1,21 @@
 // הכתבה קולית בעברית דרך הדפדפן (Chrome, Edge, Safari). בלי שרת ובלי עלות.
+// ב-Chrome ההקלטה נשלחת לעיבוד בשרתי Google, ולכן בפעם הראשונה במכשיר מבקשים אישור (נשמר בדפדפן).
+const CONSENT = 'genair-dictation-consent'
+
+function consented(): boolean {
+  try {
+    if (localStorage.getItem(CONSENT) === '1') return true
+  } catch {
+    /* מצב גלישה פרטית: שואלים בכל פעם */
+  }
+  if (!window.confirm('ההכתבה הקולית נשלחת לעיבוד בשרתי Google. להמשיך?')) return false
+  try {
+    localStorage.setItem(CONSENT, '1')
+  } catch {
+    /* */
+  }
+  return true
+}
 type Rec = {
   lang: string
   continuous: boolean
@@ -19,6 +36,10 @@ export function startDictation(onText: (finalText: string, interim: string) => v
   const Ctor = W.SpeechRecognition ?? W.webkitSpeechRecognition
   if (!Ctor) {
     onEnd('הדפדפן הזה לא תומך בהכתבה קולית')
+    return () => {}
+  }
+  if (!consented()) {
+    onEnd()
     return () => {}
   }
   const r = new Ctor()

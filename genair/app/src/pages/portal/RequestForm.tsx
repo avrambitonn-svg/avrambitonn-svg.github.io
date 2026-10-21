@@ -134,6 +134,7 @@ export default function RequestForm() {
       phone,
       addresses: [{ id: addressId, city: city.trim() || 'לא צוין', street: '' }],
       tags: ['פנייה מהאתר'],
+      pendingReview: true, // כמו בשרת: לא נשלח ל-Priority עד שהמשרד בודק שאינו כפילות ומאשר
     })
     const contactId = uid('ct')
     s.upsert('contacts', { id: contactId, customerId: customer.id, name: name.trim(), phone, primary: true })

@@ -128,7 +128,8 @@ export function readSession(req, store, cfg) {
 /** Requires a session; refreshes the token (x-auth-token response header) once it is 15 minutes old. */
 export function requireSession(req, res, store, cfg) {
   const s = readSession(req, store, cfg);
-  if (!s || s.error) throw new HttpError(401, 'unauthorized', s?.error === 'expired' ? 'פג תוקף ההתחברות, צריך להתחבר שוב' : 'צריך להתחבר למערכת');
+  // details.reason tells the app whether to keep this device's data (expired: the same user logs in again) or wipe it (revoked)
+  if (!s || s.error) throw new HttpError(401, 'unauthorized', s?.error === 'expired' ? 'פג תוקף ההתחברות, צריך להתחבר שוב' : 'צריך להתחבר למערכת', { reason: s?.error ?? 'missing' });
   const nowSec = Math.floor(Date.now() / 1000);
   if (nowSec - s.claims.iat > REFRESH_AFTER_SEC) {
     const t = issueToken(store, cfg, s.user.id, { sid: s.claims.sid, pv: s.claims.pv, auth: s.claims.auth ?? s.claims.iat });

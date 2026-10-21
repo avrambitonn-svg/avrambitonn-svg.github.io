@@ -6,10 +6,12 @@ import { readSyncConfig, writeSyncConfig } from './bridge'
 export class SyncError extends Error {
   status: number
   code?: string
-  constructor(message: string, status: number, code?: string) {
+  reason?: string
+  constructor(message: string, status: number, code?: string, reason?: string) {
     super(message)
     this.status = status
     this.code = code
+    this.reason = reason
   }
 }
 
@@ -17,6 +19,18 @@ interface SessionState {
   token?: string
   userId?: string
   mustChange?: boolean
+  notice?: string // למה החיבור נגמר (מוצג במסך הכניסה)
+}
+
+/** למה השרת סיים את החיבור: פג תוקף (אותו משתמש נכנס שוב והתור נשלח), או בוטל (משתמש הושבת, סיסמה הוחלפה, יציאה ממכשיר אחר) */
+export type EndReason = 'expired' | 'revoked' | 'missing'
+
+/** הסיבה מתשובת 401 של השרת. בלי סיבה מפורשת: לפי ההודעה ("פג תוקף") */
+export function endReason(err: { code?: string; message?: string; reason?: string } | null | undefined): EndReason {
+  const r = err?.reason
+  if (r === 'expired' || r === 'revoked' || r === 'missing') return r
+  if (err?.code === 'session_expired' || /פג תוקף|expired/i.test(err?.message ?? '')) return 'expired'
+  return 'revoked'
 }
 
 // מצב החיבור (מגיב לשינויים: כניסה, יציאה, פג תוקף)
@@ -32,8 +46,8 @@ function saveToken(token: string) {
   useSession.setState({ token })
 }
 
-let onSignedOut: (() => void) | null = null
-export const setSignedOutHandler = (fn: () => void) => {
+let onSignedOut: ((reason: EndReason) => void) | null = null
+export const setSignedOutHandler = (fn: (reason: EndReason) => void) => {
   onSignedOut = fn
 }
 
@@ -51,8 +65,8 @@ async function parse(res: Response) {
     body = text
   }
   if (!res.ok) {
-    const err = (body as { error?: { message?: string; code?: string } })?.error
-    throw new SyncError(err?.message || `שגיאה ${res.status}`, res.status, err?.code)
+    const err = (body as { error?: { message?: string; code?: string; reason?: string; details?: { reason?: string } } })?.error
+    throw new SyncError(err?.message || `שגיאה ${res.status}`, res.status, err?.code, err?.reason ?? err?.details?.reason)
   }
   return body
 }
@@ -74,16 +88,19 @@ export async function authFetch<T>(path: string, init: RequestInit & { json?: un
   const fresh = res.headers.get('x-auth-token')
   if (fresh && token && !init.anonymous) saveToken(fresh)
   if (res.status === 401 && token && !init.anonymous) {
+    const err = (await parse(res).catch((e: SyncError) => e)) as SyncError
     clearSession()
-    onSignedOut?.()
+    onSignedOut?.(endReason(err))
+    throw err
   }
   return (await parse(res)) as T
 }
 
+// בלי התחברות השרת מחזיר רק { ok, db }: הגרסה והחיבורים רק למשתמש מחובר
 export interface ServerHealth {
   ok: boolean
-  version: string
-  features: { priority: string; ai: boolean; whatsapp: boolean; google: { calendar: boolean; drive: boolean } }
+  version?: string
+  features?: { priority: string; ai: boolean; whatsapp: boolean; google: { calendar: boolean; drive: boolean } }
   db?: { mode: 'file' | 'memory' | 'off'; ready?: boolean; bootstrapped?: boolean; bootstrapToken?: boolean }
 }
 
@@ -97,7 +114,7 @@ export async function login(base: string, loginId: string, password: string) {
     json: { login: loginId, password },
   })
   writeSyncConfig({ serverUrl: base, token: r.token, userId: r.user.id, expiresAt: r.expiresAt })
-  useSession.setState({ token: r.token, userId: r.user.id, mustChange: r.mustChange })
+  useSession.setState({ token: r.token, userId: r.user.id, mustChange: r.mustChange, notice: undefined })
   return r
 }
 

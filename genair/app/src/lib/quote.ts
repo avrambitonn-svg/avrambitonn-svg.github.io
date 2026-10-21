@@ -17,15 +17,17 @@ export function lineTotal(l: QuoteLine) {
 }
 
 export function totals(q: Pick<Quote, 'lines' | 'discountPct' | 'vatPct'>, catalog: CatalogItem[] = []): QuoteTotals {
-  const subtotal = round2(q.lines.reduce((s, l) => s + lineTotal(l), 0))
+  // הצעה שהגיעה מקוצרת מהשרת (למתקין: בלי מחירים, הנחה ומע״מ) לא שוברת את החישוב
+  const lines = q.lines ?? []
+  const subtotal = round2(lines.reduce((s, l) => s + lineTotal(l), 0))
   const discount = round2((subtotal * (q.discountPct || 0)) / 100)
   const net = round2(subtotal - discount)
-  const vat = round2((net * q.vatPct) / 100)
+  const vat = round2((net * (q.vatPct || 0)) / 100)
   const cost = round2(
-    q.lines.reduce((s, l) => {
+    lines.reduce((s, l) => {
       const item = catalog.find((c) => c.id === l.itemId)
-      // שורה בלי פריט מקטלוג: מניחים עלות של 60% מהמחיר
-      return s + l.qty * (item ? item.cost : l.unitPrice * 0.6)
+      // שורה בלי פריט מקטלוג (או בלי עלות, שהשרת לא שולח למי שאינו מנהל): מניחים עלות של 60% מהמחיר
+      return s + l.qty * (item?.cost ?? l.unitPrice * 0.6)
     }, 0),
   )
   const profit = round2(net - cost)

@@ -13,7 +13,7 @@ import { approveQuote, markQuoteViewed, rejectQuote } from '../../lib/actions'
 import { lineTotal, totals } from '../../lib/quote'
 import { appointmentTypeLabel } from '../../lib/labels'
 import { date, dateLong, dateTime, daysBetween, money, nowIso, pct, sameDay, time, uid, ymd } from '../../lib/format'
-import { addressText, googleCalendarLink, telLink, whatsappLink } from '../../lib/integrations/links'
+import { addressText, googleCalendarLink, safeHref, telLink, whatsappLink } from '../../lib/integrations/links'
 import type { Address, Appointment, CatalogItem, Case, Doc, InstalledUnit, Message, Quote, ServiceCall, Signature } from '../../lib/types'
 import { Wordmark } from '../../components/Layout'
 import { Callout, Field, Modal, SignaturePad, toast } from '../../components/ui'
@@ -156,7 +156,7 @@ function LocalPortal({ token }: { token: string }) {
       units: units.filter((u) => u.customerId === k.customerId && (u.caseId === k.id || u.addressId === k.addressId)),
       docs: docs
         .filter((d) => d.caseId === k.id && docVisible(d))
-        .map((d) => ({ id: d.id, name: d.name, size: d.size, uploadedAt: d.uploadedAt, fromCustomer: d.source === 'portal', href: d.url ?? d.dataUrl, doc: d })),
+        .map((d) => ({ id: d.id, name: d.name, size: d.size, uploadedAt: d.uploadedAt, fromCustomer: d.source === 'portal', href: safeHref(d.url ?? d.dataUrl), doc: d })),
       messages: messages
         .filter((m) => m.caseId === k.id && m.channel === 'portal')
         .sort((a, b) => a.at.localeCompare(b.at))
@@ -183,9 +183,10 @@ function LocalPortal({ token }: { token: string }) {
     },
     approve: async (q, sig, method, deposit) => {
       // הדגמה: אין חיוב אמיתי. בייצור כאן נפתח דף תשלום מאובטח של חברת הסליקה.
+      // כמו בשרת: המקדמה נרשמת כממתינה, והמשרד מסמן אותה כשולמה אחרי שבדק שהכסף התקבל (approveQuote מתריע להם)
       await new Promise((r) => setTimeout(r, 900))
       const at = nowIso()
-      const dep: Quote['deposit'] = { amount: deposit, method, paidAt: method === 'transfer' ? undefined : at }
+      const dep: Quote['deposit'] = { amount: deposit, method, status: 'pending' }
       approveQuote(q.id, { name: sig.name, dataUrl: sig.dataUrl, at } as Signature, dep)
       return dep
     },
@@ -326,7 +327,7 @@ function RemotePortal({ token, server }: { token: string; server: string }) {
       depositPct: data.settings.depositPct,
       upcoming: data.appointments.filter((a) => a.status !== 'done' && ymd(a.end) >= today),
       units: data.units,
-      docs: data.docs.map((d) => ({ ...d, href: d.url ? (d.url.startsWith('/api/') ? server + d.url : d.url) : undefined })),
+      docs: data.docs.map((d) => ({ ...d, href: d.url ? safeHref(d.url.startsWith('/api/') ? server + d.url : d.url) : undefined })),
       messages: data.messages,
       catalog: [],
     }
@@ -564,7 +565,9 @@ function QuoteSection({ m, a }: { m: Model; a: Actions }) {
               {quote.deposit?.paidAt
                 ? `המקדמה (${money(quote.deposit.amount)}) התקבלה${quote.deposit.method ? ` ${viaMethod(quote.deposit.method)}` : ''}.`
                 : quote.deposit
-                  ? `המקדמה (${money(quote.deposit.amount)}) ממתינה. פרטי ההעברה נשלחו אליכם.`
+                  ? quote.deposit.method === 'transfer'
+                    ? `המקדמה (${money(quote.deposit.amount)}) ממתינה להעברה. פרטי החשבון נשלחו אליכם.`
+                    : `המקדמה (${money(quote.deposit.amount)}) ממתינה לאימות במשרד.`
                   : 'נחזור אליכם לתיאום ההתקנה.'}
             </div>
           </div>
@@ -646,6 +649,7 @@ function ApproveFlow({ quote, a, total, deposit, depositPct, defaultName, terms,
   const [busy, setBusy] = useState(false)
   const [signedAt, setSignedAt] = useState('')
   const [paid, setPaid] = useState(deposit)
+  const [paidAt, setPaidAt] = useState<string | undefined>()
   const canSign = name.trim().length >= 2 && !!sig && agree
 
   async function confirm() {
@@ -654,6 +658,7 @@ function ApproveFlow({ quote, a, total, deposit, depositPct, defaultName, terms,
     try {
       const dep = await a.approve(quote, { name: name.trim(), dataUrl: sig }, method, deposit)
       if (dep?.amount) setPaid(dep.amount)
+      setPaidAt(dep?.paidAt)
       setSignedAt(nowIso())
       setStep('done')
     } catch (e) {
@@ -762,7 +767,7 @@ function ApproveFlow({ quote, a, total, deposit, depositPct, defaultName, terms,
             <div><span>הצעה</span><b className="ltr">{quote.number}</b></div>
             <div><span>נחתם ע״י</span><b>{name}</b></div>
             <div><span>מועד</span><b>{dateTime(signedAt)}</b></div>
-            <div><span>מקדמה</span><b>{money(paid)} · {method === 'transfer' ? 'ממתינה להעברה' : `שולמה ${viaMethod(method)}`}</b></div>
+            <div><span>מקדמה</span><b>{money(paid)} · {paidAt ? `שולמה ${viaMethod(method)}` : method === 'transfer' ? 'ממתינה להעברה' : 'ממתינה לאימות במשרד'}</b></div>
           </div>
         </div>
       )}

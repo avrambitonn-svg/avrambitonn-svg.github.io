@@ -111,6 +111,7 @@ export default function Page() {
 }
 
 function LeaveItem({ l, actions, mineView, showConflicts }: { l: LeaveRequest; actions?: ReactNode; mineView?: boolean; showConflicts?: boolean }) {
+  const me = useMe()
   const users = useApp((s) => s.db.users)
   const appts = useApp((s) => s.db.appointments)
   const workDays = useApp((s) => s.settings.workDays)
@@ -121,7 +122,9 @@ function LeaveItem({ l, actions, mineView, showConflicts }: { l: LeaveRequest; a
   const [st, tone] = statusText[l.status]
   const n = leaveWorkDays(l, { workDays })
   const conflicts = showConflicts ? appointmentsInRange(appts, l.userId, l.from, l.to, l.hours) : []
-  const canCancel = mineView && (l.status === 'pending' || (l.status === 'approved' && l.to >= ymd()))
+  // אחרי החלטה רק משרד והנהלה משנים את הבקשה (השרת דוחה שינוי מעובד); העובד מבקש מהם לבטל
+  const manager = me.role === 'admin' || me.role === 'office'
+  const canCancel = mineView && (l.status === 'pending' || (manager && l.status === 'approved' && l.to >= ymd()))
   return (
     <div className="lv-item">
       <Avatar user={u} />

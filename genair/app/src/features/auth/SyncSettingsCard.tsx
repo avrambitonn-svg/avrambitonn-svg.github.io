@@ -5,10 +5,13 @@ import { app, useApp, useMe, DEVICE_SETTINGS } from '../../lib/store'
 import { Badge, Callout, Card, Confirm, Field, toast } from '../../components/ui'
 import { relative } from '../../lib/format'
 import { bootstrapServer, bridge, readSyncConfig, serverHealth, signOut, switchMode, syncNow, useSync, authFetch, type NetState } from '../../lib/sync'
-import type { ServerHealth } from '../../lib/sync/session'
+import type { ServerHealth, SyncError } from '../../lib/sync/session'
 import { docBlob, uploadToServer } from '../../lib/files'
 import './auth.css'
 import { brand } from '../../brand'
+
+// הקמה מרחוק דורשת קוד הקמה שמוגדר בשרת; בלעדיו רק מהמחשב שהשרת רץ עליו
+const CODE_HELP = 'כדי להקים את המערכת מרחוק צריך להגדיר בשרת קוד הקמה (משתנה הסביבה BOOTSTRAP_TOKEN), להפעיל את השרת מחדש ולהזין כאן את אותו קוד. בלי קוד אפשר להקים רק מהמחשב שהשרת רץ עליו (localhost).'
 
 export function SyncSettingsCard() {
   return bridge.mode === 'server' ? <Connected /> : <LocalMode />
@@ -42,7 +45,7 @@ function Connected() {
         <button className="btn sm" onClick={() => void syncNow().then(() => toast.success('מסונכרן'))}><RefreshCw size={15} /> סנכרון עכשיו</button>
         <button className="btn sm ghost" onClick={() => setConfirm(true)}><LogOut size={15} /> חזרה לגרסת ההדגמה</button>
       </div>
-      <div className="tiny muted mt12">כתובת השרת, אסימון הגישה ומפתח ה-AI שמורים רק במכשיר הזה. כל שאר ההגדרות משותפות לכל הארגון.</div>
+      <div className="tiny muted mt12">כתובת השרת שמורה רק במכשיר הזה, וההתחברות מחליפה את אסימון הגישה. כל שאר ההגדרות משותפות לכל הארגון.</div>
       {confirm && (
         <Confirm
           title="חזרה לגרסת ההדגמה"
@@ -68,6 +71,8 @@ function LocalMode() {
   const [pw, setPw] = useState('')
   const [pw2, setPw2] = useState('')
   const [code, setCode] = useState('')
+  const [needCode, setNeedCode] = useState(false) // השרת דרש קוד הקמה (גם אם הבדיקה לא אמרה)
+  const [bootErr, setBootErr] = useState('')
   const [busy, setBusy] = useState('')
   const url = settings.serverUrl.trim().replace(/\/$/, '')
   const admin = adminId || admins[0]?.id || ''
@@ -87,12 +92,14 @@ function LocalMode() {
   async function bootstrap() {
     if (pw.length < 8) return toast.error('הסיסמה צריכה לפחות 8 תווים')
     if (pw !== pw2) return toast.error('הסיסמאות לא זהות')
+    if ((h?.db?.bootstrapToken || needCode) && !code.trim()) return setBootErr(CODE_HELP)
+    setBootErr('')
     setBusy('מעלה את הנתונים...')
     try {
       const s = app()
       const { config, counters, ...collections } = s.db
       const org = Object.fromEntries(Object.entries(s.settings).filter(([k]) => !(DEVICE_SETTINGS as readonly string[]).includes(k)))
-      await bootstrapServer(url, { snapshot: { collections, config, settings: org, counters }, adminUserId: admin, password: pw, bootstrapToken: code || undefined })
+      await bootstrapServer(url, { snapshot: { collections, config, settings: org, counters }, adminUserId: admin, password: pw, bootstrapToken: code.trim() || undefined })
       // קבצים ששמורים בדפדפן הזה עולים גם הם לשרת
       const local = s.db.docs.filter((d) => d.blobKey && !d.fileId)
       let n = 0
@@ -110,7 +117,15 @@ function LocalMode() {
       toast.success('המסד המשותף הוקם')
       switchMode('server', url)
     } catch (e) {
-      toast.error((e as Error).message)
+      const err = e as SyncError
+      if (err.code === 'bootstrap_token_required') {
+        setNeedCode(true)
+        setBootErr(CODE_HELP)
+      } else if (err.code === 'invalid_bootstrap_token') {
+        setNeedCode(true)
+        setBootErr('קוד ההקמה שגוי. מזינים בדיוק את הערך של BOOTSTRAP_TOKEN מהגדרות השרת (אחרי כמה ניסיונות שגויים השרת חוסם לזמן מה).')
+      } else setBootErr('')
+      toast.error(err.message)
       setBusy('')
     }
   }
@@ -155,12 +170,13 @@ function LocalMode() {
                     {admins.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                   </select>
                 </Field>
-                {db.bootstrapToken ? (
-                  <Field label="קוד הקמה" hint="BOOTSTRAP_TOKEN מהגדרות השרת"><input className="input ltr" value={code} onChange={(e) => setCode(e.target.value)} /></Field>
+                {db.bootstrapToken || needCode ? (
+                  <Field label="קוד הקמה" hint="BOOTSTRAP_TOKEN מהגדרות השרת"><input className="input ltr" autoComplete="off" value={code} onChange={(e) => { setCode(e.target.value); setBootErr('') }} /></Field>
                 ) : <div />}
                 <Field label="סיסמה למנהל" hint="לפחות 8 תווים"><input className="input ltr" type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} /></Field>
                 <Field label="שוב, לאימות"><input className="input ltr" type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} /></Field>
               </div>
+              {bootErr && <div className="mt12"><Callout tone="warning">{bootErr}</Callout></div>}
               <div className="row wrap mt12">
                 <button className="btn primary" disabled={!!busy || !admin || !pw} onClick={() => void bootstrap()}><CheckCircle2 size={16} /> {busy || 'העלאת הנתונים והפעלה'}</button>
                 {!admins.length && <span className="small muted">צריך לפחות משתמש פעיל אחד בתפקיד ניהול.</span>}

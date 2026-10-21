@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Boxes, ChevronLeft, CloudOff, KeyRound, MapPin, MessageCircle, Navigation, Phone, Wifi } from 'lucide-react'
 import { Badge, Card, Empty } from '../../components/ui'
 import { useApp, useMe } from '../../lib/store'
+import { canOpen } from '../../lib/access'
 import type { Appointment, DB, ID, User } from '../../lib/types'
 import { appointmentStatusLabel, appointmentTypeColor, appointmentTypeLabel } from '../../lib/labels'
 import { addDays, dateLong, time as fmtTime, ymd } from '../../lib/format'
@@ -117,7 +118,7 @@ export default function FieldApp() {
       {(van.missing.length > 0 || van.low.length > 0 || van.needCount > 0) && (
         <Card
           title={<div className="row" style={{ gap: 8 }}><Boxes size={17} className="muted" /><h2>מלאי ברכב להיום</h2></div>}
-          actions={<Link className="btn sm ghost" to="/inventory">למלאי <ChevronLeft size={15} /></Link>}
+          actions={canOpen('/inventory', me.role) && <Link className="btn sm ghost" to="/inventory">למלאי <ChevronLeft size={15} /></Link>}
         >
           <div className="card-body col" style={{ gap: 8 }}>
             <div className="tiny muted">{van.van}</div>

@@ -29,7 +29,8 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
   if (!serverUrl.trim()) throw new ServerError('לא הוגדר שרת אינטגרציות (הגדרות ← חיבורים)', 0, 'no_server')
   const headers: Record<string, string> = { ...authHeaders(), ...(init.headers as Record<string, string>) }
   if (init.json !== undefined) headers['content-type'] = 'application/json'
-  if (appToken) headers['x-app-token'] = appToken
+  // במסד המשותף מספיק טוקן ההתחברות; אסימון הגישה (APP_TOKEN) רק בלי מסד משותף
+  if (appToken && readSyncConfig().mode !== 'server') headers['x-app-token'] = appToken
   let res: Response
   try {
     res = await fetch(serverUrl.replace(/\/$/, '') + path, {
@@ -59,10 +60,11 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
   return body as T
 }
 
+// בלי התחברות (או בלי אסימון) השרת מחזיר רק { ok, db }: הגרסה והחיבורים רק למי שמחובר
 export interface Health {
   ok: boolean
-  version: string
-  features: { priority: 'off' | 'demo' | 'live'; priorityWrite: boolean; ai: boolean; whatsapp: boolean; google: { calendar: boolean; drive: boolean } }
+  version?: string
+  features?: { priority: 'off' | 'demo' | 'live'; priorityWrite: boolean; ai: boolean; whatsapp: boolean; google: { calendar: boolean; drive: boolean } }
   db?: { mode: 'file' | 'memory' | 'off'; ready?: boolean; bootstrapped?: boolean; bootstrapToken?: boolean }
 }
 

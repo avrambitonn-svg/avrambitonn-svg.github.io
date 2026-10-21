@@ -10,6 +10,7 @@ import { date, nowIso, uid } from '../../lib/format'
 import { deleteLocalBlob, docBlob, downloadDoc, externalLink, filesOnServer, hasContent, isImage, isPdf, maxFileBytes, saveLocalBlob, sizeLabel, uploadToServer } from '../../lib/files'
 import { createDriveFolder, ensureCaseFolder, googleApiMode, moveDriveFile, trashDriveFile, uploadToDrive } from '../../lib/integrations/google'
 import type { Doc, ID, ListOption } from '../../lib/types'
+import { safeHref } from '../../lib/integrations/links'
 import './docs.css'
 
 const DOC_MIME = 'application/x-genair-doc'
@@ -143,7 +144,7 @@ export function DocsPanel({ caseId, customerId, supplierId }: { caseId?: ID; cus
             {drive ? ' הם עולים גם לתיקיית התיק ב-Google Drive.' : filesOnServer() ? ' כשמחברים את Google Drive, לכל תיק נפתחת תיקייה עם אותן תיקיות משנה.' : ''}
             {' '}גוררים קבצים לתיקייה, או לוחצים על "העלאה".
           </span>
-          {drive && kase?.driveFolderUrl && <a className="btn sm" href={kase.driveFolderUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} /> התיקייה ב-Drive</a>}
+          {drive && safeHref(kase?.driveFolderUrl) && <a className="btn sm" href={safeHref(kase?.driveFolderUrl)} target="_blank" rel="noreferrer"><ExternalLink size={14} /> התיקייה ב-Drive</a>}
           {drive && kase && !kase.driveFolderId && <button className="btn sm" onClick={() => void createDriveFolder(kase).then(() => toast.success('נפתחה תיקייה ב-Drive'))}><FolderPlus size={14} /> פתיחת תיקייה ב-Drive</button>}
         </div>
       </Callout>
@@ -290,7 +291,7 @@ function DocRow({ d, who, folders, caseScope, onPreview, onMove, onToggleVisible
 function Preview({ d, onClose }: { d: Doc; onClose: () => void }) {
   const [url, setUrl] = useState('')
   const [err, setErr] = useState('')
-  const link = externalLink(d)
+  const link = safeHref(externalLink(d))
   const viewable = isImage(d.mime) || isPdf(d.mime)
   useEffect(() => {
     if (link || !viewable) return
@@ -300,7 +301,8 @@ function Preview({ d, onClose }: { d: Doc; onClose: () => void }) {
       .then((b) => {
         if (!alive) return
         if (!b) return setErr('אין קובץ שמור למסמך הזה')
-        objectUrl = URL.createObjectURL(b.type ? b : new Blob([b], { type: d.mime }))
+        // הסוג נקבע לפי מה שמוצג (תמונה או PDF), לא לפי הקובץ: קובץ HTML שמתחזה ל-PDF לא ירוץ בתוך האפליקציה
+        objectUrl = URL.createObjectURL(new Blob([b], { type: isImage(d.mime) ? d.mime : 'application/pdf' }))
         setUrl(objectUrl)
       })
       .catch((e) => alive && setErr((e as Error).message))

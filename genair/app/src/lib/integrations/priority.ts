@@ -50,8 +50,12 @@ const errText = (e: unknown) => (e instanceof ServerError || e instanceof Error 
 const writeBlocked = (e: unknown) => e instanceof ServerError && e.code === 'priority_write_disabled'
 const BLOCKED = 'הכתיבה ל-Priority חסומה בשרת'
 
+// פנייה מהאתר שהמשרד עוד לא אישר: לא נשלחת ל-Priority (גם לא אנשי הקשר, ההצעות והקריאות שלה), כמו מנוע הסנכרון בשרת
+export const awaitingReview = (customerId?: string) => !!customerId && !!app().db.customers.find((c) => c.id === customerId)?.pendingReview
+
 // לקוח חדש: נפתח ב-Priority ומקבל מספר קבוע. עד אז הוא "לקוח זמני".
 export async function pushCustomer(c: Customer): Promise<SyncState> {
+  if (c.pendingReview) return c.sync
   if (serverSync()) {
     void runServerSync('hot').catch(() => {})
     return c.sync
@@ -82,6 +86,7 @@ export async function pushCustomer(c: Customer): Promise<SyncState> {
 // הצעה שאושרה הופכת להזמנה ב-Priority (בלי הקלדה כפולה)
 export async function pushOrder(q: Quote, custname: string): Promise<SyncState> {
   if (serverSync()) return q.sync
+  if (awaitingReview(app().db.cases.find((k) => k.id === q.caseId)?.customerId)) return q.sync
   if (!priorityEnabled()) {
     const s: SyncState = { ...q.sync, status: 'pending' }
     setSync('quotes', q.id, s)
@@ -123,7 +128,7 @@ export async function processQueue(): Promise<{ done: number; failed: number; wr
   let done = 0
   let failed = 0
   const { db } = app()
-  for (const c of db.customers.filter((x) => x.sync.status === 'pending' || x.sync.status === 'error' || x.temp)) {
+  for (const c of db.customers.filter((x) => !x.pendingReview && (x.sync.status === 'pending' || x.sync.status === 'error' || x.temp))) {
     const s = await pushCustomer(c)
     if (s.error === BLOCKED) return { done, failed, writeBlocked: true }
     s.status === 'synced' ? done++ : failed++

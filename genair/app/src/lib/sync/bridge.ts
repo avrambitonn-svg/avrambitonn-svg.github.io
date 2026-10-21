@@ -9,7 +9,7 @@ export interface SyncConfig {
   token?: string
   userId?: string
   expiresAt?: string
-  // הגדרות של המכשיר הזה שעוברות בין מצב הדגמה למצב משותף
+  // נשמרו כאן בגרסאות קודמות; נמחקים בטעינה (store.ts)
   appToken?: string
   anthropicKey?: string
 }

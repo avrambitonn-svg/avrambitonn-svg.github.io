@@ -7,7 +7,7 @@ import { nowIso } from '../format'
 import type { DB, Settings, User } from '../types'
 import { asRemote, bridge, type Op } from './bridge'
 import { OpQueue, applyOp } from './queue'
-import { SyncError, authFetch, clearSession, logout as logoutApi, serverBase, setSignedOutHandler, useSession } from './session'
+import { SyncError, authFetch, clearSession, endReason, logout as logoutApi, serverBase, setSignedOutHandler, useSession, type EndReason } from './session'
 
 export type NetState = 'idle' | 'connecting' | 'online' | 'offline' | 'error'
 
@@ -101,6 +101,20 @@ function setOffset(serverTime: number | undefined, t0: number) {
 
 // ---------------------------------------------------------------- החלת שינויים מהשרת
 
+/**
+ * השרת מסנן לפי תפקיד: אוסף מוסתר מגיע ריק, ולמתקין הצעה מגיעה רק כרשימת פריטים (בלי מחירים, מע״מ, סנכרון ותנאים).
+ * משלימים שדות חובה כדי שהמסכים לא ייפלו. מתקין לא כותב הצעות, כך שההשלמה לא חוזרת לשרת.
+ */
+function normalize(c: string, data: Record<string, unknown> | undefined) {
+  if (!data) return data
+  if (c === 'quotes' && (!Array.isArray(data.lines) || !data.sync || data.vatPct === undefined || data.discountPct === undefined || data.terms === undefined || data.validUntil === undefined)) {
+    const day = String(data.decidedAt ?? data.createdAt ?? '').slice(0, 10)
+    return { discountPct: 0, vatPct: 0, terms: '', validUntil: day, ...data, lines: Array.isArray(data.lines) ? data.lines : [], sync: data.sync ?? { status: 'not_synced' } }
+  }
+  if ((c === 'customers' || c === 'catalog') && !data.sync) return { ...data, sync: { status: 'not_synced' } }
+  return data
+}
+
 function applySingleton(db: Record<string, unknown>, settings: Settings, c: string, data: Record<string, unknown> | undefined): Settings {
   if (!data) return settings
   if (c === 'config') db.config = { ...defaultConfig(), ...strip(data) }
@@ -119,7 +133,7 @@ function applyChanges(changes: Change[], seq: number, force = false) {
   for (const ch of changes) {
     const pend = queue.pendingFor(ch.c, ch.id)
     if (!force && !pend.length && (acked.get(keyOf(ch.c, ch.id)) ?? 0) >= ch.seq) continue // ההד של מה שכבר אצלנו
-    let next = ch.del ? undefined : ch.data
+    let next = ch.del ? undefined : normalize(ch.c, ch.data)
     for (const op of pend) next = applyOp(next, op)
     touched = true
     if (SINGLETONS.has(ch.c)) {
@@ -153,9 +167,10 @@ async function pullSnapshot() {
   setOffset(snap.serverTime, t0)
   const s = useApp.getState()
   const db = emptyDB() as unknown as Record<string, unknown>
-  for (const [c, list] of Object.entries(snap.collections)) db[c] = list
+  // אוסף שחסר בתמונת המצב (או מוסתר לתפקיד) נשאר רשימה ריקה
+  for (const [c, list] of Object.entries(snap.collections ?? {})) db[c] = Array.isArray(list) ? list.map((x) => normalize(c, x)) : []
   db.config = { ...defaultConfig(), ...strip(snap.config) }
-  db.counters = { ...snap.counters }
+  db.counters = { ...(snap.counters ?? {}) }
   let settings = { ...defaultSettings, ...strip(snap.settings), ...deviceSettings(s.settings) } as Settings
   // שינויים מקומיים שעוד לא הגיעו לשרת נשארים מעל
   for (const op of queue.all()) {
@@ -230,6 +245,7 @@ async function flush() {
     markOnline()
   } catch (e) {
     const err = e as SyncError
+    // 429 (יותר מדי בקשות) הוא זמני: הפעולות נשארות בתור ונשלחות שוב אחרי המתנה
     if (err.status === 400 || err.status === 413) {
       // בקשה שהשרת לא יקבל לעולם: לא חוסמים את התור בגללה
       queue.ack(batch)
@@ -237,7 +253,11 @@ async function flush() {
       useSync.setState({ error: err.message })
     } else {
       queue.nack(batch)
-      if (err.status !== 401) {
+      if (err.status === 429) {
+        setNet('online', { error: err.message })
+        backoff = Math.max(backoff, 5000)
+        retry = true
+      } else if (err.status !== 401) {
         setNet(offlineNow() || err.status === 0 ? 'offline' : 'error', err.status ? { error: err.message } : {})
         retry = true
       }
@@ -288,7 +308,10 @@ async function connect() {
       signal: ctrl.signal,
       cache: 'no-store',
     })
-    if (res.status === 401) return signedOut()
+    if (res.status === 401) {
+      const body = (await res.json().catch(() => null)) as { error?: { code?: string; message?: string; reason?: string; details?: { reason?: string } } } | null
+      return signedOut(endReason(body?.error && { ...body.error, reason: body.error.reason ?? body.error.details?.reason }))
+    }
     if (!res.ok || !res.body) throw new Error(String(res.status))
     const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
     let buf = ''
@@ -311,7 +334,7 @@ async function connect() {
           scheduleFlush(0)
         } else if (ev.event === 'changes') applyChanges(data.changes, data.seq)
         else if (ev.event === 'reset') await pullSnapshot().catch(() => {})
-        else if (ev.event === 'signout') return signedOut()
+        else if (ev.event === 'signout') return signedOut(data?.reason === 'expired' ? 'expired' : data?.reason === 'missing' ? 'missing' : 'revoked')
       }
     }
   } catch {
@@ -422,9 +445,29 @@ function onHide() {
   queue.save(true)
 }
 
-function signedOut() {
+/**
+ * השרת סיים את החיבור. פג תוקף: הנתונים והתור נשארים, ואותו משתמש נכנס שוב והשינויים נשלחים.
+ * בוטל (משתמש הושבת, סיסמה הוחלפה, ניתוק מרחוק): מוחקים מהמכשיר את העותק המקומי ואת התור, כמו ביציאה.
+ * שינויים שלא נשלחו הולכים לאיבוד, וזה בכוונה: מי שהגישה שלו בוטלה לא שולח יותר כלום.
+ */
+function signedOut(reason: EndReason = 'revoked') {
   stopSync()
   clearSession()
+  useSession.setState({ notice: reason === 'expired' ? 'פג תוקף ההתחברות. נכנסים שוב, ומה שנשמר במכשיר יישלח.' : 'החיבור בוטל בשרת (למשל סיסמה הוחלפה או שהמשתמש הושבת). הנתונים נמחקו מהמכשיר הזה.' })
+  if (reason !== 'expired') void wipeLocal()
+}
+
+/** מוחק מהמכשיר את העותק המקומי של נתוני הארגון, את התור ואת המספרים השמורים */
+async function wipeLocal() {
+  await queue.clear()
+  try {
+    localStorage.removeItem(blocksKey())
+  } catch {
+    /* */
+  }
+  blocks = {}
+  asRemote(() => useApp.setState({ db: emptyDB(), syncSeq: 0, currentUserId: '' }))
+  useSync.setState({ pending: 0, error: undefined, droppedOps: undefined })
 }
 
 /** מפעיל את הסנכרון אחרי כניסה (או בפתיחה, כשיש חיבור שמור) */
@@ -435,7 +478,7 @@ export async function startSync(): Promise<void> {
   running = true
   transport = 'sse'
   sseFailures = 0
-  setSignedOutHandler(() => signedOut())
+  setSignedOutHandler((reason) => signedOut(reason))
   queue.onChange = () => {
     useSync.setState({ pending: queue.size })
     scheduleFlush()
@@ -527,15 +570,8 @@ export async function signOut() {
   if (running) await flush().catch(() => {})
   await logoutApi()
   stopSync()
-  await queue.clear()
-  try {
-    localStorage.removeItem(blocksKey())
-  } catch {
-    /* */
-  }
-  blocks = {}
-  asRemote(() => useApp.setState({ db: emptyDB(), syncSeq: 0, currentUserId: '' }))
-  useSync.setState({ pending: 0, error: undefined, droppedOps: undefined })
+  await wipeLocal()
+  useSession.setState({ notice: undefined })
 }
 
 /** ישויות ששמורות כרגע רק במכשיר (לבדיקה לפני יציאה) */

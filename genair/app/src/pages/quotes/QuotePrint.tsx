@@ -173,7 +173,9 @@ export default function QuotePrint() {
             <div className="dep">
               {q.deposit?.paidAt
                 ? `שולמה מקדמה ${money(q.deposit.amount)}${q.deposit.method ? ` (${depositMethodLabel[q.deposit.method]})` : ''}`
-                : `מקדמה באישור: ${money(deposit)} (${depositPctOfTotal}%)`}
+                : q.deposit
+                  ? `מקדמה ${money(q.deposit.amount)} ממתינה לאימות`
+                  : `מקדמה באישור: ${money(deposit)} (${depositPctOfTotal}%)`}
             </div>
           </div>
         </section>

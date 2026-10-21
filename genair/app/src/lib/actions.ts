@@ -8,16 +8,48 @@ import { pushCustomer, pushOrder, serverSync } from './integrations/priority'
 import { createDriveFolder, pushAppointment } from './integrations/google'
 import { nextCaseNumber } from './numbering'
 import { commissionFor } from './commission'
+import { bridge } from './sync/bridge'
 import { onCaseCreated, onStageChanged } from '../features/flow/engine'
 
 const yy = () => String(new Date().getFullYear()).slice(2)
 
+export const REVIEW_TEXT = 'פנייה מהאתר: ממתין לאישור במשרד'
+
+// pendingReview (פנייה מהטופס הציבורי): הלקוח לא נשלח ל-Priority עד שהמשרד מאשר אותו (כמו בשרת)
 export function createCustomer(c: Omit<Customer, 'id' | 'createdAt' | 'sync' | 'temp'>): Customer {
-  const customer: Customer = { ...c, id: uid('c'), createdAt: nowIso(), temp: true, sync: { status: 'not_synced' } }
+  const customer: Customer = {
+    ...c, id: uid('c'), createdAt: nowIso(), temp: true,
+    sync: c.pendingReview ? { status: 'pending', error: REVIEW_TEXT } : { status: 'not_synced' },
+  }
   app().upsert('customers', customer)
   void pushCustomer(customer)
   return customer
 }
+
+/** המשרד אישר לקוח שנפתח מהאתר (בדק שאינו כפילות): מעכשיו הוא, אנשי הקשר, ההצעות והקריאות שלו נשלחים ל-Priority */
+export function approveCustomerReview(customerId: ID) {
+  const s = app()
+  const c = s.db.customers.find((x) => x.id === customerId)
+  if (!c?.pendingReview) return
+  const sync = c.sync?.error === REVIEW_TEXT ? { ...c.sync, error: undefined } : c.sync
+  s.patch('customers', c.id, { pendingReview: false, sync })
+  s.log({ kind: 'sync', customerId: c.id, text: 'הלקוח מהאתר נבדק ואושר במשרד' })
+  const next = app().db.customers.find((x) => x.id === c.id)
+  if (next) void pushCustomer(next)
+}
+
+/** המשרד אימת את תשלום המקדמה: מסמנים כשולמה ורושמים תקבול בכספי התיק (כמו באישור הצעה עם מקדמה ששולמה) */
+export function markDepositPaid(quoteId: ID) {
+  const s = app()
+  const q = s.db.quotes.find((x) => x.id === quoteId)
+  if (!q?.deposit || q.deposit.paidAt) return
+  const deposit = { ...q.deposit, paidAt: nowIso(), status: 'paid' as const, paidBy: s.currentUserId }
+  s.patch('quotes', q.id, { deposit })
+  s.upsert('money', { id: uid('mn'), caseId: q.caseId, kind: 'payment', category: 'מקדמה', description: `מקדמה — ${q.number}`, amount: deposit.amount, at: ymd() })
+  s.log({ kind: 'payment', caseId: q.caseId, text: `התקבלה מקדמה ₪${deposit.amount.toLocaleString('he-IL')} (אומתה במשרד)` })
+}
+
+export const depositPending = (q?: Pick<Quote, 'deposit'>) => !!q?.deposit && !q.deposit.paidAt
 
 // מספר ידני (number) נשמר כמו שהוא; ריק = המספר הבא לפי הגדרות המספור. customerId ריק = תיק בלי לקוח, משייכים אחר כך
 export function createCase(input: Omit<Case, 'id' | 'number' | 'createdAt' | 'updatedAt' | 'portal' | 'survey' | 'stage' | 'tags' | 'installerIds'> &
@@ -113,7 +145,7 @@ export function approveQuote(quoteId: ID, signature: Signature, deposit?: Quote[
   const s = app()
   const q = s.db.quotes.find((x) => x.id === quoteId)
   if (!q) return
-  const approved: Quote = { ...q, status: 'approved', signature, deposit, decidedAt: nowIso() }
+  const approved: Quote = { ...q, status: 'approved', signature, deposit: deposit && { ...deposit, status: deposit.paidAt ? 'paid' : 'pending' }, decidedAt: nowIso() }
   s.upsert('quotes', approved)
   s.log({ kind: 'quote', caseId: q.caseId, text: `הלקוח אישר וחתם על הצעה ${q.number} (${signature.name})` })
   if (deposit?.paidAt) {
@@ -126,8 +158,13 @@ export function approveQuote(quoteId: ID, signature: Signature, deposit?: Quote[
   const k = s.db.cases.find((x) => x.id === q.caseId)
   const office = s.db.users.filter((u) => u.role === 'office' || u.role === 'admin')
   office.forEach((u) => s.notify(u.id, `הצעה אושרה: ${k?.title ?? q.number} — לתאם התקנה`, `/cases/${q.caseId}`))
+  if (deposit && !deposit.paidAt) office.forEach((u) => s.notify(u.id, `${q.number}: לאמת את תשלום המקדמה`, `/cases/${q.caseId}`))
+  // עמלה מהרווח צריכה עלויות, ומול השרת רק ניהול ומשרד מקבלים אותן: במכשיר אחר המשרד משלים אותה (reconcile)
+  const me = s.db.users.find((u) => u.id === s.currentUserId)
+  const seesCost = bridge.mode !== 'server' || me?.role === 'admin' || me?.role === 'office'
+  if (k?.agentId && !seesCost) s.patch('quotes', q.id, { commissionPending: true })
   const t = totals(approved, s.db.catalog)
-  const com = k && commissionFor(k, t)
+  const com = seesCost && k && commissionFor(k, t)
   if (k?.agentId && com) {
     s.upsert('money', {
       id: uid('mn'), caseId: q.caseId, kind: 'commission', category: 'עמלת סוכן',

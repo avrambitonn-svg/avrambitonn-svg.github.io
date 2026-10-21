@@ -5,7 +5,7 @@ import type { Activity, Collection, Config, DB, Entity, ID, Notification, Settin
 import { nowIso, uid } from './format'
 import { seedDB } from './seed'
 import { defaultConfig } from './configDefaults'
-import { bridge, readSyncConfig, type Op } from './sync/bridge'
+import { bridge, readSyncConfig, writeSyncConfig, type Op } from './sync/bridge'
 import { brand } from '../brand'
 import { applyHistorySeed } from './seedHistory'
 
@@ -38,6 +38,24 @@ export const defaultSettings: Settings = {
 
 // הגדרות של המכשיר הזה בלבד; כל השאר משותף לכל הארגון
 export const DEVICE_SETTINGS = ['serverUrl', 'appToken', 'anthropicKey'] as const
+
+// מפתח ה-AI לשימוש ישיר מהדפדפן (בלי שרת) לא נשמר במאגר: רק ב-sessionStorage, ונמחק כשסוגרים את הדפדפן
+const AI_KEY = 'genair-ai-key'
+export function readAiKey(): string {
+  try {
+    return sessionStorage.getItem(AI_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+function writeAiKey(v: string) {
+  try {
+    if (v) sessionStorage.setItem(AI_KEY, v)
+    else sessionStorage.removeItem(AI_KEY)
+  } catch {
+    /* מצב גלישה פרטית */
+  }
+}
 
 interface AppState {
   db: DB
@@ -200,13 +218,18 @@ export const useApp = create<AppState>()(
         },
 
         notify: (userId, text, link) => {
-          const n: Notification = { id: uid('n'), at: nowIso(), userId, text, link, read: false }
+          // השרת דוחה התראה ממי שאינו מנהל עם קישור חיצוני או טקסט ארוך מ-300 תווים
+          const body = text.length > 300 ? `${text.slice(0, 299)}…` : text
+          const n: Notification = { id: uid('n'), at: nowIso(), userId, text: body, link: link?.startsWith('/') ? link : undefined, read: false }
           tracked(() => set((s) => ({ db: { ...s.db, notifications: [n, ...s.db.notifications] } })))
           bridge.emit([entityOp('notifications', undefined, n as unknown as Obj)])
         },
 
         setSettings: (p) => {
           const prev = get().settings
+          if (p.anthropicKey !== undefined) writeAiKey(p.anthropicKey)
+          // במסד המשותף ההתחברות מספיקה: אסימון הגישה לא נשמר ולא נשלח
+          if (serverMode && p.appToken !== undefined) p = { ...p, appToken: '' }
           tracked(() => set((s) => ({ settings: { ...s.settings, ...p } })))
           bridge.emit([entityOp('settings', { id: 'org', ...orgSettings(prev) }, { id: 'org', ...orgSettings(get().settings) })])
         },
@@ -231,21 +254,28 @@ export const useApp = create<AppState>()(
       name: serverMode ? 'genair-ops-shared-v1' : 'genair-ops-v1',
       version: 1,
       storage: createJSONStorage(() => idbStorage),
-      partialize: (s) => ({ db: s.db, settings: s.settings, currentUserId: s.currentUserId, ...(serverMode ? { syncSeq: s.syncSeq } : {}) }),
+      // מפתח ה-AI לא נשמר במאגר (רק ב-sessionStorage); במסד המשותף גם לא אסימון הגישה
+      partialize: (s) => ({ db: s.db, settings: { ...s.settings, anthropicKey: '', ...(serverMode ? { appToken: '' } : {}) }, currentUserId: s.currentUserId, ...(serverMode ? { syncSeq: s.syncSeq } : {}) }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<AppState>
         // נתונים מגרסה קודמת: אוספים חדשים מקבלים את ערכי ההתחלה, וההגדרות משלימות שדות חסרים
         const db = p.db ? ({ ...current.db, ...p.db } as DB) : current.db
+        // אוסף חסר או פגום (למשל אוסף שהשרת לא שולח לתפקיד הזה) הוא רשימה ריקה
+        for (const k of Object.keys(current.db)) if (Array.isArray((current.db as unknown as Obj)[k]) && !Array.isArray((db as unknown as Obj)[k])) (db as unknown as Obj)[k] = []
         db.config = { ...defaultConfig(), ...(p.db?.config ?? {}) }
         // מודולים שנוספו אחרי שהדפדפן כבר שמר נתונים: מקבלים את נתוני ההדגמה שלהם
         for (const c of ['chat', 'leaves', 'suppliers', 'purchaseOrders', 'stockMoves'] as const) if (!p.db?.[c]?.length) (db[c] as unknown[]) = current.db[c]
         const settings = { ...defaultSettings, ...(p.settings ?? {}) }
+        // מפתח AI שנשמר בגרסה קודמת (במאגר או בהגדרות החיבור): עובר ל-sessionStorage ונמחק משם
+        const sc = readSyncConfig()
+        const oldKey = settings.anthropicKey || sc.anthropicKey || ''
+        if (oldKey && !readAiKey()) writeAiKey(oldKey)
+        settings.anthropicKey = readAiKey()
+        if (sc.anthropicKey !== undefined || sc.appToken !== undefined) writeSyncConfig({ anthropicKey: undefined, appToken: undefined })
         if (serverMode) {
-          // כתובת השרת והמפתחות של המכשיר נשמרים בהגדרות החיבור, כדי שיעברו גם בין שני העותקים
-          const sc = readSyncConfig()
+          // כתובת השרת נשמרת בהגדרות החיבור, כדי שתעבור גם בין שני העותקים. אסימון גישה לא צריך: ההתחברות מספיקה
           settings.serverUrl = sc.serverUrl || settings.serverUrl
-          if (sc.appToken !== undefined) settings.appToken = sc.appToken
-          if (sc.anthropicKey !== undefined) settings.anthropicKey = sc.anthropicKey
+          settings.appToken = ''
           return { ...current, ...p, db, settings, currentUserId: sc.userId ?? p.currentUserId ?? current.currentUserId }
         }
         // קישור ההדגמה (מותג ניטרלי): מי שפתח לפני שנוספה ההיסטוריה מקבל אותה עכשיו. במערכת אמיתית לא נוגעים בנתונים

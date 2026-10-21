@@ -6,6 +6,7 @@ import { api, serverConfigured } from './integrations/server'
 import { whatsappLink } from './integrations/links'
 import type { Channel, ID, Message } from './types'
 import { nowIso, uid } from './format'
+import { toast } from '../components/ui'
 
 export type TemplateKey =
   | 'quote'
@@ -56,8 +57,10 @@ export async function sendMessage(opts: {
     try {
       await api('/api/whatsapp/send', { method: 'POST', json: { to: opts.to, text: opts.body } })
       status = 'sent'
-    } catch {
+    } catch (e) {
+      // ההודעה מהשרת (למשל "יותר מדי בקשות" או תבנית שלא אושרה)
       status = 'failed'
+      toast.error(`וואטסאפ: ${(e as Error).message}`)
     }
   } else if (channel === 'whatsapp') {
     window.open(whatsappLink(opts.to, opts.body), '_blank', 'noopener')

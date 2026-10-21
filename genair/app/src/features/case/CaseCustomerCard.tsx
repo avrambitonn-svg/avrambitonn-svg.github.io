@@ -75,6 +75,7 @@ export function CaseCustomerCard({ caseId, onWhatsapp }: { caseId: ID; onWhatsap
       <div className="row wrap mt8" style={{ gap: 6 }}>
         <Badge tone={syncTone[c.sync.status]}>{syncLabel[c.sync.status]} ב-Priority</Badge>
         {c.temp && <Badge tone="warning">לקוח זמני</Badge>}
+        {c.pendingReview && <Link to={`/customers/${c.id}`} className="badge warning" title="לא נשלח ל-Priority עד שהמשרד מאשר אותו">פנייה מהאתר — לבדיקה</Link>}
       </div>
       {payer && <div className="small mt8">משלם: <Link to={`/customers/${payer.id}`}>{payer.name}</Link></div>}
       <div className="mt12"><QuickContact phone={primary?.phone ?? c.phone} address={addr} whatsapp={onWhatsapp} /></div>
@@ -177,6 +178,7 @@ function AssignDialog({ caseId, mode, onClose }: { caseId: ID; mode: 'assign' | 
                     <span className="tiny muted"><span className="ltr">{phone(c.phone)}</span> · {customerTypeLabel[c.type]}{c.addresses[0] ? ` · ${addressText(c.addresses[0])}` : ''}</span>
                   </span>
                   {c.temp && <Badge tone="warning">זמני</Badge>}
+                  {c.pendingReview && <Badge tone="warning">פנייה מהאתר — לבדיקה</Badge>}
                 </button>
               ))}
               {results.length === 0 && <div className="small muted">לא נמצא. אפשר ליצור לקוח חדש.</div>}

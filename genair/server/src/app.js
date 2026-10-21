@@ -188,7 +188,7 @@ async function checkIntegration(req, cfg) {
   if (store) {
     const s = auth.readSession(req, store, cfg);
     if (s && !s.error) return { user: s.user };
-    if (!store.isEmpty()) throw new HttpError(401, 'unauthorized', 'צריך להתחבר למערכת');
+    if (!store.isEmpty()) throw new HttpError(401, 'unauthorized', s?.error === 'expired' ? 'פג תוקף ההתחברות, צריך להתחבר שוב' : 'צריך להתחבר למערכת', { reason: s?.error ?? 'missing' });
   }
   if (validAppToken(req, cfg)) return { app: true };
   if (!cfg.appToken && isLocalRequest(req)) return { app: true, local: true };

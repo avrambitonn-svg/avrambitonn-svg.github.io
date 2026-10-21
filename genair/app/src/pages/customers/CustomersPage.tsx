@@ -95,7 +95,8 @@ export default function CustomersPage() {
                   <tr key={c.id} className="click" onClick={() => nav(`/customers/${c.id}`)}>
                     <td>
                       <div className="strong small cu-name">{c.name}<MissingIcon c={c} /></div>
-                      {c.temp && (
+                      {c.pendingReview && <Badge tone="warning">פנייה מהאתר — לבדיקה</Badge>}
+                      {c.temp && !c.pendingReview && (
                         <span className="row wrap" style={{ gap: 6 }}>
                           <Badge tone="warning">לקוח זמני</Badge>
                           <button className="btn sm ghost" style={{ height: 26, padding: '0 8px' }} onClick={(e) => { e.stopPropagation(); void convertToPermanent(c) }}><BadgeCheck size={14} /> המרה ללקוח קבוע</button>
@@ -109,7 +110,7 @@ export default function CustomersPage() {
                     <td>
                       <Badge tone={syncTone[c.sync.status]}>{syncLabel[c.sync.status]}</Badge>
                       {c.sync.priorityId && <div className="tiny muted num">{c.sync.priorityId}</div>}
-                      {c.sync.error && <div className="tiny" style={{ color: 'var(--danger)' }}>{c.sync.error}</div>}
+                      {c.sync?.error && !c.pendingReview && <div className="tiny" style={{ color: 'var(--danger)' }}>{c.sync.error}</div>}
                     </td>
                   </tr>
                 ))}

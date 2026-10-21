@@ -71,6 +71,7 @@ function LoginScreen() {
   const [show, setShow] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const notice = useSession((s) => s.notice)
   const serverUrl = readSyncConfig().serverUrl
 
   async function submit(e: FormEvent) {
@@ -107,7 +108,7 @@ function LoginScreen() {
               <button type="button" className="icon-btn" onClick={() => setShow((v) => !v)} aria-label={show ? 'הסתרת הסיסמה' : 'הצגת הסיסמה'}>{show ? <EyeOff size={17} /> : <Eye size={17} />}</button>
             </div>
           </Field>
-          {err && <Callout tone="danger">{err}</Callout>}
+          {err ? <Callout tone="danger">{err}</Callout> : notice && <Callout tone="warning">{notice}</Callout>}
           <button className="btn primary lg block" type="submit" disabled={busy}><LogIn size={18} /> {busy ? 'נכנסים...' : 'כניסה'}</button>
           <div className="tiny muted" style={{ textAlign: 'center' }}>שכחתם סיסמה? מנהל המערכת מאפס אותה בעמוד המשתמשים.</div>
         </form>

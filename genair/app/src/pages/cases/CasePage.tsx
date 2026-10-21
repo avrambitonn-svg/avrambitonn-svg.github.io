@@ -24,6 +24,7 @@ import { CaseChat } from '../../features/chat/CaseChat'
 import { TasksPanel } from '../../features/tasks/TasksPanel'
 import { FlowPanel } from '../../features/flow/FlowPanel'
 import type { Activity, AppointmentType, CaseStage, Photo, Survey, SurveyRoom } from '../../lib/types'
+import { DepositBadge } from '../../features/quotes/parts'
 
 type Tab = 'overview' | 'survey' | 'quotes' | 'schedule' | 'tasks' | 'docs' | 'money' | 'chat' | 'history' | 'portal'
 
@@ -78,6 +79,8 @@ export default function CasePage() {
   const team = [k.agentId, k.engineerId, k.managerId, ...k.installerIds].filter(Boolean).map((u) => db.users.find((x) => x.id === u)).filter((u, i, arr) => u && arr.indexOf(u) === i)
   const activeQuote = quotes.find((q) => q.status === 'approved') ?? quotes[0]
   const canSeeMoney = me.role === 'admin' || me.role === 'office'
+  // מתקין לא רואה הצעות מחיר (השרת שולח לו רק את רשימת הפריטים של הצעה מאושרת, בלי מחירים)
+  const canSeeQuotes = me.role !== 'installer'
   const firstName = (c?.name ?? '').replace(/^משפחת /, '')
   const portal = portalUrl(k.portal.token)
   const stageIdx = pipeline.indexOf(k.stage)
@@ -152,7 +155,7 @@ export default function CasePage() {
         items={[
           { id: 'overview', label: 'סקירה', icon: <ClipboardList size={15} /> },
           { id: 'survey', label: 'סקר בשטח', icon: <Ruler size={15} />, count: k.survey.photos.length },
-          { id: 'quotes', label: 'הצעות מחיר', icon: <FileText size={15} />, count: quotes.length },
+          ...(canSeeQuotes ? [{ id: 'quotes' as Tab, label: 'הצעות מחיר', icon: <FileText size={15} />, count: quotes.length }] : []),
           { id: 'schedule', label: 'תיאום', icon: <CalendarPlus size={15} />, count: appts.length },
           { id: 'tasks', label: 'משימות', icon: <ListChecks size={15} />, count: tasks.filter((t) => !t.done).length },
           { id: 'docs', label: 'מסמכים', icon: <FolderOpen size={15} />, count: docs.length },
@@ -172,7 +175,7 @@ export default function CasePage() {
                 <b>הצעד הבא: </b>{nextStepText[k.stage]}
               </Callout>
             )}
-            <Card title="הצעת המחיר" actions={activeQuote && <Link className="btn sm" to={`/quotes/${activeQuote.id}`}>פתיחה</Link>}>
+            {canSeeQuotes && <Card title="הצעת המחיר" actions={activeQuote && <Link className="btn sm" to={`/quotes/${activeQuote.id}`}>פתיחה</Link>}>
               {activeQuote ? (
                 <div className="card-body">
                   <div className="row between wrap">
@@ -181,6 +184,7 @@ export default function CasePage() {
                         <b className="num">{activeQuote.number}</b>
                         <Badge tone={quoteStatusTone[activeQuote.status]}>{quoteStatusLabel[activeQuote.status]}</Badge>
                         {activeQuote.ai && <Badge tone="brand"><Sparkles size={12} /> AI</Badge>}
+                        {activeQuote.status === 'approved' && <DepositBadge q={activeQuote} />}
                       </div>
                       <div className="tiny muted mt8">
                         {activeQuote.lines.length} שורות · בתוקף עד {date(activeQuote.validUntil)}
@@ -198,7 +202,7 @@ export default function CasePage() {
                   <button className="btn sm primary mt8" onClick={() => setAiOpen(true)}><Sparkles size={15} /> טיוטה מהסקר בעזרת AI</button>
                 </Empty>
               )}
-            </Card>
+            </Card>}
             <Card title="מועדים קרובים" actions={<button className="btn sm" onClick={() => setSched('installation')}><Plus size={15} /> שיבוץ</button>}>
               {appts.filter((a) => a.status !== 'cancelled' && a.end >= nowIso()).length === 0 ? (
                 <Empty title="אין מועדים קרובים" />
@@ -235,7 +239,7 @@ export default function CasePage() {
 
       {tab === 'survey' && <SurveyTab survey={k.survey} onSave={(s) => { touchCase(k.id, { survey: s }); toast.success('הסקר נשמר') }} onAI={() => setAiOpen(true)} />}
 
-      {tab === 'quotes' && (
+      {tab === 'quotes' && canSeeQuotes && (
         <Card
           title="הצעות מחיר"
           actions={
@@ -260,7 +264,7 @@ export default function CasePage() {
                       <td className="small">{q.version}</td>
                       <td><Badge tone={quoteStatusTone[q.status]}>{quoteStatusLabel[q.status]}</Badge></td>
                       <td className="small hide-mobile">{date(q.createdAt)}</td>
-                      <td className="hide-mobile"><Badge tone={syncTone[q.sync.status]}>{syncLabel[q.sync.status]}</Badge></td>
+                      <td className="hide-mobile"><Badge tone={syncTone[q.sync?.status ?? 'not_synced']}>{syncLabel[q.sync?.status ?? 'not_synced']}</Badge></td>
                       <td className="end num strong">{money(totals(q).total)}</td>
                     </tr>
                   ))}

@@ -5,6 +5,7 @@ import { useApp, useMe } from '../../lib/store'
 import { Avatar, Confirm, compressImage, toast } from '../../components/ui'
 import { date, dateLong, phone as fmtPhone, sameDay, time } from '../../lib/format'
 import { sendMessage } from '../../lib/messaging'
+import { safeHref } from '../../lib/integrations/links'
 import type { ChatMessage, ID, Message, User } from '../../lib/types'
 import {
   type Attachment, convKey, deleteChat, editChat, isCustUnread, isUnread, markConvRead, markThreadRead, parseThread, sendChat, threadMembers,
@@ -43,7 +44,7 @@ function Atts({ list }: { list?: Attachment[] }) {
     <>
       {list.map((a, i) => {
         const doc = a.docId ? docs.find((d) => d.id === a.docId) : undefined
-        const href = a.dataUrl ?? doc?.dataUrl ?? doc?.url ?? doc?.webViewLink
+        const href = safeHref(a.dataUrl ?? doc?.dataUrl ?? doc?.url ?? doc?.webViewLink)
         const mime = a.mime ?? doc?.mime ?? ''
         if (href && mime.startsWith('image/')) return <a key={i} href={href} download={a.name} title={a.name}><img className="cm-img" src={href} alt={a.name} /></a>
         const inner = <><FileText size={15} /> <span>{a.name}</span>{doc && <small>מסמכי התיק</small>}</>

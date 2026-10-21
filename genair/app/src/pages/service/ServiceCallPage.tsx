@@ -3,7 +3,8 @@ import { Link, useParams } from 'react-router-dom'
 import { CalendarPlus, CheckCircle2, ChevronLeft, FileSignature, HardHat, History, MessageCircle, Package, RotateCcw, ShieldCheck, ShieldOff, Star, Trash2 } from 'lucide-react'
 import { Avatars, Badge, Callout, Card, Confirm, Empty, Field, PageHead, toast } from '../../components/ui'
 import { Dictate, QuickContact } from '../../components/extras'
-import { useApp, useSettings } from '../../lib/store'
+import { useApp, useMe, useSettings } from '../../lib/store'
+import { canOpen } from '../../lib/access'
 import type { ID, ServiceCall, ServiceStatus } from '../../lib/types'
 import { appointmentStatusLabel, contractTypeLabel, serviceStatusLabel, serviceStatusTone, sourceLabel } from '../../lib/labels'
 import { date as fmtDate, dateShortDay, dateTime, money, nowIso, relative, time as fmtTime } from '../../lib/format'
@@ -32,6 +33,7 @@ export default function ServiceCallPage() {
 
 function CallView({ call }: { call: ServiceCall }) {
   const db = useApp((s) => s.db)
+  const me = useMe()
   const settings = useSettings()
   const s = useApp.getState
   const closeRef = useRef<HTMLDivElement>(null)
@@ -246,7 +248,7 @@ function CallView({ call }: { call: ServiceCall }) {
                     <Badge tone={contract.status === 'active' ? 'success' : contract.status === 'expiring' ? 'warning' : 'muted'}>{contract.status === 'active' ? 'פעיל' : contract.status === 'expiring' ? 'מסתיים בקרוב' : contract.status === 'expired' ? 'פג' : contract.status === 'proposed' ? 'הוצע ללקוח' : 'בוטל'}</Badge>
                     <span className="tiny muted">ביקור הבא {fmtDate(contract.nextVisit)} · עד {fmtDate(contract.endDate)}</span>
                   </div>
-                  <Link to="/contracts" className="small">לחוזים ותחזוקה</Link>
+                  {canOpen('/contracts', me?.role) && <Link to="/contracts" className="small">לחוזים ותחזוקה</Link>}
                 </>
               ) : suggestContract ? (
                 <>

@@ -1,7 +1,7 @@
 // טיוטת הצעת מחיר מהסקר בשטח: רואים מה נשלח, בונים, בודקים ומתקנים, ורק אז יוצרים הצעה
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Bot, Calculator, CheckCircle2, Circle, FileStack, FileText, Image as ImageIcon, Loader2, MapPin, Mic, Paperclip, RotateCcw, Ruler, Server, Sparkles, Sun, Trash2, X,
+  Bot, Calculator, CheckCircle2, Circle, FileStack, FileText, Image as ImageIcon, Loader2, MapPin, Mic, Paperclip, RotateCcw, Ruler, Server, ShieldCheck, Sparkles, Sun, Trash2, X,
 } from 'lucide-react'
 import type { ID, QuoteLine } from '../../lib/types'
 import { useDB, useSettings } from '../../lib/store'
@@ -33,6 +33,8 @@ function errorText(e: unknown): string {
   if (e instanceof ServerError) {
     if (e.code === 'network') return 'אין חיבור לשרת האינטגרציות. בדקו שהשרת פועל ושהכתובת בהגדרות נכונה.'
     if (e.status === 401 || e.status === 403) return 'השרת דחה את הבקשה. בדקו את קוד הגישה בהגדרות ← חיבורים.'
+    // 429 מהשרת עצמו (הגבלת קצב) מגיע עם הודעה בעברית: מציגים אותה
+    if (e.status === 429 && /[֐-׿]/.test(e.message)) return e.message
     if (e.status === 429 || e.status === 529) return 'שירות ה-AI עמוס כרגע. נסו שוב בעוד דקה.'
     if (e.status === 413) return 'הבקשה גדולה מדי לשרת. הסירו מסמך או תמונה ונסו שוב.'
     return /[֐-׿]/.test(e.message) ? e.message : `שגיאה מהשרת: ${e.message}`
@@ -299,6 +301,11 @@ export function AIQuoteDialog({ caseId, onClose, onCreated }: { caseId: ID; onCl
               ))}
             </div>
             <p className="tiny muted mt8">המחירים תמיד נלקחים מהמחירון. ה-AI רק בוחר פריטים וכמויות, ואתם מאשרים לפני שנוצרת הצעה.</p>
+            {mode !== 'demo' && (
+              <p className="tiny muted mt8">
+                <ShieldCheck size={13} style={{ verticalAlign: -2 }} /> כדי לבנות את הטיוטה, תמונות הסקר, נתוני החדרים, ההערות והמסמכים שצירפתם נשלחים ל-Anthropic (Claude). שם הלקוח, הטלפון, האימייל והרחוב לא נדרשים ולא נשלחים (מוסרים גם מההערות); העיר והמידות כן.
+              </p>
+            )}
           </div>
         </div>
       )}
