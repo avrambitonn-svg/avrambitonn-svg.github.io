@@ -1,0 +1,1 @@
+import{u as e}from"./params-BRz1Qx0p.js";function t(t){let n=e.lessons.findIndex(e=>e.id===t);return n>=0?e.lessons[n+1]:void 0}export{t};
