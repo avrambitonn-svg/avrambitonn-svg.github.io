@@ -1,0 +1,1 @@
+import{E as e,s as t}from"./params-BWex-5No.js";import{T as n}from"./index-oAKOzQ71.js";function r(){let r=e();return e=>{n(t.get(),Date.now())?r(`/done`):e&&r(e)}}var i=()=>n(t.get(),Date.now());export{r as n,i as t};
