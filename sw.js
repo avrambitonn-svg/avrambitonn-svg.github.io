@@ -70,6 +70,9 @@ self.addEventListener('message', (event) => {
   }
 })
 
+// אין רשת ואין עותק שמור: דף הסבר במקום שגיאת דפדפן ריקה (ERR_FAILED)
+const offlinePage = () => new Response(`<!doctype html><html lang="he" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>אין חיבור</title><body style="font-family:system-ui,sans-serif;padding:24px;line-height:1.6;max-width:32em;margin:auto"><h1>לא הצלחנו להגיע לאתר</h1><p>האתר עוד לא שמור במכשיר, והחיבור לשרת נכשל.</p><ul><li>לבדוק חיבור לאינטרנט ולנסות שוב.</li><li>ברשת מסוננת: ייתכן שהכתובת <b>github.io</b> חסומה. לבקש מספק הסינון לאשר אותה, או לנסות ברשת אחרת.</li></ul><p><button onclick="location.reload()" style="font-size:1rem;padding:10px 18px">לנסות שוב</button></p></body></html>`, { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+
 self.addEventListener('fetch', (event) => {
   const req = event.request
   if (req.method !== 'GET') return
@@ -77,7 +80,7 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return
   if (req.mode === 'navigate') {
     // ניווט: הרשת קודם (תוכן עדכני); בלי רשת, או אם השרת לא עונה, index.html מהמטמון
-    event.respondWith(fetch(req).catch(async () => (await caches.match(BASE, { cacheName: CACHE, ignoreVary: true })) ?? (await caches.match(BASE, { ignoreVary: true })) ?? Response.error()))
+    event.respondWith(fetch(req).catch(async () => (await caches.match(BASE, { cacheName: CACHE, ignoreVary: true })) ?? (await caches.match(BASE, { ignoreVary: true })) ?? offlinePage()))
     return
   }
   event.respondWith(caches.match(req, { ignoreVary: true }).then((hit) => hit ?? fetch(req)))
