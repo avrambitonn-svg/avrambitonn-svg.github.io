@@ -1,0 +1,313 @@
+/* SEAMOR, בית ספר לצלילה, אילת
+   Concept: the page is a descent. Each section sits one step deeper in the
+   water; the background darkens with depth and the depth labels are the real
+   depths of each course. The red-and-white diver-down flag is the brand's
+   recurring marker and the only accent colour. */
+
+:root {
+  /* water column, from the surface down */
+  --surface: #DDF0EC;
+  --shallow: #C4E5E1;
+  --reef: #1F6F80;
+  --deep: #174A6E;
+  --abyss: #0E2E4A;
+  --trench: #091D31;
+
+  --ink: #0F2A3D;          /* logo navy */
+  --ink-soft: #3C5A6B;
+  --foam: #F2FAF8;
+  --foam-soft: #B9D3DA;
+  --line-light: rgba(15, 42, 61, .16);
+  --line-dark: rgba(242, 250, 248, .18);
+
+  --flag: #C81E3A;         /* diver-down flag red */
+  --flag-hover: #A9152F;
+
+  --f-display: "Karantina", "Rubik", system-ui, sans-serif;
+  --f-body: "Rubik", system-ui, "Segoe UI", Arial, sans-serif;
+  --f-gauge: "IBM Plex Mono", "Rubik", ui-monospace, Menlo, Consolas, monospace;
+
+  --step--1: clamp(0.9rem, 0.87rem + 0.15vw, 1rem);
+  --step-0: clamp(1.06rem, 1rem + 0.25vw, 1.19rem);
+  --step-1: clamp(1.3rem, 1.18rem + 0.55vw, 1.6rem);
+  --step-2: clamp(2.2rem, 1.8rem + 2vw, 3.4rem);
+  --step-3: clamp(3.2rem, 2.4rem + 4vw, 6rem);
+  --step-4: clamp(4.5rem, 3rem + 8vw, 10rem);
+
+  --gutter: max(16px, env(safe-area-inset-left, 0px));
+  --gutter-end: max(16px, env(safe-area-inset-right, 0px));
+  --measure: 62ch;
+  --radius: 6px;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: var(--step-0);
+  line-height: 1.65;
+  font-synthesis: none;
+}
+img { max-width: 100%; height: auto; display: block; }
+a { color: inherit; text-underline-offset: 3px; }
+:focus-visible { outline: 3px solid var(--flag); outline-offset: 3px; border-radius: 2px; }
+
+.skip {
+  position: absolute; inset-inline-start: 12px; top: -60px; z-index: 100;
+  background: var(--ink); color: var(--foam); padding: 10px 16px; border-radius: var(--radius);
+}
+.skip:focus { top: 12px; }
+
+.wrap {
+  max-width: 1160px; margin-inline: auto;
+  padding-inline-start: var(--gutter); padding-inline-end: var(--gutter-end);
+}
+[dir="rtl"] .wrap { padding-inline-start: var(--gutter-end); padding-inline-end: var(--gutter); }
+
+/* diver-down flag: red with a white diagonal */
+.flag {
+  display: inline-block; flex: none;
+  width: 1.5em; height: 1.05em; border-radius: 2px;
+  background: linear-gradient(to bottom left, var(--flag) 0 40%, #fff 40% 60%, var(--flag) 60% 100%);
+  vertical-align: -0.12em;
+}
+[dir="ltr"] .flag { background: linear-gradient(to bottom right, var(--flag) 0 40%, #fff 40% 60%, var(--flag) 60% 100%); }
+
+/* ---------- header ---------- */
+.site-head {
+  position: sticky; top: 0; z-index: 40;
+  background: rgba(221, 240, 236, .92);
+  backdrop-filter: saturate(1.2) blur(6px);
+  border-bottom: 1px solid var(--line-light);
+}
+.site-head .wrap { display: flex; align-items: center; gap: 20px; min-height: 68px; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+.brand img { width: 52px; height: auto; }
+.brand-name { display: grid; line-height: 1.05; }
+.brand-name b { font-family: var(--f-body); font-weight: 700; letter-spacing: .06em; font-size: 1.15rem; }
+.brand-name span { font-size: .82rem; color: var(--ink-soft); }
+.nav { display: flex; gap: 4px; margin-inline-start: auto; }
+.nav a { text-decoration: none; padding: 8px 12px; border-radius: var(--radius); font-size: .98rem; }
+.nav a:hover { background: var(--shallow); }
+.lang { font-family: var(--f-gauge); font-size: .85rem; border: 1px solid var(--line-light); }
+.head-call {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--ink); color: var(--foam); text-decoration: none;
+  padding: 9px 14px; border-radius: var(--radius); font-weight: 500; white-space: nowrap;
+}
+.head-call:hover { background: var(--reef); }
+@media (max-width: 920px) { .nav a:not(.lang) { display: none; } }
+@media (max-width: 520px) { .head-call { display: none; } .brand-name span { display: none; } }
+
+/* ---------- buttons ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  min-height: 48px; padding: 12px 22px; border-radius: var(--radius);
+  font: 500 1.05rem/1.2 var(--f-body); text-decoration: none; cursor: pointer;
+  border: 2px solid transparent; transition: background-color .15s, color .15s, border-color .15s;
+}
+.btn-flag { background: var(--flag); color: #fff; }
+.btn-flag:hover { background: var(--flag-hover); }
+.btn-line { border-color: currentColor; }
+.btn-line:hover { background: rgba(15, 42, 61, .08); }
+.on-dark .btn-line:hover { background: rgba(242, 250, 248, .1); }
+.btn svg { width: 20px; height: 20px; flex: none; }
+
+/* ---------- depth sections ---------- */
+.zone { position: relative; padding-block: clamp(64px, 9vw, 120px); }
+.z-0 { background: var(--surface); }
+.z-6 { background: var(--shallow); }
+.z-18 { background: var(--reef); color: var(--foam); }
+.z-30 { background: var(--deep); color: var(--foam); }
+.z-40 { background: var(--abyss); color: var(--foam); }
+.z-bottom { background: var(--trench); color: var(--foam); }
+.on-dark { --line: var(--line-dark); }
+.seam { border-top: 1px solid var(--line-dark); }
+.more { margin-top: 32px; }
+.zone:not(.on-dark) { --line: var(--line-light); }
+
+.depth-label {
+  display: flex; align-items: center; gap: 12px;
+  font-family: var(--f-gauge); font-size: .9rem; letter-spacing: .02em;
+  margin: 0 0 14px; opacity: .85;
+}
+.depth-label .m { unicode-bidi: isolate; }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+h2 {
+  font-family: var(--f-display); font-weight: 700;
+  font-size: var(--step-3); line-height: .95; letter-spacing: .005em;
+  margin-bottom: 20px;
+}
+h3 { font-size: var(--step-1); font-weight: 700; line-height: 1.25; }
+.lead { font-size: var(--step-1); line-height: 1.5; max-width: 36ch; margin: 0 0 8px; }
+p { max-width: var(--measure); }
+
+/* ---------- hero (0 m) ---------- */
+.hero { position: relative; overflow: hidden; background: var(--surface); padding-block: clamp(48px, 7vw, 96px) clamp(56px, 7vw, 96px); }
+.hero canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  opacity: .9; pointer-events: none; filter: blur(1.2px);
+}
+.hero .wrap { position: relative; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: clamp(28px, 5vw, 72px); align-items: end; }
+@media (max-width: 860px) { .hero .wrap { grid-template-columns: minmax(0, 1fr); } }
+.hero h1 {
+  font-family: var(--f-display); font-weight: 700;
+  font-size: var(--step-4); line-height: .86; letter-spacing: -.005em;
+  margin: 0 0 22px;
+}
+.hero h1 em { font-style: normal; color: var(--reef); }
+.hero .lead { max-width: 34ch; }
+.hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
+
+.gauge {
+  border: 2px solid var(--ink); border-radius: 10px; background: rgba(242, 250, 248, .78);
+  padding: 18px 20px; font-family: var(--f-gauge);
+}
+.gauge-title { font-size: .78rem; margin: 0 0 12px; display: flex; justify-content: space-between; gap: 12px; color: var(--ink-soft); }
+.gauge dl { margin: 0; display: grid; gap: 0; }
+.gauge div { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding-block: 10px; border-top: 1px dashed var(--line-light); }
+.gauge div:first-child { border-top: 0; }
+.gauge dt { font-family: var(--f-body); font-size: .98rem; }
+.gauge dd { margin: 0; font-size: 1.2rem; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gauge small { display: block; font-size: .72rem; color: var(--ink-soft); margin-top: 10px; font-family: var(--f-body); }
+
+/* ---------- first dive options (6 m) ---------- */
+.split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0; margin-top: 36px; border-top: 2px solid var(--ink); }
+@media (max-width: 760px) { .split { grid-template-columns: minmax(0, 1fr); } }
+.option { padding: 28px 0 8px; padding-inline-end: clamp(0px, 4vw, 48px); display: grid; gap: 14px; align-content: start; }
+.option + .option { border-inline-start: 1px solid var(--line-light); padding-inline-start: clamp(0px, 4vw, 48px); }
+@media (max-width: 760px) { .option + .option { border-inline-start: 0; border-top: 1px solid var(--line-light); padding-inline-start: 0; } }
+.option p { margin: 0; }
+.facts { list-style: none; margin: 4px 0 8px; padding: 0; display: grid; gap: 0; font-size: .98rem; }
+.facts li { display: flex; justify-content: space-between; gap: 16px; padding-block: 8px; border-bottom: 1px solid var(--line); }
+.facts li span:last-child { font-family: var(--f-gauge); font-weight: 500; text-align: end; }
+
+/* ---------- course ladder (18 m and down) ---------- */
+.ladder { list-style: none; margin: 40px 0 0; padding: 0; display: grid; }
+.rung {
+  display: grid; grid-template-columns: 9rem minmax(0, 1fr) auto; gap: 8px 32px; align-items: start;
+  padding-block: 26px; border-top: 1px solid var(--line);
+}
+.rung:last-child { border-bottom: 1px solid var(--line); }
+.rung .depth { font-family: var(--f-display); font-weight: 700; font-size: clamp(3.4rem, 2.6rem + 3vw, 5.2rem); line-height: .8; direction: ltr; unicode-bidi: isolate; text-align: end; }
+[dir="ltr"] .rung .depth { text-align: start; }
+.rung .depth small { font-family: var(--f-gauge); font-size: .9rem; font-weight: 400; margin-inline-start: 4px; }
+.rung p { margin: 6px 0 0; color: var(--foam-soft); }
+.rung .tag { font-family: var(--f-gauge); font-size: .8rem; color: var(--foam-soft); margin-top: 6px; }
+@media (max-width: 760px) {
+  .rung { grid-template-columns: minmax(0, 1fr); }
+  .rung .depth { text-align: start; }
+}
+.on-dark .btn-ask { color: var(--foam); }
+.btn-ask { min-height: 44px; padding: 10px 16px; font-size: .98rem; }
+.extras { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+.chip { font-size: .95rem; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; }
+
+/* ---------- dives for certified divers (30 m) ---------- */
+.dive-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 0; margin-top: 36px; border-top: 1px solid var(--line); }
+.dive { padding: 22px 0 24px; padding-inline-end: 24px; border-bottom: 1px solid var(--line); }
+.dive h3 { font-size: 1.2rem; margin-bottom: 6px; }
+.dive p { margin: 0; color: var(--foam-soft); font-size: 1rem; }
+
+/* ---------- about ---------- */
+.about { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(28px, 6vw, 80px); align-items: start; }
+@media (max-width: 860px) { .about { grid-template-columns: minmax(0, 1fr); } }
+.about p { color: var(--foam-soft); }
+.about p strong { color: var(--foam); font-weight: 500; }
+.people { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+.person { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 16px; align-items: center; padding: 16px; border: 1px solid var(--line); border-radius: 10px; }
+.monogram {
+  width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--reef); font-family: var(--f-display); font-weight: 700; font-size: 2rem; line-height: 1;
+}
+.person b { display: block; font-size: 1.15rem; }
+.person span { color: var(--foam-soft); font-size: .98rem; }
+
+/* ---------- reviews (40 m) ---------- */
+.quotes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 28px; margin-top: 36px; }
+.quote { margin: 0; padding-top: 20px; border-top: 2px solid var(--foam); }
+.quote blockquote { margin: 0; }
+.quote .orig { direction: ltr; unicode-bidi: isolate; font-family: var(--f-display); font-size: clamp(1.9rem, 1.5rem + 1.4vw, 2.6rem); line-height: 1; margin: 0 0 12px; text-align: start; }
+[dir="rtl"] .quote .orig { text-align: right; }
+.quote .tr { color: var(--foam-soft); margin: 0; font-size: 1rem; }
+.quote figcaption { margin-top: 12px; font-family: var(--f-gauge); font-size: .8rem; color: var(--foam-soft); }
+
+/* ---------- briefing / FAQ ---------- */
+.brief { margin-top: 32px; border-top: 1px solid var(--line); max-width: 860px; }
+.brief details { border-bottom: 1px solid var(--line); }
+.brief summary {
+  list-style: none; cursor: pointer; padding: 18px 0; font-size: 1.15rem; font-weight: 500;
+  display: flex; justify-content: space-between; align-items: center; gap: 16px;
+}
+.brief summary::-webkit-details-marker { display: none; }
+.brief summary::after { content: "+"; font-family: var(--f-gauge); font-size: 1.4rem; line-height: 1; }
+.brief details[open] summary::after { content: "−"; }
+.brief details p { margin: 0 0 20px; color: var(--foam-soft); }
+
+/* ---------- find us (bottom) ---------- */
+.find { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: clamp(28px, 6vw, 80px); }
+@media (max-width: 860px) { .find { grid-template-columns: minmax(0, 1fr); } }
+.contact-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.contact-list li { display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: 12px; padding-block: 14px; border-bottom: 1px solid var(--line); }
+.contact-list li > span:first-child { font-family: var(--f-gauge); font-size: .85rem; color: var(--foam-soft); padding-top: 3px; }
+.contact-list a { text-decoration-thickness: 1px; }
+.ltr { direction: ltr; unicode-bidi: isolate; }
+.find-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
+
+.site-foot { background: var(--trench); color: var(--foam-soft); border-top: 1px solid var(--line-dark); padding-block: 28px 110px; font-size: .92rem; }
+.site-foot .wrap { display: flex; flex-wrap: wrap; gap: 12px 28px; justify-content: space-between; }
+.site-foot a { color: var(--foam); }
+@media (min-width: 761px) { .site-foot { padding-block: 28px; } }
+
+/* ---------- mobile action bar ---------- */
+.action-bar {
+  position: fixed; inset-inline: 0; bottom: 0; z-index: 50;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  background: var(--ink); border-top: 1px solid var(--line-dark);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px);
+}
+.action-bar a {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  min-height: 62px; color: var(--foam); text-decoration: none; font-size: .88rem; font-weight: 500;
+}
+.action-bar a + a { border-inline-start: 1px solid var(--line-dark); }
+.action-bar a.wa { background: var(--flag); }
+.action-bar svg { width: 22px; height: 22px; }
+@media (min-width: 761px) { .action-bar { display: none; } }
+
+/* ---------- depth gauge on the page edge (desktop) ---------- */
+.depthometer {
+  position: fixed; inset-inline-end: 18px; top: 50%; transform: translateY(-50%); z-index: 30;
+  display: grid; justify-items: center; gap: 8px; font-family: var(--f-gauge); font-size: .78rem;
+  pointer-events: none; color: var(--ink);
+}
+.depthometer .track { position: relative; width: 2px; height: 220px; background: currentColor; opacity: .35; }
+.depthometer .bob {
+  position: absolute; inset-inline-start: 50%; width: 12px; height: 12px; margin-inline-start: -6px; margin-top: -6px;
+  border-radius: 50%; background: var(--flag); top: 0; transition: top .12s linear;
+}
+.depthometer .read { unicode-bidi: isolate; background: var(--foam); color: var(--ink); padding: 2px 6px; border-radius: 4px; font-variant-numeric: tabular-nums; }
+@media (max-width: 1100px) { .depthometer { display: none; } }
+@media (prefers-reduced-motion: reduce) { .depthometer .bob { transition: none; } }
+
+/* ---------- legal page ---------- */
+.legal { padding-block: 56px 96px; }
+.legal h1 { font-family: var(--f-display); font-weight: 700; font-size: var(--step-3); line-height: .95; margin-bottom: 24px; }
+.legal h2 { font-family: var(--f-body); font-size: var(--step-1); line-height: 1.3; margin: 36px 0 10px; }
+.legal li { max-width: var(--measure); margin-block: 6px; }
+.fill { background: #FFF1B8; padding: 0 4px; border-radius: 3px; }
+
+/* Hebrew has no monospaced companion here: gauge-style labels use the body
+   face with tabular digits instead */
+[dir="rtl"] .depth-label, [dir="rtl"] .gauge, [dir="rtl"] .gauge-title,
+[dir="rtl"] .facts li span:last-child, [dir="rtl"] .rung .tag,
+[dir="rtl"] .quote figcaption, [dir="rtl"] .contact-list li > span:first-child,
+[dir="rtl"] .depthometer {
+  font-family: var(--f-body); font-variant-numeric: tabular-nums;
+}
